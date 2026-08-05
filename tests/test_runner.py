@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from e2h.models import TaskCapsule
-from e2h.runner import _BoundedCapture, CheckStatus, RunnerError, RunStatus, run_capsule
+from e2h.runner import CheckStatus, RunnerError, RunStatus, _BoundedCapture, run_capsule
 
 
 def make_capsule(commands: list[dict[str, object]], **limits: object) -> TaskCapsule:
