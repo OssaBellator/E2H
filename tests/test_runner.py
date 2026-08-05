@@ -22,9 +22,7 @@ def make_capsule(commands: list[dict[str, object]], **limits: object) -> TaskCap
 
 
 def test_run_passes_and_captures_output(tmp_path: Path) -> None:
-    capsule = make_capsule(
-        [{"id": "hello", "argv": [sys.executable, "-c", "print('hello')"]}]
-    )
+    capsule = make_capsule([{"id": "hello", "argv": [sys.executable, "-c", "print('hello')"]}])
     result = run_capsule(capsule, tmp_path)
     assert result.status is RunStatus.PASSED
     assert result.checks[0].stdout == "hello\n"
