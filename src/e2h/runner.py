@@ -178,7 +178,6 @@ def _execute_command(
     timeout: float,
     max_output_chars: int,
 ) -> _ProcessOutcome:
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     process = subprocess.Popen(
         check.argv,
         cwd=cwd,
@@ -186,7 +185,6 @@ def _execute_command(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=os.name == "posix",
-        creationflags=creationflags,
     )
     assert process.stdout is not None
     assert process.stderr is not None
