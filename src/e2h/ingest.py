@@ -412,7 +412,7 @@ def _mapping(value: Any, location: str) -> dict[str, Any]:
 def _list(value: Any, location: str) -> list[Any]:
     if not isinstance(value, list):
         raise EvidenceIngestError(f"{location} must be an array")
-    return cast(list[Any], value)
+    return value
 
 
 def _text(value: Any, location: str, *, allow_empty: bool = False) -> str:
