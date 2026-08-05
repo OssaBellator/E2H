@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from e2h.models import TaskCapsule
-from e2h.runner import CheckStatus, RunStatus, RunnerError, run_capsule
+from e2h.runner import CheckStatus, RunnerError, RunStatus, run_capsule
 
 
 def make_capsule(commands: list[dict[str, object]], **limits: object) -> TaskCapsule:
@@ -39,10 +39,7 @@ def test_failure_halts_and_marks_remaining_checks_skipped(tmp_path: Path) -> Non
     )
     result = run_capsule(capsule, tmp_path)
     assert result.status is RunStatus.FAILED
-    assert [check.status for check in result.checks] == [
-        CheckStatus.FAILED,
-        CheckStatus.SKIPPED,
-    ]
+    assert [check.status for check in result.checks] == [CheckStatus.FAILED, CheckStatus.SKIPPED]
     assert result.checks[0].exit_code == 7
 
 
