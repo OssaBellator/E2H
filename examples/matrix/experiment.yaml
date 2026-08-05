@@ -1,0 +1,14 @@
+schema_version: "0.1"
+id: smoke-matrix
+capsule: examples/smoke/capsule.yaml
+workspace: .
+repetitions: 2
+variants:
+  - id: baseline
+    env:
+      E2H_HARNESS_PROFILE: baseline
+  - id: candidate
+    env:
+      E2H_HARNESS_PROFILE: candidate
+metadata:
+  purpose: continuous-integration-smoke

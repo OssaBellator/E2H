@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from e2h.loader import CapsuleLoadError, load_capsule
+from e2h.loader import (
+    CapsuleLoadError,
+    ExperimentLoadError,
+    load_capsule,
+    load_experiment,
+)
 
 
 def test_load_yaml_capsule(tmp_path: Path) -> None:
@@ -62,3 +67,35 @@ def test_reject_schema_validation_error(tmp_path: Path) -> None:
 def test_missing_file_is_wrapped(tmp_path: Path) -> None:
     with pytest.raises(CapsuleLoadError, match="unable to read"):
         load_capsule(tmp_path / "missing.yaml")
+
+
+def test_load_yaml_experiment(tmp_path: Path) -> None:
+    path = tmp_path / "experiment.yaml"
+    path.write_text(
+        "id: demo\ncapsule: capsule.yaml\nvariants:\n  - id: baseline\n",
+        encoding="utf-8",
+    )
+    assert load_experiment(path).variants[0].id == "baseline"
+
+
+def test_load_json_experiment(tmp_path: Path) -> None:
+    path = tmp_path / "experiment.json"
+    path.write_text(
+        '{"id":"demo","capsule":"capsule.yaml","variants":[{"id":"baseline"}]}',
+        encoding="utf-8",
+    )
+    assert load_experiment(path).capsule == "capsule.yaml"
+
+
+def test_reject_invalid_experiment(tmp_path: Path) -> None:
+    path = tmp_path / "experiment.yaml"
+    path.write_text("id: demo\n", encoding="utf-8")
+    with pytest.raises(ExperimentLoadError, match="capsule"):
+        load_experiment(path)
+
+
+def test_reject_experiment_non_object_root(tmp_path: Path) -> None:
+    path = tmp_path / "experiment.yaml"
+    path.write_text("- item\n", encoding="utf-8")
+    with pytest.raises(ExperimentLoadError, match="root"):
+        load_experiment(path)
