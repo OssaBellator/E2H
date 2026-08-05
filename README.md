@@ -2,14 +2,14 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-This repository currently contains the first vertical slice: a safe, deterministic **task capsule replay core**.
+This repository currently contains the first vertical slice: a deterministic **task capsule replay core**.
 
 ## What works today
 
 - Strict JSON/YAML task capsule validation.
 - Explicit command arguments with no shell interpolation.
-- Workspace boundary enforcement, including resolved symlink checks.
-- Per-command timeouts, expected exit codes, fail-fast behavior, and bounded output.
+- Capsule-declared working-directory boundary checks, including resolved symlink checks.
+- Per-command timeouts, expected exit codes, fail-fast behavior, and bounded in-memory output capture.
 - Structured JSON run reports suitable for CI and later optimization loops.
 - A CLI for validation, schema generation, and replay.
 - Unit tests, coverage enforcement, linting, type checks, and a smoke workflow.
@@ -76,8 +76,8 @@ See [`ROADMAP.md`](ROADMAP.md) for planned milestones.
 
 ## Security model
 
-Task capsules should be treated as code. The current runner enforces filesystem path boundaries and avoids shell expansion, but it does not yet provide OS-level isolation or enforce the declared network policy. Run untrusted capsules only inside an external sandbox or disposable CI worker until sandbox backends land.
+Task capsules should be treated as code. The current runner verifies that capsule-declared working directories resolve within the selected workspace, avoids shell expansion, and bounds retained output in memory. It does not restrict a command's filesystem access, provide OS-level isolation, or enforce the declared network policy. Run untrusted capsules only inside an external sandbox or disposable CI worker until sandbox backends land.
 
 ## License
 
-Apache-2.0.
+Apache-2.0. See [`LICENSE`](LICENSE).
