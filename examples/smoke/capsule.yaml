@@ -1,0 +1,20 @@
+schema_version: "0.1"
+id: e2h-smoke
+goal: Verify that the E2H runner can execute deterministic checks.
+allowed_actions:
+  tools: [command]
+  network: deny
+limits:
+  max_commands: 5
+  default_timeout_seconds: 10
+  max_output_chars: 5000
+success:
+  commands:
+    - id: import-package
+      description: Import the installed E2H package.
+      argv: [python, -c, "import e2h; print(e2h.__version__)"]
+    - id: validate-example
+      description: Validate this capsule through the public CLI.
+      argv: [e2h, validate, examples/smoke/capsule.yaml]
+metadata:
+  capability: replay-core
