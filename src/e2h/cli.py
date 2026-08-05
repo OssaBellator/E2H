@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -11,7 +12,7 @@ from rich.table import Table
 
 from e2h.loader import CapsuleLoadError, load_capsule
 from e2h.models import TaskCapsule
-from e2h.runner import CheckStatus, RunStatus, RunnerError, run_capsule
+from e2h.runner import CheckStatus, RunnerError, RunStatus, run_capsule
 
 app = typer.Typer(no_args_is_help=True, help="Evidence-to-Harness replay tools.")
 console = Console()
@@ -19,7 +20,9 @@ error_console = Console(stderr=True)
 
 
 @app.command()
-def validate(capsule: Path = typer.Argument(..., exists=True, dir_okay=False)) -> None:
+def validate(
+    capsule: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+) -> None:
     """Validate a task capsule without executing it."""
     try:
         loaded = load_capsule(capsule)
@@ -31,7 +34,9 @@ def validate(capsule: Path = typer.Argument(..., exists=True, dir_okay=False)) -
 
 @app.command("schema")
 def write_schema(
-    output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", dir_okay=False)
+    ] = None,
 ) -> None:
     """Print or write the JSON Schema for task capsules."""
     rendered = json.dumps(TaskCapsule.model_json_schema(), indent=2, sort_keys=True) + "\n"
@@ -45,10 +50,16 @@ def write_schema(
 
 @app.command()
 def run(
-    capsule: Path = typer.Argument(..., exists=True, dir_okay=False),
-    workspace: Path = typer.Option(Path("."), "--workspace", "-w", file_okay=False),
-    output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
-    json_stdout: bool = typer.Option(False, "--json", help="Write the result as JSON."),
+    capsule: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    workspace: Annotated[
+        Path, typer.Option("--workspace", "-w", file_okay=False)
+    ] = Path("."),
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", dir_okay=False)
+    ] = None,
+    json_stdout: Annotated[
+        bool, typer.Option("--json", help="Write the result as JSON.")
+    ] = False,
 ) -> None:
     """Execute a capsule's deterministic checks."""
     try:
