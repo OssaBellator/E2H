@@ -8,12 +8,13 @@
 - [x] Structured run result.
 - [x] CLI and generated JSON Schema.
 - [x] CI, typing, linting, coverage, and smoke replay.
+- [x] Observable trace event intermediate representation.
+- [x] Multi-configuration variant × repetition replay matrix.
+- [x] Atomic JSON result and JSONL trace persistence baseline.
 - [ ] Container sandbox adapter.
-- [ ] Trace event intermediate representation.
-- [ ] Multi-configuration replay matrix.
-- [ ] Experiment persistence in DuckDB/Parquet.
+- [ ] DuckDB/Parquet experiment store and query layer.
 
-## Milestone 2 — Capsule compiler
+## Milestone 2 — Evidence and capsule compiler
 
 - Transcript and OpenTelemetry import.
 - Explicit correction capture.
@@ -25,6 +26,7 @@
 
 - Structured failure taxonomy.
 - Typed harness genome and patch language.
+- Prompt, tool, context, routing, and workflow variant types.
 - DSPy/GEPA optimizer adapters.
 - Train/validation/sealed-test partitions.
 - Statistical promotion gates and rollback metadata.

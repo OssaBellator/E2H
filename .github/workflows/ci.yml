@@ -41,7 +41,16 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run pytest
       - run: uv run e2h run examples/smoke/capsule.yaml --workspace . --output .e2h/smoke.json
+      - run: >-
+          uv run e2h experiment run examples/matrix/experiment.yaml
+          --root .
+          --output .e2h/matrix.json
+          --traces .e2h/matrix.jsonl
+          --require-all-pass
       - uses: actions/upload-artifact@v7
         with:
-          name: smoke-result-python-${{ matrix.python-version }}
-          path: .e2h/smoke.json
+          name: replay-results-python-${{ matrix.python-version }}
+          path: |
+            .e2h/smoke.json
+            .e2h/matrix.json
+            .e2h/matrix.jsonl
