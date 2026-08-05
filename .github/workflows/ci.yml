@@ -47,6 +47,14 @@ jobs:
           --output .e2h/matrix.json
           --traces .e2h/matrix.jsonl
           --require-all-pass
+      - run: >-
+          uv run e2h ingest transcript examples/ingest/transcript.json
+          --output .e2h/transcript-bundle.json
+          --traces .e2h/transcript.jsonl
+      - run: >-
+          uv run e2h ingest otlp examples/ingest/otlp.json
+          --output .e2h/otlp-bundle.json
+          --traces .e2h/otlp.jsonl
       - uses: actions/upload-artifact@v7
         with:
           name: replay-results-python-${{ matrix.python-version }}
@@ -54,3 +62,7 @@ jobs:
             .e2h/smoke.json
             .e2h/matrix.json
             .e2h/matrix.jsonl
+            .e2h/transcript-bundle.json
+            .e2h/transcript.jsonl
+            .e2h/otlp-bundle.json
+            .e2h/otlp.jsonl
