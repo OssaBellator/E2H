@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from time import monotonic
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from e2h.models import CommandCheck, TaskCapsule
 
 
-class CheckStatus(str, Enum):
+class CheckStatus(StrEnum):
     PASSED = "passed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
@@ -22,7 +22,7 @@ class CheckStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     PASSED = "passed"
     FAILED = "failed"
     ERROR = "error"
