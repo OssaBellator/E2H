@@ -207,15 +207,15 @@ def run_capsule(capsule: TaskCapsule, workspace: Path) -> RunResult:
 
     failed = any(result.status is not CheckStatus.PASSED for result in results)
     if infrastructure_error:
-        status = RunStatus.ERROR
+        run_status = RunStatus.ERROR
     elif failed:
-        status = RunStatus.FAILED
+        run_status = RunStatus.FAILED
     else:
-        status = RunStatus.PASSED
+        run_status = RunStatus.PASSED
     finished_at = datetime.now(UTC)
     return RunResult(
         capsule_id=capsule.id,
-        status=status,
+        status=run_status,
         started_at=started_at,
         finished_at=finished_at,
         duration_seconds=monotonic() - started_clock,
