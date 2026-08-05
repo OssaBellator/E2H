@@ -140,12 +140,8 @@ def run_capsule(capsule: TaskCapsule, workspace: Path) -> RunResult:
                 timeout=timeout,
                 check=False,
             )
-            stdout, stdout_truncated = _truncate(
-                completed.stdout, capsule.limits.max_output_chars
-            )
-            stderr, stderr_truncated = _truncate(
-                completed.stderr, capsule.limits.max_output_chars
-            )
+            stdout, stdout_truncated = _truncate(completed.stdout, capsule.limits.max_output_chars)
+            stderr, stderr_truncated = _truncate(completed.stderr, capsule.limits.max_output_chars)
             status = (
                 CheckStatus.PASSED
                 if completed.returncode in check.expected_exit_codes
