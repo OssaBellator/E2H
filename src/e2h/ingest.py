@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -18,9 +19,12 @@ from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 _MAX_SOURCE_BYTES = 10 * 1024 * 1024
 _MAX_RECORDS = 10_000
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$"
 _HEX_TRACE_ID = re.compile(r"^[0-9a-fA-F]{32}$")
 _HEX_SPAN_ID = re.compile(r"^[0-9a-fA-F]{16}$")
+_INTEGER_TEXT = re.compile(r"^-?\d+$")
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}\b")
 _PHONE = re.compile(
     r"(?<!\w)(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)|\d{2,4})[ .-]\d{3,4}[ .-]\d{3,4}(?!\w)"
@@ -189,9 +193,13 @@ class _ParsedSpan:
 
 def _ensure_json(value: Any, noun: str) -> None:
     try:
-        json.dumps(value, sort_keys=True)
+        json.dumps(value, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{noun} must be JSON-serializable") from exc
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
 
 
 def _load_json(path: Path, source_format: EvidenceFormat, redact: bool) -> _LoadedSource:
@@ -206,8 +214,8 @@ def _load_json(path: Path, source_format: EvidenceFormat, redact: bool) -> _Load
     except UnicodeDecodeError as exc:
         raise EvidenceIngestError("evidence must be UTF-8") from exc
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
+        data = json.loads(text, parse_constant=_reject_json_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise EvidenceIngestError(f"invalid evidence JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise EvidenceIngestError("evidence root must be an object")
@@ -290,10 +298,15 @@ def _redact_value(value: Any, location: str, records: list[RedactionRecord]) -> 
     return value
 
 
-def _apply_redaction(trace: Trace, records: list[RedactionRecord]) -> Trace:
+def _apply_redaction(
+    trace: Trace,
+    records: list[RedactionRecord],
+    *,
+    trace_index: int,
+) -> Trace:
     copy = trace.model_copy(deep=True)
     for event in copy.events:
-        prefix = f"/traces/{trace.trace_id}/events/{event.sequence}"
+        prefix = f"/traces/{trace_index}/events/{event.sequence}"
         event.context.metadata = cast(
             dict[str, Any],
             _redact_value(event.context.metadata, f"{prefix}/context/metadata", records),
@@ -318,7 +331,7 @@ def import_transcript_document(
     context = TraceContext(
         run_id=document.id,
         capsule_id=selected_capsule,
-        metadata={"source_format": EvidenceFormat.TRANSCRIPT_JSON.value, **document.metadata},
+        metadata={**document.metadata, "source_format": EvidenceFormat.TRANSCRIPT_JSON.value},
     )
     first_timestamp = document.messages[0].timestamp
     events = [
@@ -377,7 +390,7 @@ def import_transcript_document(
     trace = Trace(trace_id=document.id, events=events)
     redactions: list[RedactionRecord] = []
     if provenance.redaction_enabled:
-        trace = _apply_redaction(trace, redactions)
+        trace = _apply_redaction(trace, redactions, trace_index=0)
     return IngestionBundle(
         provenance=provenance,
         traces=[trace],
@@ -424,11 +437,11 @@ def _text(value: Any, location: str, *, allow_empty: bool = False) -> str:
 def _integer(value: Any, location: str) -> int:
     if isinstance(value, bool):
         raise EvidenceIngestError(f"{location} must be an integer")
-    try:
-        result = int(value)
-    except (TypeError, ValueError) as exc:
-        raise EvidenceIngestError(f"{location} must be an integer") from exc
-    return result
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and _INTEGER_TEXT.fullmatch(value) is not None:
+        return int(value)
+    raise EvidenceIngestError(f"{location} must be an integer")
 
 
 def _nanoseconds(value: Any, location: str) -> int:
@@ -476,11 +489,17 @@ def _decode_any_value(value: Any, location: str) -> Any:
             raise EvidenceIngestError(f"{location}/{key} must be a boolean")
         return raw
     if key == "intValue":
-        return _integer(raw, f"{location}/{key}")
+        result = _integer(raw, f"{location}/{key}")
+        if result < _INT64_MIN or result > _INT64_MAX:
+            raise EvidenceIngestError(f"{location}/{key} must fit a signed 64-bit integer")
+        return result
     if key == "doubleValue":
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise EvidenceIngestError(f"{location}/{key} must be a number")
-        return float(raw)
+        result = float(raw)
+        if not math.isfinite(result):
+            raise EvidenceIngestError(f"{location}/{key} must be finite")
+        return result
     if key == "arrayValue":
         array = _mapping(raw, f"{location}/{key}")
         values = _list(array.get("values", []), f"{location}/{key}/values")
@@ -516,14 +535,20 @@ def _parse_span(
     span_id = _text(span.get("spanId"), f"{location}/spanId")
     if _HEX_TRACE_ID.fullmatch(trace_id) is None:
         raise EvidenceIngestError(f"{location}/traceId must be 32 hexadecimal characters")
+    if int(trace_id, 16) == 0:
+        raise EvidenceIngestError(f"{location}/traceId must not be all zeros")
     if _HEX_SPAN_ID.fullmatch(span_id) is None:
         raise EvidenceIngestError(f"{location}/spanId must be 16 hexadecimal characters")
+    if int(span_id, 16) == 0:
+        raise EvidenceIngestError(f"{location}/spanId must not be all zeros")
     parent_raw = span.get("parentSpanId")
     parent_span_id = None
     if parent_raw not in (None, ""):
         parent_span_id = _text(parent_raw, f"{location}/parentSpanId")
         if _HEX_SPAN_ID.fullmatch(parent_span_id) is None:
             raise EvidenceIngestError(f"{location}/parentSpanId must be 16 hexadecimal characters")
+        if int(parent_span_id, 16) == 0:
+            raise EvidenceIngestError(f"{location}/parentSpanId must not be all zeros")
     start_nanoseconds, start = _unix_nano(
         span.get("startTimeUnixNano"), f"{location}/startTimeUnixNano"
     )
@@ -567,6 +592,7 @@ def _parse_span(
 def _parse_otlp(data: dict[str, Any]) -> dict[str, list[_ParsedSpan]]:
     resource_spans = _list(data.get("resourceSpans"), "/resourceSpans")
     parsed: dict[str, list[_ParsedSpan]] = defaultdict(list)
+    seen_span_ids: set[tuple[str, str]] = set()
     span_count = 0
     for resource_index, raw_resource_spans in enumerate(resource_spans):
         location = f"/resourceSpans/{resource_index}"
@@ -596,12 +622,19 @@ def _parse_otlp(data: dict[str, Any]) -> dict[str, list[_ParsedSpan]]:
                 span_count += 1
                 if span_count > _MAX_RECORDS:
                     raise EvidenceIngestError(f"OTLP export exceeds {_MAX_RECORDS} spans")
+                span_location = f"{scope_location}/spans/{span_index}"
                 parsed_span = _parse_span(
                     raw_span,
                     resource=resource,
                     scope=scope,
-                    location=f"{scope_location}/spans/{span_index}",
+                    location=span_location,
                 )
+                span_key = (parsed_span.trace_id, parsed_span.span_id)
+                if span_key in seen_span_ids:
+                    raise EvidenceIngestError(
+                        f"{span_location}/spanId duplicates an earlier span in the trace"
+                    )
+                seen_span_ids.add(span_key)
                 parsed[parsed_span.trace_id].append(parsed_span)
     if not parsed:
         raise EvidenceIngestError("OTLP export contains no spans")
@@ -690,13 +723,20 @@ def import_otlp_data(
     capsule_id: str = "unassigned",
 ) -> IngestionBundle:
     """Normalize an OTLP/HTTP JSON trace export into one E2H trace per trace ID."""
+    try:
+        _ensure_json(data, "OTLP data")
+    except ValueError as exc:
+        raise EvidenceIngestError(str(exc)) from exc
     traces = [
         _trace_from_spans(trace_id, spans, capsule_id)
         for trace_id, spans in sorted(_parse_otlp(data).items())
     ]
     redactions: list[RedactionRecord] = []
     if provenance.redaction_enabled:
-        traces = [_apply_redaction(trace, redactions) for trace in traces]
+        traces = [
+            _apply_redaction(trace, redactions, trace_index=index)
+            for index, trace in enumerate(traces)
+        ]
     return IngestionBundle(provenance=provenance, traces=traces, redactions=redactions)
 
 
