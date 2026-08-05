@@ -236,9 +236,7 @@ def _placeholder(
         raise EvidenceIngestError(f"evidence exceeds {_MAX_RECORDS} redactions")
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     value = f"<redacted:{kind.value}:{digest[:12]}>"
-    records.append(
-        RedactionRecord(kind=kind, location=location, digest=digest, placeholder=value)
-    )
+    records.append(RedactionRecord(kind=kind, location=location, digest=digest, placeholder=value))
     return value
 
 
@@ -491,9 +489,7 @@ def _decode_any_value(value: Any, location: str) -> Any:
             for index, item in enumerate(values)
         ]
     key_values = _mapping(raw, f"{location}/{key}")
-    return _decode_attributes(
-        key_values.get("values", []), f"{location}/{key}/values"
-    )
+    return _decode_attributes(key_values.get("values", []), f"{location}/{key}/values")
 
 
 def _decode_attributes(value: Any, location: str) -> dict[str, Any]:
@@ -527,15 +523,11 @@ def _parse_span(
     if parent_raw not in (None, ""):
         parent_span_id = _text(parent_raw, f"{location}/parentSpanId")
         if _HEX_SPAN_ID.fullmatch(parent_span_id) is None:
-            raise EvidenceIngestError(
-                f"{location}/parentSpanId must be 16 hexadecimal characters"
-            )
+            raise EvidenceIngestError(f"{location}/parentSpanId must be 16 hexadecimal characters")
     start_nanoseconds, start = _unix_nano(
         span.get("startTimeUnixNano"), f"{location}/startTimeUnixNano"
     )
-    end_nanoseconds, end = _unix_nano(
-        span.get("endTimeUnixNano"), f"{location}/endTimeUnixNano"
-    )
+    end_nanoseconds, end = _unix_nano(span.get("endTimeUnixNano"), f"{location}/endTimeUnixNano")
     if end_nanoseconds < start_nanoseconds:
         raise EvidenceIngestError(f"{location} ends before it starts")
     events: list[tuple[int, datetime, str, dict[str, Any]]] = []
@@ -686,9 +678,7 @@ def _trace_from_spans(trace_id: str, spans: list[_ParsedSpan], capsule_id: str) 
             attributes=attributes,
             payload=payload,
         )
-        for sequence, (_, timestamp, _, _, event_type, attributes, payload) in enumerate(
-            drafts
-        )
+        for sequence, (_, timestamp, _, _, event_type, attributes, payload) in enumerate(drafts)
     ]
     return Trace(trace_id=trace_id, events=events)
 

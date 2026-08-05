@@ -52,8 +52,7 @@ def transcript_data() -> dict[str, Any]:
                 "id": "m1",
                 "role": "user",
                 "content": (
-                    "Use token ghp_abcdefghijklmnopqrstuvwxyz123456 "
-                    "and call +61 412 345 678."
+                    "Use token ghp_abcdefghijklmnopqrstuvwxyz123456 and call +61 412 345 678."
                 ),
                 "timestamp": "2026-08-05T12:00:00Z",
             },
@@ -111,9 +110,7 @@ def otlp_span(
                 "key": "mapping",
                 "value": {
                     "kvlistValue": {
-                        "values": [
-                            {"key": "nested", "value": {"stringValue": "value"}}
-                        ]
+                        "values": [{"key": "nested", "value": {"stringValue": "value"}}]
                     }
                 },
             },
@@ -122,9 +119,7 @@ def otlp_span(
             {
                 "timeUnixNano": str(start_ns + 500_000_000),
                 "name": "checkpoint",
-                "attributes": [
-                    {"key": "api_key", "value": {"stringValue": "sk-abcdefghijklmnop"}}
-                ],
+                "attributes": [{"key": "api_key", "value": {"stringValue": "sk-abcdefghijklmnop"}}],
             }
         ],
         "status": {"code": 1, "message": "ok"},
@@ -153,9 +148,7 @@ def otlp_data(*spans: dict[str, Any]) -> dict[str, Any]:
                         "scope": {
                             "name": "e2h.tests",
                             "version": "1.0",
-                            "attributes": [
-                                {"key": "scope.flag", "value": {"boolValue": True}}
-                            ],
+                            "attributes": [{"key": "scope.flag", "value": {"boolValue": True}}],
                         },
                         "spans": list(spans),
                     }
@@ -206,12 +199,8 @@ def test_transcript_import_captures_corrections_and_redacts() -> None:
 
 def test_redaction_placeholders_are_stable() -> None:
     document = TranscriptDocument.model_validate(transcript_data())
-    first = import_transcript_document(
-        document, provenance(EvidenceFormat.TRANSCRIPT_JSON)
-    )
-    second = import_transcript_document(
-        document, provenance(EvidenceFormat.TRANSCRIPT_JSON)
-    )
+    first = import_transcript_document(document, provenance(EvidenceFormat.TRANSCRIPT_JSON))
+    second = import_transcript_document(document, provenance(EvidenceFormat.TRANSCRIPT_JSON))
     assert [record.placeholder for record in first.redactions] == [
         record.placeholder for record in second.redactions
     ]
@@ -409,9 +398,7 @@ def test_otlp_rejects_invalid_span_fields(change: Any, message: str) -> None:
     span = otlp_span(parent_span_id="1111111111111111")
     change(span)
     with pytest.raises(EvidenceIngestError, match=message):
-        import_otlp_data(
-            otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False)
-        )
+        import_otlp_data(otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False))
 
 
 @pytest.mark.parametrize(
@@ -430,9 +417,7 @@ def test_otlp_rejects_invalid_any_values(value: Any, message: str) -> None:
     span = otlp_span()
     span["attributes"] = [{"key": "bad", "value": value}]
     with pytest.raises(EvidenceIngestError, match=message):
-        import_otlp_data(
-            otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False)
-        )
+        import_otlp_data(otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False))
 
 
 def test_otlp_rejects_duplicate_attributes_and_bad_events() -> None:
@@ -442,16 +427,12 @@ def test_otlp_rejects_duplicate_attributes_and_bad_events() -> None:
         {"key": "same", "value": {"stringValue": "two"}},
     ]
     with pytest.raises(EvidenceIngestError, match="duplicate"):
-        import_otlp_data(
-            otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False)
-        )
+        import_otlp_data(otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False))
 
     span = otlp_span()
     span["events"] = [{"timeUnixNano": str(START_NS), "name": ""}]
     with pytest.raises(EvidenceIngestError, match="name"):
-        import_otlp_data(
-            otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False)
-        )
+        import_otlp_data(otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False))
 
 
 @pytest.mark.parametrize(
@@ -486,9 +467,7 @@ def test_otlp_timestamp_outside_supported_range() -> None:
     span = otlp_span()
     span["startTimeUnixNano"] = str(10**40)
     with pytest.raises(EvidenceIngestError, match="timestamp range"):
-        import_otlp_data(
-            otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False)
-        )
+        import_otlp_data(otlp_data(span), provenance(EvidenceFormat.OTLP_JSON, redact=False))
 
 
 def test_otlp_rejects_too_many_spans() -> None:
@@ -513,9 +492,7 @@ def test_redaction_record_limit_is_enforced(monkeypatch: pytest.MonkeyPatch) -> 
     ]
     document = TranscriptDocument.model_validate(data)
     with pytest.raises(EvidenceIngestError, match="redactions"):
-        import_transcript_document(
-            document, provenance(EvidenceFormat.TRANSCRIPT_JSON)
-        )
+        import_transcript_document(document, provenance(EvidenceFormat.TRANSCRIPT_JSON))
 
 
 def test_source_provenance_validation() -> None:
