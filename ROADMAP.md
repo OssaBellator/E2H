@@ -16,11 +16,15 @@
 
 ## Milestone 2 — Evidence and capsule compiler
 
-- Transcript and OpenTelemetry import.
-- Explicit correction capture.
-- Secret and PII redaction.
-- Environment and artifact snapshots.
-- Oracle proposal, mutation testing, and human review.
+- [x] Canonical transcript JSON import.
+- [x] OTLP/HTTP JSON trace import.
+- [x] Explicit correction capture.
+- [x] Secret and common PII redaction baseline.
+- [x] Content-addressed source provenance.
+- [ ] Provider-specific transcript adapters.
+- [ ] Configurable redaction policies and review reports.
+- [ ] Environment and artifact snapshots.
+- [ ] Oracle proposal, mutation testing, and human review.
 
 ## Milestone 3 — Controlled optimization
 
