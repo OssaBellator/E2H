@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "e2h"
+version = "0.1.0"
+description = "Evidence-to-Harness: reproducible task capsules and deterministic replay for AI harness improvement."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "E2H contributors" }]
+dependencies = [
+  "pydantic>=2.10,<3",
+  "pyyaml>=6.0.2,<7",
+  "typer>=0.16,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.11,<1",
+  "types-PyYAML>=6.0.12,<7",
+]
+
+[project.scripts]
+e2h = "e2h.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/e2h"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers --cov=e2h --cov-report=term-missing --cov-fail-under=90"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["e2h"]
+
+[tool.coverage.run]
+omit = ["src/e2h/__main__.py"]
