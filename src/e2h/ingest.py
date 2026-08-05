@@ -618,6 +618,8 @@ def _parse_otlp(data: dict[str, Any]) -> dict[str, list[_ParsedSpan]]:
                 "schema_url": scope_item.get("schemaUrl"),
             }
             spans = _list(scope_item.get("spans", []), f"{scope_location}/spans")
+            if span_count + len(spans) > _MAX_RECORDS:
+                raise EvidenceIngestError(f"OTLP export exceeds {_MAX_RECORDS} spans")
             for span_index, raw_span in enumerate(spans):
                 span_count += 1
                 if span_count > _MAX_RECORDS:
