@@ -56,7 +56,7 @@ def test_capsule_enforces_command_limit() -> None:
 def test_capsule_requires_command_permission() -> None:
     data = capsule_data()
     data["allowed_actions"] = {"tools": [], "network": "deny"}
-    with pytest.raises(ValidationError, match="command.*permission"):
+    with pytest.raises(ValidationError, match=r"command.*permission"):
         TaskCapsule.model_validate(data)
 
 
