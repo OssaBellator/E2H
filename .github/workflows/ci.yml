@@ -41,7 +41,7 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run pytest
       - run: uv run e2h run examples/smoke/capsule.yaml --workspace . --output .e2h/smoke.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: smoke-result-python-${{ matrix.python-version }}
           path: .e2h/smoke.json
