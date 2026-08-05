@@ -86,8 +86,7 @@ def test_redaction_locations_use_bundle_indexes_not_trace_ids() -> None:
     serialized_locations = "\n".join(record.location for record in bundle.redactions)
     assert trace_id not in serialized_locations
     assert all(
-        location.startswith("/traces/0/events/")
-        for location in serialized_locations.splitlines()
+        location.startswith("/traces/0/events/") for location in serialized_locations.splitlines()
     )
 
 
