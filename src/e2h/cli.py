@@ -34,9 +34,7 @@ def validate(
 
 @app.command("schema")
 def write_schema(
-    output: Annotated[
-        Path | None, typer.Option("--output", "-o", dir_okay=False)
-    ] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
 ) -> None:
     """Print or write the JSON Schema for task capsules."""
     rendered = json.dumps(TaskCapsule.model_json_schema(), indent=2, sort_keys=True) + "\n"
@@ -51,15 +49,9 @@ def write_schema(
 @app.command()
 def run(
     capsule: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
-    workspace: Annotated[
-        Path, typer.Option("--workspace", "-w", file_okay=False)
-    ] = Path("."),
-    output: Annotated[
-        Path | None, typer.Option("--output", "-o", dir_okay=False)
-    ] = None,
-    json_stdout: Annotated[
-        bool, typer.Option("--json", help="Write the result as JSON.")
-    ] = False,
+    workspace: Annotated[Path, typer.Option("--workspace", "-w", file_okay=False)] = Path("."),
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
+    json_stdout: Annotated[bool, typer.Option("--json", help="Write the result as JSON.")] = False,
 ) -> None:
     """Execute a capsule's deterministic checks."""
     try:
