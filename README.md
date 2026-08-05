@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains two connected vertical slices: deterministic **task capsule replay** and an observable **trace + replay-matrix layer**.
+The repository now contains three connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, and a privacy-aware **evidence ingestion layer**.
 
 ## What works today
 
@@ -10,10 +10,14 @@ The repository now contains two connected vertical slices: deterministic **task 
 - Explicit command arguments with no shell interpolation.
 - Capsule-declared working-directory boundary checks, including resolved symlink checks.
 - Per-command timeouts, expected exit codes, fail-fast behavior, and bounded in-memory output capture.
-- Normalized observable trace events for conversations, tools, artifacts, feedback, runs, and checks.
+- Normalized observable trace events for conversations, messages, spans, tools, artifacts, feedback, runs, and checks.
 - Variant × repetition replay matrices with stable run IDs and per-variant reliability summaries.
-- Atomic JSON experiment reports and deterministic JSONL trace evidence.
-- CLI commands for validation, schema generation, replay, and experiments.
+- Canonical transcript JSON and OTLP/HTTP JSON ingestion.
+- Explicit user-correction capture linked to earlier assistant messages.
+- Default-on secret, email, and phone redaction with stable non-reversible placeholders.
+- Content-addressed source provenance without exposing local filesystem paths.
+- Atomic JSON reports and deterministic JSONL trace evidence.
+- CLI commands for validation, replay, experiments, and evidence ingestion.
 - Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
 
 ## Quick start
@@ -28,6 +32,12 @@ uv run e2h experiment run examples/matrix/experiment.yaml \
   --output .e2h/matrix.json \
   --traces .e2h/matrix.jsonl \
   --require-all-pass
+uv run e2h ingest transcript examples/ingest/transcript.json \
+  --output .e2h/transcript-bundle.json \
+  --traces .e2h/transcript.jsonl
+uv run e2h ingest otlp examples/ingest/otlp.json \
+  --output .e2h/otlp-bundle.json \
+  --traces .e2h/otlp.jsonl
 ```
 
 Run all checks:
@@ -85,7 +95,44 @@ variants:
 
 Environment overlays are the first typed variant mechanism. They make the matrix immediately useful for command-driven harnesses while leaving room for prompt, tool, context, routing, and workflow variant types in later schema versions.
 
-Each matrix cell receives stable `E2H_VARIANT_ID` and `E2H_REPETITION` environment variables. Results preserve the complete run report, while the JSONL trace contains only observable evidence—never hidden model reasoning.
+Each matrix cell receives protected `E2H_VARIANT_ID` and `E2H_REPETITION` environment variables. Results preserve the complete run report, while the JSONL trace contains only observable evidence—never hidden model reasoning.
+
+## Transcript ingestion
+
+The canonical transcript format is intentionally provider-neutral:
+
+```json
+{
+  "schema_version": "0.1",
+  "id": "conversation-123",
+  "capsule_id": "billing-regression",
+  "messages": [
+    {
+      "id": "m1",
+      "role": "assistant",
+      "content": "The migration passed.",
+      "timestamp": "2026-08-05T12:00:00Z"
+    },
+    {
+      "id": "m2",
+      "role": "user",
+      "content": "That is incorrect; the contract test failed.",
+      "timestamp": "2026-08-05T12:00:01Z",
+      "correction_of": "m1"
+    }
+  ]
+}
+```
+
+Corrections must be explicit, must come from a user message, and must reference an earlier assistant message. This avoids unreliable sentiment or phrase heuristics.
+
+## Privacy and provenance
+
+Ingestion redacts recognized secrets, email addresses, and phone numbers by default. Placeholders include a truncated SHA-256 digest, so repeated values remain comparable without storing the original value. Redaction records contain only the class, safe JSON-pointer location, digest, and placeholder.
+
+Every ingestion bundle records the source filename, byte length, SHA-256 content hash, importer format, and whether redaction was enabled. Absolute source paths are never written to the bundle. Use `--no-redact` only for trusted local workflows where raw evidence is intentionally retained.
+
+The OTLP importer accepts OTLP/HTTP JSON `resourceSpans`, preserves resource, scope, span, event, status, and parent identifiers, and retains nanosecond ordering even though normalized timestamps use Python's microsecond-resolution datetime representation.
 
 ## Architecture direction
 
@@ -105,6 +152,8 @@ See [`ROADMAP.md`](ROADMAP.md) for planned milestones.
 ## Security model
 
 Task capsules should be treated as code. The current runner verifies that capsule-declared working directories resolve within the selected workspace, avoids shell expansion, bounds retained output in memory, and terminates POSIX process groups on timeout. It does not restrict a command's filesystem access, provide OS-level isolation, or enforce the declared network policy. Run untrusted capsules only inside an external sandbox or disposable CI worker until sandbox backends land.
+
+Evidence importers parse data rather than execute it, but imported content can still contain sensitive or adversarial text. Redaction is pattern-based and cannot guarantee removal of every possible identifier. Review sanitized evidence before publishing it or using it outside the original trust boundary.
 
 ## License
 
