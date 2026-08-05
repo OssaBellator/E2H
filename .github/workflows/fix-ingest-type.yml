@@ -1,0 +1,35 @@
+name: Fix ingestion type narrowing
+
+on:
+  push:
+    branches: [agent/evidence-ingestion]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/evidence-ingestion
+      - name: Remove redundant cast
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/e2h/ingest.py")
+          text = path.read_text(encoding="utf-8")
+          old = "    return cast(list[Any], value)\n"
+          new = "    return value\n"
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one redundant cast")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+      - name: Commit type correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/e2h/ingest.py
+          git commit -m "Remove redundant list cast"
+          git push origin HEAD:agent/evidence-ingestion
