@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from e2h.models import TaskCapsule
-from e2h.runner import CheckStatus, RunnerError, RunStatus, run_capsule
+from e2h.runner import _BoundedCapture, CheckStatus, RunnerError, RunStatus, run_capsule
 
 
 def make_capsule(commands: list[dict[str, object]], **limits: object) -> TaskCapsule:
@@ -80,6 +81,43 @@ def test_output_is_bounded(tmp_path: Path) -> None:
     result = run_capsule(capsule, tmp_path)
     assert result.checks[0].stdout_truncated is True
     assert len(result.checks[0].stdout) == 256
+
+
+def test_capture_retains_bounded_memory() -> None:
+    capture = _BoundedCapture(256)
+    for _ in range(1024):
+        capture.feed(b"x" * 4096)
+    rendered, truncated = capture.render()
+    assert capture.retained_bytes <= 1024
+    assert truncated is True
+    assert len(rendered) == 256
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group termination is POSIX-specific")
+def test_timeout_terminates_descendant_processes(tmp_path: Path) -> None:
+    sentinel = tmp_path / "descendant-survived"
+    child_code = (
+        "import time; from pathlib import Path; "
+        f"time.sleep(0.4); Path({str(sentinel)!r}).write_text('alive', encoding='utf-8')"
+    )
+    parent_code = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+        "time.sleep(10)"
+    )
+    capsule = make_capsule(
+        [
+            {
+                "id": "spawns-child",
+                "argv": [sys.executable, "-c", parent_code],
+                "timeout_seconds": 0.05,
+            }
+        ]
+    )
+    result = run_capsule(capsule, tmp_path)
+    time.sleep(0.6)
+    assert result.checks[0].status is CheckStatus.TIMED_OUT
+    assert not sentinel.exists()
 
 
 def test_missing_command_is_infrastructure_error(tmp_path: Path) -> None:
