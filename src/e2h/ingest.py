@@ -489,17 +489,17 @@ def _decode_any_value(value: Any, location: str) -> Any:
             raise EvidenceIngestError(f"{location}/{key} must be a boolean")
         return raw
     if key == "intValue":
-        result = _integer(raw, f"{location}/{key}")
-        if result < _INT64_MIN or result > _INT64_MAX:
+        integer_result = _integer(raw, f"{location}/{key}")
+        if integer_result < _INT64_MIN or integer_result > _INT64_MAX:
             raise EvidenceIngestError(f"{location}/{key} must fit a signed 64-bit integer")
-        return result
+        return integer_result
     if key == "doubleValue":
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise EvidenceIngestError(f"{location}/{key} must be a number")
-        result = float(raw)
-        if not math.isfinite(result):
+        double_result = float(raw)
+        if not math.isfinite(double_result):
             raise EvidenceIngestError(f"{location}/{key} must be finite")
-        return result
+        return double_result
     if key == "arrayValue":
         array = _mapping(raw, f"{location}/{key}")
         values = _list(array.get("values", []), f"{location}/{key}/values")
