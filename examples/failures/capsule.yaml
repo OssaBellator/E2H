@@ -1,0 +1,14 @@
+schema_version: "0.1"
+id: failure-taxonomy-demo
+goal: Demonstrate typed failure classification and blocked-check linkage.
+limits:
+  max_commands: 2
+  default_timeout_seconds: 5
+  max_output_chars: 2000
+success:
+  commands:
+    - id: contract
+      argv: [python, -c, "raise SystemExit(7)"]
+      expected_exit_codes: [0]
+    - id: blocked
+      argv: [python, -c, "print('must not run')"]
