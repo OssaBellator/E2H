@@ -106,6 +106,59 @@ jobs:
           --workspace .
           --output .e2h/oracle-run.json
       - run: >-
+          uv run e2h snapshot create examples .e2h/examples.e2hsnap
+          --include compile
+          --include ingest
+      - run: uv run e2h snapshot verify .e2h/examples.e2hsnap
+      - run: uv run e2h snapshot inspect .e2h/examples.e2hsnap --json > .e2h/snapshot-manifest.json
+      - run: >-
+          uv run e2h snapshot reference .e2h/examples.e2hsnap
+          --locator cas://ci/examples
+          > .e2h/snapshot-reference.json
+      - run: uv run e2h snapshot restore .e2h/examples.e2hsnap .e2h/restored-examples
+      - run: test -f .e2h/restored-examples/compile/spec.yaml
+      - run: |
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+          import yaml
+
+          spec = yaml.safe_load(Path("examples/compile/oracles.yaml").read_text(encoding="utf-8"))
+          reference = json.loads(Path(".e2h/snapshot-reference.json").read_text(encoding="utf-8"))
+          spec["snapshots"] = [reference]
+          Path(".e2h/snapshot-spec.json").write_text(
+              json.dumps(spec, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - run: >-
+          uv run e2h compile proposal
+          .e2h/transcript-bundle.json
+          .e2h/snapshot-spec.json
+          --output .e2h/snapshot-proposal.json
+      - run: >-
+          uv run e2h compile verify
+          .e2h/snapshot-proposal.json
+          --workspace .
+          --output .e2h/snapshot-verification.json
+          --require-strong
+      - run: >-
+          uv run e2h compile review
+          .e2h/snapshot-proposal.json
+          --reviewer ci
+          --decision approve
+          --output .e2h/snapshot-approved.json
+      - run: >-
+          uv run e2h compile materialize
+          .e2h/snapshot-approved.json
+          .e2h/snapshot-verification.json
+          --output .e2h/snapshot-capsule.yaml
+      - run: >-
+          uv run e2h run
+          .e2h/snapshot-capsule.yaml
+          --workspace .
+          --output .e2h/snapshot-run.json
+      - run: >-
           uv run e2h ingest otlp examples/ingest/otlp.json
           --output .e2h/otlp-bundle.json
           --traces .e2h/otlp.jsonl
@@ -130,3 +183,12 @@ jobs:
             .e2h/oracle-approved.json
             .e2h/oracle-capsule.yaml
             .e2h/oracle-run.json
+            .e2h/examples.e2hsnap
+            .e2h/snapshot-manifest.json
+            .e2h/snapshot-reference.json
+            .e2h/snapshot-spec.json
+            .e2h/snapshot-proposal.json
+            .e2h/snapshot-verification.json
+            .e2h/snapshot-approved.json
+            .e2h/snapshot-capsule.yaml
+            .e2h/snapshot-run.json
