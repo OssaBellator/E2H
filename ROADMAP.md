@@ -35,7 +35,7 @@
 
 - [x] Structured failure taxonomy.
 - [x] Typed harness genome and patch language.
-- Prompt, tool, context, routing, and workflow variant types.
+- [x] Prompt, tool, context, routing, and workflow variant types.
 - DSPy/GEPA optimizer adapters.
 - Train/validation/sealed-test partitions.
 - Statistical promotion gates and rollback metadata.

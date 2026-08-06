@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "e2h"
-version = "0.14.0"
+version = "0.15.0"
 description = "Evidence-to-Harness: reproducible task capsules and deterministic replay for AI harness improvement."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,6 +30,7 @@ dev = [
 [project.scripts]
 e2h = "e2h.main_cli:app"
 e2h-genome = "e2h.genome_cli:genome_app"
+e2h-variant = "e2h.variant_cli:variant_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/e2h"]
