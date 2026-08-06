@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains three connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, and a privacy-aware **evidence ingestion layer**.
+The repository now contains four connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, and a review-gated **capsule compiler**.
 
 ## What works today
 
@@ -16,6 +16,9 @@ The repository now contains three connected vertical slices: deterministic **tas
 - Explicit user-correction capture linked to earlier assistant messages.
 - Default-on secret, email, and phone redaction with stable non-reversible placeholders.
 - Content-addressed source provenance without exposing local filesystem paths.
+- Immutable capsule proposals with evidence references and stable proposal IDs.
+- Controlled mutation verification plus human approval/rejection gates.
+- Capsule materialization only after matching review and verification evidence.
 - Atomic JSON reports and deterministic JSONL trace evidence.
 - CLI commands for validation, replay, experiments, and evidence ingestion.
 - Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
@@ -38,6 +41,14 @@ uv run e2h ingest transcript examples/ingest/transcript.json \
 uv run e2h ingest otlp examples/ingest/otlp.json \
   --output .e2h/otlp-bundle.json \
   --traces .e2h/otlp.jsonl
+uv run e2h compile proposal .e2h/transcript-bundle.json examples/compile/spec.yaml \
+  --output .e2h/compiler-proposal.json
+uv run e2h compile verify .e2h/compiler-proposal.json \
+  --workspace . --output .e2h/compiler-verification.json --require-strong
+uv run e2h compile review .e2h/compiler-proposal.json \
+  --reviewer maintainer --decision approve --output .e2h/compiler-approved.json
+uv run e2h compile materialize .e2h/compiler-approved.json \
+  .e2h/compiler-verification.json --output .e2h/compiled-capsule.yaml
 ```
 
 Run all checks:
@@ -133,6 +144,14 @@ Ingestion redacts recognized secrets, email addresses, and phone numbers by defa
 Every ingestion bundle records the source filename, byte length, SHA-256 content hash, importer format, and whether redaction was enabled. Absolute source paths are never written to the bundle. Use `--no-redact` only for trusted local workflows where raw evidence is intentionally retained.
 
 The OTLP importer accepts OTLP/HTTP JSON `resourceSpans`, preserves resource, scope, span, event, status, and parent identifiers, and retains nanosecond ordering even though normalized timestamps use Python's microsecond-resolution datetime representation.
+
+## Capsule compilation
+
+The compiler turns a sanitized ingestion bundle plus a human-authored compiler specification into an immutable proposal. Evidence may supply the goal and provenance, but executable checks and mutation probes remain explicit trusted declarations; imported text is never silently promoted into a command.
+
+Each proposal ID is the SHA-256 digest of its immutable core. Verification binds to that exact capsule and ordered mutation plan. A strong report requires the baseline capsule to pass and every declared controlled environment mutation to make the oracle fail. Human reviews are append-only, and the latest approval or rejection determines whether materialization is allowed.
+
+`e2h compile materialize` rejects stale or mismatched reports, weak verification, and unapproved proposals by default. Mutation verification executes the proposed commands, so it has the same security boundary as ordinary task capsule replay and should run in an external sandbox for untrusted workloads.
 
 ## Architecture direction
 

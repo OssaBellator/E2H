@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from e2h.compiler_cli import compiler_app
 from e2h.experiment import resolve_under_root
 from e2h.experiment import run_experiment as execute_experiment
 from e2h.ingest import (
@@ -31,6 +32,7 @@ from e2h.trace import write_json_atomic, write_traces_jsonl
 app = typer.Typer(no_args_is_help=True, help="Evidence-to-Harness replay tools.")
 experiment_app = typer.Typer(no_args_is_help=True, help="Run reproducible replay matrices.")
 ingest_app = typer.Typer(no_args_is_help=True, help="Normalize observable evidence.")
+app.add_typer(compiler_app, name="compile")
 app.add_typer(experiment_app, name="experiment")
 app.add_typer(ingest_app, name="ingest")
 console = Console()
