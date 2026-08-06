@@ -1,0 +1,25 @@
+schema_version: "0.1"
+id: genome-smoke
+goal: Verify the baseline harness.
+initial_state:
+  working_directory: .
+allowed_actions:
+  tools: [command]
+  network: deny
+limits:
+  max_commands: 50
+  default_timeout_seconds: 30.0
+  max_output_chars: 20000
+sandbox: null
+success:
+  commands:
+    - id: contract
+      argv: [python, -c, "import os; print(os.getenv('MODE', 'baseline'))"]
+      description: null
+      cwd: .
+      env:
+        MODE: baseline
+      timeout_seconds: null
+      expected_exit_codes: [0]
+      continue_on_failure: false
+metadata: {}
