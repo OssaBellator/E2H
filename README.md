@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains five connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, and declarative **file, JSON, and artifact oracles**.
+The repository now contains six connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, and content-addressed **workspace snapshots**.
 
 ## What works today
 
@@ -21,6 +21,8 @@ The repository now contains five connected vertical slices: deterministic **task
 - Capsule materialization only after matching review and verification evidence.
 - Declarative file, RFC 6901 JSON, and artifact digest/size oracle templates.
 - Automatic operator-specific oracle mutations for strong verification.
+- Deterministic content-addressed workspace and artifact snapshot bundles.
+- Snapshot verification, safe restoration, and portable compiler references.
 - Atomic JSON reports and deterministic JSONL trace evidence.
 - CLI commands for validation, replay, experiments, and evidence ingestion.
 - Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
@@ -51,6 +53,10 @@ uv run e2h compile review .e2h/compiler-proposal.json \
   --reviewer maintainer --decision approve --output .e2h/compiler-approved.json
 uv run e2h compile materialize .e2h/compiler-approved.json \
   .e2h/compiler-verification.json --output .e2h/compiled-capsule.yaml
+uv run e2h snapshot create examples .e2h/examples.e2hsnap \
+  --include compile --include ingest
+uv run e2h snapshot verify .e2h/examples.e2hsnap
+uv run e2h snapshot restore .e2h/examples.e2hsnap .e2h/restored-examples
 ```
 
 Run all checks:
@@ -162,6 +168,16 @@ Compiler specifications may declare `file`, `json`, and `artifact` oracles along
 File oracles support presence, absence, exact UTF-8 text, contained text, and SHA-256 checks. JSON oracles use RFC 6901 pointers with equality, presence, and absence modes. Artifact oracles enforce byte-size bounds and optional SHA-256 digests. All paths remain relative, reject parent traversal, and are resolved against the check working directory to prevent symlink escapes.
 
 By default, each oracle receives a generated mutation probe. Presence checks are inverted, JSON equality values are structurally changed, and content/artifact checks receive a digest mismatch. Strong verification therefore proves that the baseline passes and every declared oracle detects its operator-specific regression. Set `auto_mutate_oracles: false` only when mutations are supplied by another trusted workflow.
+
+## Workspace snapshots
+
+`e2h snapshot create` records selected workspace or artifact trees as deterministic ZIP bundles. A canonical `manifest.json` contains sorted directory and file entries, executable bits, byte lengths, and SHA-256 digests; identical file content is stored once under `blobs/<sha256>`. Fixed archive timestamps, modes, and member ordering make equivalent snapshots byte-for-byte reproducible.
+
+Creation rejects symbolic links, special filesystem entries, unsafe include paths, and configured entry or byte limits. Verification rejects duplicate, unexpected, oversized, or traversal-style archive members and recomputes every blob digest. Restoration first verifies the complete archive, writes into a sibling staging directory, and atomically moves the result into a new or empty destination. It never extracts ZIP member paths directly.
+
+`e2h snapshot reference` emits a portable `SnapshotReference` containing the manifest-derived snapshot ID, archive SHA-256, locator, and workspace/artifact role. Compiler specifications may attach these references under `snapshots`; they become immutable `e2h_compiler.snapshots` metadata and therefore participate in capsule and proposal identity without embedding archive bytes in the proposal.
+
+Default creation excludes `.git`, `.venv`, `.e2h`, Python caches, and bytecode. Supplying `--exclude` replaces that default list, so trusted workflows can define an explicit capture policy.
 
 ## Architecture direction
 

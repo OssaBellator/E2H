@@ -90,10 +90,11 @@ class SnapshotEntry(StrictModel):
 
     @model_validator(mode="after")
     def fields_must_match_kind(self) -> SnapshotEntry:
-        if self.kind == "directory":
-            if self.sha256 is not None or self.size_bytes != 0 or self.executable:
-                raise ValueError("directory entries cannot declare file attributes")
-        elif self.sha256 is None:
+        if self.kind == "directory" and (
+            self.sha256 is not None or self.size_bytes != 0 or self.executable
+        ):
+            raise ValueError("directory entries cannot declare file attributes")
+        if self.kind == "file" and self.sha256 is None:
             raise ValueError("file entries require sha256")
         return self
 
@@ -101,7 +102,7 @@ class SnapshotEntry(StrictModel):
 class SnapshotCore(StrictModel):
     """Immutable content-addressed portion of a snapshot manifest."""
 
-    schema_version: Literal["0.1"] = SNAPSHOT_SCHEMA_VERSION
+    schema_version: Literal["0.1"] = "0.1"
     entries: list[SnapshotEntry] = Field(max_length=DEFAULT_MAX_ENTRIES)
     total_bytes: int = Field(ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -423,9 +424,9 @@ def restore_snapshot(
     limits = limits or SnapshotLimits()
     manifest = verify_snapshot(archive_path, limits=limits)
     destination = destination.resolve()
+    if destination.exists() and not destination.is_dir():
+        raise SnapshotError("restore destination exists and is not a directory")
     if destination.exists():
-        if not destination.is_dir():
-            raise SnapshotError("restore destination exists and is not a directory")
         try:
             if any(destination.iterdir()):
                 raise SnapshotError("restore destination must be empty")

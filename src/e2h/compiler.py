@@ -29,6 +29,7 @@ from e2h.oracles import (
     oracle_mutation_operator,
 )
 from e2h.runner import RunResult, RunStatus, run_capsule
+from e2h.snapshot import SnapshotReference
 from e2h.trace import TraceEvent, TraceEventType
 
 _MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
@@ -138,6 +139,7 @@ class CompilerSpec(StrictModel):
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
     checks: list[CommandCheck] = Field(default_factory=list, max_length=1000)
     oracles: list[OracleTemplate] = Field(default_factory=list, max_length=100)
+    snapshots: list[SnapshotReference] = Field(default_factory=list, max_length=100)
     auto_mutate_oracles: bool = True
     mutations: list[EnvironmentMutation] = Field(default_factory=list, max_length=_MAX_MUTATIONS)
     allow_unredacted: bool = False
@@ -146,6 +148,9 @@ class CompilerSpec(StrictModel):
     @model_validator(mode="after")
     def checks_and_mutations_must_be_consistent(self) -> CompilerSpec:
         _ensure_json(self.metadata, "compiler metadata")
+        snapshot_ids = [snapshot.snapshot_id for snapshot in self.snapshots]
+        if len(snapshot_ids) != len(set(snapshot_ids)):
+            raise ValueError("snapshot ids must be unique")
         compiled_oracles = [compile_oracle(oracle) for oracle in self.oracles]
         check_ids = [check.id for check in self.checks] + [check.id for check in compiled_oracles]
         if not check_ids:
@@ -459,6 +464,7 @@ def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProp
             "source_format": bundle.provenance.format.value,
             "evidence": [reference.model_dump(mode="json") for reference in references],
             "oracles": [oracle.model_dump(mode="json") for oracle in spec.oracles],
+            "snapshots": [snapshot.model_dump(mode="json") for snapshot in spec.snapshots],
         },
     }
     capsule = TaskCapsule(

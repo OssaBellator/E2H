@@ -82,9 +82,7 @@ def test_duplicate_snapshot_ids_are_rejected(tmp_path: Path) -> None:
 
 def test_distinct_snapshot_roles_can_be_attached(tmp_path: Path) -> None:
     workspace = _reference(tmp_path, "workspace", "workspace")
-    artifact = _reference(tmp_path, "artifact", "artifact").model_copy(
-        update={"role": "artifact"}
-    )
+    artifact = _reference(tmp_path, "artifact", "artifact").model_copy(update={"role": "artifact"})
     proposal = compile_proposal(
         _bundle(tmp_path),
         CompilerSpec(

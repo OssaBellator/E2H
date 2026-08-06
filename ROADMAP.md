@@ -23,7 +23,7 @@
 - [x] Content-addressed source provenance.
 - [ ] Provider-specific transcript adapters.
 - [ ] Configurable redaction policies and review reports.
-- [ ] Environment and artifact snapshots.
+- [x] Environment and artifact snapshots.
 - [x] Review-gated capsule proposals with immutable evidence provenance.
 - [x] Controlled environment mutation verification.
 - [x] Human approval/rejection and gated capsule materialization.
