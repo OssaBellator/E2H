@@ -23,24 +23,16 @@ from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 _MAX_PROVIDER_ITEMS = 10_000
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,255}$"
 _BINARY_KEYS = frozenset({"thought_signature", "thoughtSignature"})
-_PART_FIELDS = (
-    "text",
-    "function_call",
-    "functionCall",
-    "function_response",
-    "functionResponse",
-    "tool_call",
-    "toolCall",
-    "tool_response",
-    "toolResponse",
-    "executable_code",
-    "executableCode",
-    "code_execution_result",
-    "codeExecutionResult",
-    "inline_data",
-    "inlineData",
-    "file_data",
-    "fileData",
+_PART_FIELD_GROUPS = (
+    ("text",),
+    ("function_call", "functionCall"),
+    ("function_response", "functionResponse"),
+    ("tool_call", "toolCall"),
+    ("tool_response", "toolResponse"),
+    ("executable_code", "executableCode"),
+    ("code_execution_result", "codeExecutionResult"),
+    ("inline_data", "inlineData"),
+    ("file_data", "fileData"),
 )
 
 
@@ -86,11 +78,26 @@ def _safe(value: Any) -> Any:
 def _parts(value: Any, location: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for index, item in enumerate(_list(value, location)):
-        part = _mapping(item, f"{location}/{index}")
-        populated = [field for field in _PART_FIELDS if part.get(field) is not None]
+        part_location = f"{location}/{index}"
+        part = _mapping(item, part_location)
+        populated: list[str] = []
+        for group in _PART_FIELD_GROUPS:
+            aliases = [field for field in group if part.get(field) is not None]
+            if len(aliases) > 1:
+                raise EvidenceIngestError(
+                    f"{part_location} must not define both {aliases[0]} and {aliases[1]}"
+                )
+            if aliases:
+                populated.append(group[0])
         thought = bool(part.get("thought", False))
         if not populated and not thought:
-            raise EvidenceIngestError(f"{location}/{index} must contain an observable part field")
+            raise EvidenceIngestError(
+                f"{part_location} must contain an observable part field"
+            )
+        if len(populated) > 1:
+            raise EvidenceIngestError(
+                f"{part_location} must contain exactly one observable part field"
+            )
         result.append(part)
     return result
 
