@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
 
 import pytest
 
-from e2h.privacy import RedactionPolicy, apply_redaction_policy
+from e2h.privacy import (
+    RedactionPolicy,
+    apply_redaction_policy,
+)
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 SENSITIVE_KEY = "allowed@example.com"
