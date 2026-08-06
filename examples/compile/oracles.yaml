@@ -1,0 +1,34 @@
+schema_version: "0.1"
+id: compiled-oracle-smoke
+goal:
+  strategy: explicit
+  text: Verify repository evidence with declarative file, JSON, and artifact oracles.
+initial_state:
+  working_directory: .
+allowed_actions:
+  tools: [command]
+  network: deny
+limits:
+  max_commands: 10
+  default_timeout_seconds: 30
+  max_output_chars: 20000
+oracles:
+  - kind: file
+    id: readme-heading
+    path: README.md
+    mode: text_contains
+    expected: "# E2H — Evidence-to-Harness"
+  - kind: json
+    id: transcript-role
+    path: examples/ingest/transcript.json
+    pointer: /messages/0/role
+    mode: equals
+    expected: user
+  - kind: artifact
+    id: pyproject-artifact
+    path: pyproject.toml
+    min_bytes: 500
+    max_bytes: 5000
+auto_mutate_oracles: true
+metadata:
+  purpose: declarative-oracle-ci-smoke
