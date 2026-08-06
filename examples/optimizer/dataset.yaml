@@ -15,5 +15,13 @@ examples:
       expected_status: passed
     metadata:
       source: example
+  - id: sealed-task
+    inputs:
+      task: Evaluate the sealed harness candidate.
+    outputs:
+      expected_status: passed
+    metadata:
+      source: sealed-example
+      private_note: must not be exported
 metadata:
   purpose: demonstrate stable dspy.Example payload export
