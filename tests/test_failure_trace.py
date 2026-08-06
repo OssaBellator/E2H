@@ -32,9 +32,7 @@ def test_failure_record_and_summary_propagate_to_trace() -> None:
     )
     trace = trace_from_run_result(result, run_id="failure-run")
     check_event = next(
-        event
-        for event in trace.events
-        if event.event_type is TraceEventType.CHECK_COMPLETED
+        event for event in trace.events if event.event_type is TraceEventType.CHECK_COMPLETED
     )
     assert check_event.payload["failure"]["code"] == "timeout"
     completed = trace.events[-1]
