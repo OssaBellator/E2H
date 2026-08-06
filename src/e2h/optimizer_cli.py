@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import typer
+from pydantic import BaseModel
 from rich.console import Console
 from rich.table import Table
 
@@ -41,10 +42,7 @@ error_console = Console(stderr=True)
 
 
 def _render_json(value: Any) -> str:
-    if hasattr(value, "model_dump"):
-        payload = value.model_dump(mode="json")
-    else:
-        payload = value
+    payload = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
@@ -102,9 +100,7 @@ def export_dataset_command(
     except OptimizerAdapterError as exc:
         error_console.print(f"[red]Invalid DSPy dataset:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    exported = [
-        item.model_dump(mode="json") for item in dspy_dataset_payload(dataset)
-    ]
+    exported = [item.model_dump(mode="json") for item in dspy_dataset_payload(dataset)]
     rendered = _render_json(exported)
     if output is None:
         typer.echo(rendered, nl=False)
@@ -185,7 +181,7 @@ def write_optimizer_schema(
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
 ) -> None:
     """Print or write one optimizer adapter JSON Schema."""
-    models = {
+    models: dict[str, type[BaseModel]] = {
         "adapter": OptimizerAdapterDocument,
         "candidate": OptimizerCandidateDocument,
         "dataset": DSPyDatasetDocument,

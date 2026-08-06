@@ -246,6 +246,7 @@ def test_candidate_rejects_unknown_noop_and_reserved_provenance() -> None:
         apply_optimizer_candidate(adapter, candidate, base, variant)
 
     variant.variant.metadata["e2h_optimizer"] = {"existing": True}
+    adapter.base_variant_sha256 = variant_sha256(variant.variant)
     candidate = candidate_document(adapter)
     with pytest.raises(OptimizerAdapterError, match="reserved key"):
         apply_optimizer_candidate(adapter, candidate, base, variant)

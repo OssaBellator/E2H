@@ -18,7 +18,6 @@ from e2h.runner import CheckStatus, RunResult
 from e2h.variants import (
     HarnessVariant,
     HarnessVariantDocument,
-    variant_sha256,
     verify_variant_document,
 )
 
@@ -284,9 +283,13 @@ def verify_optimizer_adapter(
     """Verify exact identities and prompt component bindings without execution."""
     verification = verify_variant_document(variant_document, capsule)
     if adapter.base_capsule_sha256 != verification.base_capsule_sha256:
-        raise OptimizerAdapterError("adapter base capsule digest does not match the supplied capsule")
+        raise OptimizerAdapterError(
+            "adapter base capsule digest does not match the supplied capsule"
+        )
     if adapter.base_variant_sha256 != verification.variant_sha256:
-        raise OptimizerAdapterError("adapter base variant digest does not match the supplied variant")
+        raise OptimizerAdapterError(
+            "adapter base variant digest does not match the supplied variant"
+        )
     prompt = variant_document.variant.prompt
     if prompt is None:
         raise OptimizerAdapterError("optimizer adapters require a prompt variant")
@@ -320,9 +323,13 @@ def apply_optimizer_candidate(
     if candidate.adapter_sha256 != verification.adapter_sha256:
         raise OptimizerAdapterError("candidate adapter digest does not match the supplied adapter")
     if candidate.base_capsule_sha256 != verification.base_capsule_sha256:
-        raise OptimizerAdapterError("candidate base capsule digest does not match the supplied capsule")
+        raise OptimizerAdapterError(
+            "candidate base capsule digest does not match the supplied capsule"
+        )
     if candidate.base_variant_sha256 != verification.base_variant_sha256:
-        raise OptimizerAdapterError("candidate base variant digest does not match the supplied variant")
+        raise OptimizerAdapterError(
+            "candidate base variant digest does not match the supplied variant"
+        )
 
     bindings = {component.id: component.message_id for component in adapter.components}
     unknown = sorted({update.component_id for update in candidate.updates} - bindings.keys())
