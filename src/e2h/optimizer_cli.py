@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.table import Table
 
@@ -129,7 +129,7 @@ def apply_candidate_command(
             loaded_capsule,
             loaded_variant,
         )
-    except (OptimizerAdapterError, CapsuleLoadError, VariantError) as exc:
+    except (OptimizerAdapterError, CapsuleLoadError, VariantError, ValidationError) as exc:
         error_console.print(f"[red]Invalid optimizer candidate:[/red] {exc}")
         raise typer.Exit(code=2) from exc
     write_json_atomic(output, result.model_dump_json(indent=2) + "\n")
