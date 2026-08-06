@@ -1,0 +1,27 @@
+schema_version: "0.1"
+id: sandbox-smoke
+goal: Execute a deterministic check inside an isolated container.
+initial_state:
+  working_directory: .
+allowed_actions:
+  tools: [command]
+  network: deny
+limits:
+  max_commands: 5
+  default_timeout_seconds: 30
+  max_output_chars: 20000
+sandbox:
+  engine: docker
+  image: "python@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  workspace_access: read_only
+  user: "65532:65532"
+  read_only_root: true
+  pull_policy: never
+  pids_limit: 128
+  memory_mb: 512
+  cpus: 1
+  tmpfs_mb: 64
+success:
+  commands:
+    - id: runtime
+      argv: [python, -c, "print('sandbox-ok')"]
