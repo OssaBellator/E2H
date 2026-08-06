@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 
 import pytest
 
 from e2h.privacy import RedactionPolicy, apply_redaction_policy
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
-
 
 SENSITIVE_KEY = "allowed@example.com"
 
@@ -25,7 +24,14 @@ def _trace() -> Trace:
                 timestamp=timestamp,
                 context=context,
                 payload={SENSITIVE_KEY: "api_key=secretvalue123"},
-            )
+            ),
+            TraceEvent(
+                trace_id="location-safety",
+                sequence=1,
+                event_type=TraceEventType.ARTIFACT_OBSERVED,
+                timestamp=timestamp,
+                context=context,
+            ),
         ],
     )
 
