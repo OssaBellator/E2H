@@ -291,6 +291,7 @@ def _reject_noop(patch: PatchBase, before: Any, after: Any) -> None:
 
 
 def _apply_patch(capsule: TaskCapsule, patch: HarnessPatch) -> None:
+    before: Any
     if isinstance(patch, GoalSetPatch):
         before = capsule.goal
         capsule.goal = patch.value
