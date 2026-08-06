@@ -32,6 +32,34 @@ replace_once(
     "            previous_timestamp = record.timestamp\n",
 )
 replace_once(
+    "src/e2h/anthropic_messages.py",
+    "            for message in messages:\n"
+    "                signature = _observable_content_signature(message.role, message.content)\n"
+    "                existing = observable_messages.get(message.id)\n"
+    "                if existing is not None and existing != signature:\n"
+    "                    raise ValueError(\"message ids must retain identical observable content\")\n"
+    "                observable_messages[message.id] = signature\n"
+    "                blocks = _content_list(message.content, \"message.content\")\n",
+    "            for message in messages:\n"
+    "                blocks = _content_list(message.content, \"message.content\")\n",
+)
+replace_once(
+    "src/e2h/anthropic_messages.py",
+    "                    tool_uses[tool_id] = signature\n"
+    "                if provider_items > _MAX_PROVIDER_ITEMS:\n",
+    "                    tool_uses[tool_id] = signature\n"
+    "                message_signature = _observable_content_signature(\n"
+    "                    message.role, message.content\n"
+    "                )\n"
+    "                existing_message = observable_messages.get(message.id)\n"
+    "                if existing_message is not None and existing_message != message_signature:\n"
+    "                    raise ValueError(\n"
+    "                        \"message ids must retain identical observable content\"\n"
+    "                    )\n"
+    "                observable_messages[message.id] = message_signature\n"
+    "                if provider_items > _MAX_PROVIDER_ITEMS:\n",
+)
+replace_once(
     "tests/test_anthropic_messages.py",
     '                        "content": first_response_content,\n',
     '                        "content": copy.deepcopy(first_response_content),\n',
