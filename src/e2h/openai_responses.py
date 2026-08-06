@@ -11,7 +11,6 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from e2h.ingest import (
-    CorrectionRecord,
     EvidenceFormat,
     EvidenceIngestError,
     IngestionBundle,
@@ -148,9 +147,7 @@ def _text_blocks(content: Any) -> tuple[str, list[dict[str, Any]]]:
         elif block_type == "refusal":
             refusal = block.get("refusal")
             if not isinstance(refusal, str):
-                raise EvidenceIngestError(
-                    f"message content block {index}.refusal must be a string"
-                )
+                raise EvidenceIngestError(f"message content block {index}.refusal must be a string")
             rendered.append(refusal)
         elif block_type == "input_image":
             rendered.append("[input_image]")
@@ -529,8 +526,40 @@ def _response_metadata(response: dict[str, Any], record: OpenAIResponseRecord) -
         "parallel_tool_calls": response.get("parallel_tool_calls"),
         "service_tier": response.get("service_tier"),
         "input_item_ids": [item.get("id") for item in record.input_items],
-        "output_item_ids": [item.get("id") for item in cast(list[dict[str, Any]], response["output"])],
+        "output_item_ids": [
+            item.get("id") for item in cast(list[dict[str, Any]], response["output"])
+        ],
     }
+
+
+def _index_function_calls(
+    document: OpenAIResponsesDocument,
+) -> dict[str, dict[str, Any]]:
+    """Index observable function calls before emitting any output events."""
+    calls: dict[str, dict[str, Any]] = {}
+    for record in document.responses:
+        output = cast(list[dict[str, Any]], record.response["output"])
+        for item in [*record.input_items, *output]:
+            if item.get("type") != "function_call":
+                continue
+            call_id = item.get("call_id")
+            name = item.get("name")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            if not isinstance(name, str) or not name:
+                continue
+            metadata = {
+                "name": name,
+                "namespace": item.get("namespace"),
+                "provider_item_id": item.get("id"),
+            }
+            existing = calls.get(call_id)
+            if existing is not None and existing != metadata:
+                raise EvidenceIngestError(
+                    f"function call {call_id!r} has conflicting provider metadata"
+                )
+            calls[call_id] = metadata
+    return calls
 
 
 def import_openai_responses_document(
@@ -563,7 +592,7 @@ def import_openai_responses_document(
         )
     ]
     seen_items: set[str] = set()
-    calls: dict[str, dict[str, Any]] = {}
+    calls = _index_function_calls(document)
     for record in document.responses:
         response = record.response
         response_id = cast(str, response["id"])
@@ -620,7 +649,7 @@ def import_openai_responses_document(
     return IngestionBundle(
         provenance=provenance,
         traces=[trace],
-        corrections=cast(list[CorrectionRecord], []),
+        corrections=[],
         redactions=redactions,
     )
 

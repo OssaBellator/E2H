@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains eight connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, and a transactional **DuckDB/Parquet experiment store**.
+The repository now contains nine connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, a transactional **DuckDB/Parquet experiment store**, and native **OpenAI Responses evidence ingestion**.
 
 ## What works today
 
@@ -12,7 +12,8 @@ The repository now contains eight connected vertical slices: deterministic **tas
 - Per-command timeouts, expected exit codes, fail-fast behavior, and bounded in-memory output capture.
 - Normalized observable trace events for conversations, messages, spans, tools, artifacts, feedback, runs, and checks.
 - Variant × repetition replay matrices with stable run IDs and per-variant reliability summaries.
-- Canonical transcript JSON and OTLP/HTTP JSON ingestion.
+- Canonical transcript JSON, OTLP/HTTP JSON, and archived OpenAI Responses ingestion.
+- Provider-native message, function-call, function-output, usage, status, and request metadata normalization.
 - Explicit user-correction capture linked to earlier assistant messages.
 - Default-on secret, email, and phone redaction with stable non-reversible placeholders.
 - Content-addressed source provenance without exposing local filesystem paths.
@@ -49,6 +50,9 @@ uv run e2h ingest transcript examples/ingest/transcript.json \
 uv run e2h ingest otlp examples/ingest/otlp.json \
   --output .e2h/otlp-bundle.json \
   --traces .e2h/otlp.jsonl
+uv run e2h ingest openai-responses examples/ingest/openai-responses.json \
+  --output .e2h/openai-responses-bundle.json \
+  --traces .e2h/openai-responses.jsonl
 uv run e2h compile proposal .e2h/transcript-bundle.json examples/compile/spec.yaml \
   --output .e2h/compiler-proposal.json
 uv run e2h compile verify .e2h/compiler-proposal.json \
@@ -153,6 +157,18 @@ The canonical transcript format is intentionally provider-neutral:
 ```
 
 Corrections must be explicit, must come from a user message, and must reference an earlier assistant message. This avoids unreliable sentiment or phrase heuristics.
+
+## OpenAI Responses ingestion
+
+`e2h ingest openai-responses` consumes an archived export envelope rather than making a live API request. Each record contains the raw `response` object returned by the Responses API plus the `input_items` retrieved for that response. This mirrors the provider API split: response output items are returned on the response object, while input items are retrieved separately when reconstructing observable request context.
+
+The adapter normalizes input, developer, user, and assistant messages into `message.observed` events. Standard `function_call` and `function_call_output` items become linked `tool.called` and `tool.completed` events keyed by `call_id`. Response model, status, token usage, errors, incomplete details, request ID, conversation ID, previous-response linkage, and item IDs are retained as `openai.response` artifacts. Unknown output-item types remain observable provider artifacts rather than being silently discarded.
+
+Reasoning items receive a deliberately narrower treatment. E2H records only provider-supplied summary text, status, and booleans indicating whether reasoning or encrypted content was present. It never copies `reasoning_text` or `encrypted_content` into normalized evidence. The built-in redactor then processes all retained messages, arguments, tool outputs, summaries, and response metadata by default.
+
+Stable provider item IDs are deduplicated across chained response records, so an item returned as output in one response and replayed as input to the next produces one observable event. Function outputs from partial exports are still retained and explicitly marked as unlinked when their originating call is absent.
+
+The export envelope is intentionally SDK-independent and additive-field tolerant inside provider payloads. E2H requires only the core response identity, object type, Unix creation time, model, ordered output array, and typed provider items; this preserves archived evidence across SDK upgrades without accepting malformed core structure.
 
 ## Privacy and provenance
 

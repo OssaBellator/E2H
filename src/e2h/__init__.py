@@ -12,6 +12,12 @@ from e2h.compiler import (
 from e2h.experiment import ExperimentResult, ExperimentSpec, run_experiment
 from e2h.ingest import IngestionBundle, ingest_otlp_file, ingest_transcript_file
 from e2h.models import ContainerSandbox, TaskCapsule
+from e2h.openai_responses import (
+    OpenAIResponseRecord,
+    OpenAIResponsesDocument,
+    import_openai_responses_document,
+    ingest_openai_responses_file,
+)
 from e2h.oracles import ArtifactOracle, FileOracle, JsonOracle, OracleEvaluation
 from e2h.runner import ExecutionBackend, RunResult, run_capsule
 from e2h.snapshot import (
@@ -46,6 +52,8 @@ __all__ = [
     "IngestResult",
     "IngestionBundle",
     "JsonOracle",
+    "OpenAIResponseRecord",
+    "OpenAIResponsesDocument",
     "OracleEvaluation",
     "QueryView",
     "RunResult",
@@ -60,7 +68,9 @@ __all__ = [
     "compile_proposal",
     "create_snapshot",
     "export_parquet",
+    "import_openai_responses_document",
     "ingest_artifact",
+    "ingest_openai_responses_file",
     "ingest_otlp_file",
     "ingest_transcript_file",
     "initialize_store",
@@ -76,4 +86,4 @@ __all__ = [
     "verify_proposal",
     "verify_snapshot",
 ]
-__version__ = "0.8.0"
+__version__ = "0.9.0"

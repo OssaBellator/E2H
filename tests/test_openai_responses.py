@@ -82,9 +82,7 @@ def export_document() -> dict[str, object]:
                         {
                             "id": "reason_1",
                             "type": "reasoning",
-                            "summary": [
-                                {"type": "summary_text", "text": "Use the account tool."}
-                            ],
+                            "summary": [{"type": "summary_text", "text": "Use the account tool."}],
                             "content": [
                                 {"type": "reasoning_text", "text": "private chain of thought"}
                             ],
@@ -183,7 +181,6 @@ def test_chained_responses_normalize_messages_tools_and_metadata() -> None:
     assert responses[0].payload["request_id"] == "req_1"
     assert responses[1].payload["previous_response_id"] == "resp_1"
     assert responses[1].payload["conversation_id"] == "conv_1"
-    assert trace.context if False else True
 
 
 def test_reasoning_preserves_summary_but_not_hidden_or_encrypted_content() -> None:
@@ -226,8 +223,8 @@ def test_redaction_covers_messages_arguments_outputs_and_metadata(tmp_path: Path
     rendered = bundle.model_dump_json()
     assert "alice@example.com" not in rendered
     assert "sk-secret123456" not in rendered
-    assert "[REDACTED_EMAIL]" in rendered
-    assert "[REDACTED_SECRET]" in rendered
+    assert "<redacted:email:" in rendered
+    assert "<redacted:secret:" in rendered
     assert bundle.provenance.redaction_enabled is True
     assert bundle.redactions
 
@@ -326,14 +323,12 @@ def test_orphan_function_output_is_explicitly_unlinked() -> None:
 @pytest.mark.parametrize(
     ("mutation", "message_text"),
     [
-        (lambda data: data["responses"].append(data["responses"][0]), "response ids must be unique"),
         (
-            lambda data: data["responses"].append(
-                {
-                    "input_items": [],
-                    "response": response("resp_earlier", 1, []),
-                }
-            ),
+            lambda data: data["responses"].append(data["responses"][0]),
+            "response ids must be unique",
+        ),
+        (
+            lambda data: data["responses"][1]["response"].update({"created_at": 1}),
             "timestamps must be nondecreasing",
         ),
         (
@@ -364,5 +359,15 @@ def test_invalid_nested_content_is_reported_as_ingest_error() -> None:
 def test_file_loader_rejects_invalid_json(tmp_path: Path) -> None:
     path = tmp_path / "responses.json"
     path.write_text("not-json", encoding="utf-8")
-    with pytest.raises(EvidenceIngestError, match="invalid JSON"):
+    with pytest.raises(EvidenceIngestError, match="invalid evidence JSON"):
         ingest_openai_responses_file(path)
+
+
+def test_conflicting_function_call_metadata_is_rejected() -> None:
+    data = export_document()
+    second_call = dict(data["responses"][1]["input_items"][1])
+    second_call["name"] = "different_tool"
+    data["responses"][1]["input_items"][1] = second_call
+    document = OpenAIResponsesDocument.model_validate(data)
+    with pytest.raises(EvidenceIngestError, match="conflicting provider metadata"):
+        import_openai_responses_document(document, provenance())

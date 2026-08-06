@@ -26,6 +26,7 @@ from e2h.loader import (
     load_experiment,
 )
 from e2h.models import TaskCapsule
+from e2h.openai_responses import ingest_openai_responses_file
 from e2h.runner import (
     CheckStatus,
     ExecutionBackend,
@@ -256,6 +257,28 @@ def ingest_transcript_command(
     """Import a canonical transcript JSON document."""
     try:
         bundle = ingest_transcript_file(source, capsule_id=capsule_id, redact=redact)
+    except EvidenceIngestError as exc:
+        error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    _emit_ingestion(bundle, output=output, traces=traces, json_stdout=json_stdout)
+
+
+@ingest_app.command("openai-responses")
+def ingest_openai_responses_command(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    capsule_id: Annotated[str | None, typer.Option("--capsule-id")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
+    traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
+    redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
+) -> None:
+    """Import an archived OpenAI Responses API export."""
+    try:
+        bundle = ingest_openai_responses_file(
+            source,
+            capsule_id=capsule_id,
+            redact=redact,
+        )
     except EvidenceIngestError as exc:
         error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
         raise typer.Exit(code=2) from exc

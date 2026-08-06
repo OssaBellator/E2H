@@ -26,11 +26,8 @@ def write_export(path: Path) -> None:
                                 "type": "message",
                                 "role": "user",
                                 "content": [
-                                    {
-                                        "type": "input_text",
-                                        "text": "Contact cli@example.com"
-                                    }
-                                ]
+                                    {"type": "input_text", "text": "Contact cli@example.com"}
+                                ],
                             }
                         ],
                         "response": {
@@ -46,17 +43,13 @@ def write_export(path: Path) -> None:
                                     "role": "assistant",
                                     "status": "completed",
                                     "content": [
-                                        {
-                                            "type": "output_text",
-                                            "text": "Done",
-                                            "annotations": []
-                                        }
-                                    ]
+                                        {"type": "output_text", "text": "Done", "annotations": []}
+                                    ],
                                 }
-                            ]
-                        }
+                            ],
+                        },
                     }
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -89,9 +82,11 @@ def test_openai_responses_cli_json_and_artifacts(tmp_path: Path) -> None:
     assert payload["provenance"]["format"] == "openai-responses-json"
     assert payload["traces"][0]["events"][0]["context"]["capsule_id"] == "override"
     assert "cli@example.com" not in result.stdout
-    assert "[REDACTED_EMAIL]" in result.stdout
+    assert "<redacted:email:" in result.stdout
     assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "0.1"
-    assert len(traces.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(traces.read_text(encoding="utf-8").splitlines()) == len(
+        payload["traces"][0]["events"]
+    )
 
 
 def test_openai_responses_cli_table_and_no_redact(tmp_path: Path) -> None:
