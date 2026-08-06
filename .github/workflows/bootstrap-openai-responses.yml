@@ -87,7 +87,9 @@ jobs:
               event for event in events if event["event_type"] == "tool.completed"
           )
           assert completed["attributes"]["linked_call"] is True
-          assert len(Path(".e2h/openai-responses.jsonl").read_text().splitlines()) == 1
+          trace_lines = Path(".e2h/openai-responses.jsonl").read_text().splitlines()
+          expected_lines = sum(len(trace["events"]) for trace in payload["traces"])
+          assert len(trace_lines) == expected_lines
           PY
       - name: Commit tested implementation
         shell: bash
