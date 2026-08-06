@@ -1,0 +1,13 @@
+schema_version: "0.1"
+candidate_id: gepa-example-001
+variant_id: typed-candidate-gepa
+optimizer: gepa
+adapter_sha256: 46906640c93aede1590337abc67ffa579108d6ee1fd6f3d697987f5045d3f905
+base_capsule_sha256: be3a655c9487ec0a2fa62039cfaf1f6d4603ce33d3ac3423dbd4e428c521fc61
+base_variant_sha256: b740747952a42a3fb99d7b322c14067bac7f1556d981e6b3014a3def2e99704f
+updates:
+  - component_id: system-instruction
+    content: Follow the task contract and rely only on observable evidence.
+score: 0.8
+metadata:
+  source: archived optimizer output
