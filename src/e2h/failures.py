@@ -5,8 +5,9 @@ from __future__ import annotations
 import errno
 import json
 from collections import Counter
+from collections.abc import Iterable
 from enum import StrEnum
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
