@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from e2h.anthropic_messages import ingest_anthropic_messages_file
 from e2h.compiler_cli import compiler_app
 from e2h.experiment import resolve_under_root
 from e2h.experiment import run_experiment as execute_experiment
@@ -330,6 +331,47 @@ def ingest_openai_responses_command(
             else None
         )
         bundle = ingest_openai_responses_file(
+            source,
+            capsule_id=capsule_id,
+            redact=redact,
+            redaction_policy=redaction_policy,
+        )
+    except (EvidenceIngestError, RedactionPolicyError) as exc:
+        error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    _emit_ingestion(
+        bundle,
+        output=output,
+        traces=traces,
+        redaction_report=redaction_report,
+        json_stdout=json_stdout,
+    )
+
+
+@ingest_app.command("anthropic-messages")
+def ingest_anthropic_messages_command(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    capsule_id: Annotated[str | None, typer.Option("--capsule-id")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
+    traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
+    redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    redaction_policy_path: Annotated[
+        Path | None,
+        typer.Option("--redaction-policy", exists=True, dir_okay=False),
+    ] = None,
+    redaction_report: Annotated[
+        Path | None, typer.Option("--redaction-report", dir_okay=False)
+    ] = None,
+    json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
+) -> None:
+    """Import an archived Anthropic Messages API export."""
+    try:
+        redaction_policy: RedactionPolicy | None = (
+            load_redaction_policy(redaction_policy_path)
+            if redaction_policy_path is not None
+            else None
+        )
+        bundle = ingest_anthropic_messages_file(
             source,
             capsule_id=capsule_id,
             redact=redact,

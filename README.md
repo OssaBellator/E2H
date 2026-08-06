@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains ten connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, a transactional **DuckDB/Parquet experiment store**, native **OpenAI Responses evidence ingestion**, and configurable **redaction policies with privacy review reports**.
+The repository now contains eleven connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, a transactional **DuckDB/Parquet experiment store**, native **OpenAI Responses and Anthropic Messages evidence ingestion**, and configurable **redaction policies with privacy review reports**.
 
 ## What works today
 
@@ -12,7 +12,7 @@ The repository now contains ten connected vertical slices: deterministic **task 
 - Per-command timeouts, expected exit codes, fail-fast behavior, and bounded in-memory output capture.
 - Normalized observable trace events for conversations, messages, spans, tools, artifacts, feedback, runs, and checks.
 - Variant × repetition replay matrices with stable run IDs and per-variant reliability summaries.
-- Canonical transcript JSON, OTLP/HTTP JSON, and archived OpenAI Responses ingestion.
+- Canonical transcript JSON, OTLP/HTTP JSON, archived OpenAI Responses, and archived Anthropic Messages ingestion.
 - Provider-native message, function-call, function-output, usage, status, and request metadata normalization.
 - Explicit user-correction capture linked to earlier assistant messages.
 - Configurable secret, email, phone, custom-regex, and exact-allowlist redaction policies.
@@ -56,6 +56,9 @@ uv run e2h ingest otlp examples/ingest/otlp.json \
 uv run e2h ingest openai-responses examples/ingest/openai-responses.json \
   --output .e2h/openai-responses-bundle.json \
   --traces .e2h/openai-responses.jsonl
+uv run e2h ingest anthropic-messages examples/ingest/anthropic-messages.json \
+  --output .e2h/anthropic-messages-bundle.json \
+  --traces .e2h/anthropic-messages.jsonl
 uv run e2h compile proposal .e2h/transcript-bundle.json examples/compile/spec.yaml \
   --output .e2h/compiler-proposal.json
 uv run e2h compile verify .e2h/compiler-proposal.json \
@@ -172,6 +175,16 @@ Reasoning items receive a deliberately narrower treatment. E2H records only prov
 Stable provider item IDs are deduplicated across chained response records, so an item returned as output in one response and replayed as input to the next produces one observable event. Function outputs from partial exports are still retained and explicitly marked as unlinked when their originating call is absent.
 
 The export envelope is intentionally SDK-independent and additive-field tolerant inside provider payloads. E2H requires only the core response identity, object type, Unix creation time, model, ordered output array, and typed provider items; this preserves archived evidence across SDK upgrades without accepting malformed core structure.
+
+## Anthropic Messages ingestion
+
+`e2h ingest anthropic-messages` consumes archived request/response envelopes and never makes a live API request. Each record contains a timezone-aware capture timestamp, exporter-assigned stable IDs for request messages, the request history, an optional system prompt, and the raw Anthropic response message. Stable IDs let chained histories be deduplicated while conflicting reuse fails validation.
+
+Visible text becomes `message.observed` evidence. Client `tool_use` and Anthropic `server_tool_use` blocks become `tool.called` events; request `tool_result` blocks and provider result blocks become linked `tool.completed` events keyed by `tool_use_id`. Usage, model, stop reason, stop sequence, request ID, container metadata, and content-block types are retained in `anthropic.message` artifacts. Unknown future block types remain observable provider artifacts instead of being silently discarded.
+
+Thinking blocks have a deliberately narrow evidence boundary. Normalized records retain only the block type and booleans indicating whether thinking, signature, or redacted data was present. E2H never copies thinking text, signatures, redacted-thinking data, image bytes, or opaque `encrypted_content` into evidence. Text citations and non-binary source metadata remain observable and pass through the shared redaction policy engine.
+
+The envelope is SDK-independent and additive-field tolerant inside provider payloads, but requires core response identity, `message` type, assistant role, model, content array, token usage, timezone-aware record ordering, and consistent message/tool IDs. Partial archives retain unlinked tool results explicitly for review.
 
 ## Privacy and provenance
 

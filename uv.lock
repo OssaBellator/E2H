@@ -201,7 +201,7 @@ wheels = [
 
 [[package]]
 name = "e2h"
-version = "0.10.0"
+version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
