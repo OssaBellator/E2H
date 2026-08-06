@@ -7,6 +7,7 @@ import json
 import math
 import operator
 import re
+from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from fractions import Fraction
@@ -544,7 +545,8 @@ def compare_variant_predictions(
             )
         if document.public_partition_sha256 != verification.public_partition_sha256:
             raise PromotionError(
-                f"{document.variant_id} public partition digest does not match the supplied manifest"
+                f"{document.variant_id} public partition digest does not match "
+                "the supplied manifest"
             )
 
     role = baseline.role
@@ -750,7 +752,10 @@ def materialize_promotion(
     )
 
 
-_ROLLBACK_OPERATORS = {
+_ROLLBACK_OPERATORS: dict[
+    RollbackOperator,
+    Callable[[float, float], bool],
+] = {
     RollbackOperator.LT: operator.lt,
     RollbackOperator.LTE: operator.le,
     RollbackOperator.GT: operator.gt,
