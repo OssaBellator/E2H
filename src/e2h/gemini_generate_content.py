@@ -22,7 +22,7 @@ from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 _MAX_PROVIDER_ITEMS = 10_000
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,255}$"
-_BINARY_KEYS = frozenset({"data", "thought_signature", "thoughtSignature"})
+_BINARY_KEYS = frozenset({"thought_signature", "thoughtSignature"})
 _PART_FIELDS = (
     "text",
     "function_call",
