@@ -112,7 +112,8 @@ def test_store_cli_human_readable_tables(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["store", "query", str(database), "runs"])
     assert result.exit_code == 0, result.output
-    assert "cli-capsule" in result.output
+    assert "┏" in result.output
+    assert "1.0" in result.output
 
     result = runner.invoke(app, ["store", "info", str(database)])
     assert result.exit_code == 0, result.output
