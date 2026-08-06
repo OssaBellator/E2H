@@ -56,12 +56,15 @@ for name in (
     )
 replace_once("src/e2h/__init__.py", '__version__ = "0.7.0"', '__version__ = "0.8.0"')
 
-# Runtime dependency and package version.
+# Runtime dependencies and package version.
 replace_once("pyproject.toml", 'version = "0.7.0"', 'version = "0.8.0"')
 replace_once(
     "pyproject.toml",
     'dependencies = [\n  "pydantic>=2.10,<3",\n',
-    'dependencies = [\n  "duckdb>=1.4,<2",\n  "pydantic>=2.10,<3",\n',
+    'dependencies = [\n'
+    '  "duckdb>=1.4,<2",\n'
+    '  "pydantic>=2.10,<3",\n'
+    '  "pytz>=2024,<2027",\n',
 )
 
 # Documentation and roadmap.
