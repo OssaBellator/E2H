@@ -174,6 +174,7 @@ def materialize_promotion(
         raise PromotionError("rollback plan target does not match the promotion baseline")
     return PromotionReceipt(
         promotion_decision_sha256=digest,
+        decision=decision,
         policy_id=decision.policy_id,
         policy_sha256=decision.policy_sha256,
         proposal_id=decision.proposal_id,
