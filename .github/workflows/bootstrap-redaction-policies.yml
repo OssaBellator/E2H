@@ -34,6 +34,7 @@ jobs:
           python fix_redaction_cli_lines.py
           python prepare_redaction_behavior.py
           python fix_redaction_behavior.py
+          python fix_placeholder_scan.py
       - name: Sync dependencies
         run: uv sync --extra dev
       - name: Lint and format
