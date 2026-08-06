@@ -32,6 +32,7 @@ jobs:
         run: |
           python fix_openai_bootstrap.py
           python bootstrap_openai_responses.py
+          python fix_openai_responses.py
       - name: Sync dependencies
         run: uv sync --extra dev
       - name: Lint and format
