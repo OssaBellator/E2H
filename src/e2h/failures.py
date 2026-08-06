@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import json
+import math
 from collections import Counter
 from collections.abc import Iterable
 from enum import StrEnum
@@ -65,17 +66,26 @@ class Retryability(StrEnum):
     UNKNOWN = "unknown"
 
 
-def _contains_forbidden_detail_key(value: Any) -> bool:
+def _validate_detail_value(value: Any) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("failure details must contain canonical JSON values")
+        return
+    if isinstance(value, list):
+        for item in value:
+            _validate_detail_value(item)
+        return
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in _FORBIDDEN_DETAIL_KEYS:
-                return True
-            if _contains_forbidden_detail_key(item):
-                return True
-        return False
-    if isinstance(value, list):
-        return any(_contains_forbidden_detail_key(item) for item in value)
-    return False
+            if not isinstance(key, str):
+                raise ValueError("failure details must contain canonical JSON values")
+            if key.casefold() in _FORBIDDEN_DETAIL_KEYS:
+                raise ValueError("failure details must not contain raw command output")
+            _validate_detail_value(item)
+        return
+    raise ValueError("failure details must contain canonical JSON values")
 
 
 class FailureRecord(StrictModel):
@@ -94,17 +104,13 @@ class FailureRecord(StrictModel):
     @field_validator("details")
     @classmethod
     def details_must_be_bounded_json(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if _contains_forbidden_detail_key(value):
-            raise ValueError("failure details must not contain raw command output")
-        try:
-            rendered = json.dumps(
-                value,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
-        except (TypeError, ValueError) as exc:
-            raise ValueError("failure details must contain canonical JSON values") from exc
+        _validate_detail_value(value)
+        rendered = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
         if len(rendered.encode("utf-8")) > _MAX_DETAILS_BYTES:
             raise ValueError(f"failure details exceed {_MAX_DETAILS_BYTES} bytes")
         return value
@@ -135,6 +141,10 @@ class FailureSummary(StrictModel):
 
     @model_validator(mode="after")
     def counts_must_be_consistent(self) -> FailureSummary:
+        if any(count < 0 for count in self.by_category.values()):
+            raise ValueError("failure category counts must be non-negative")
+        if any(count < 0 for count in self.by_code.values()):
+            raise ValueError("failure code counts must be non-negative")
         impacts = self.evaluation_failures + self.infrastructure_errors + self.not_evaluated
         if impacts != self.total:
             raise ValueError("failure impact counts must sum to total")
@@ -144,6 +154,10 @@ class FailureSummary(StrictModel):
             raise ValueError("failure code counts must sum to total")
         if (self.primary_check_id is None) != (self.primary_code is None):
             raise ValueError("primary_check_id and primary_code must be set together")
+        if self.total == 0 and self.primary_check_id is not None:
+            raise ValueError("empty failure summaries must not define a primary failure")
+        if self.total > 0 and self.primary_check_id is None:
+            raise ValueError("non-empty failure summaries require a primary failure")
         return self
 
 
