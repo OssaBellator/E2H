@@ -32,6 +32,7 @@ jobs:
         run: |
           python bootstrap_redaction_policies.py
           python fix_redaction_cli_lines.py
+          python fix_redaction_behavior.py
       - name: Sync dependencies
         run: uv sync --extra dev
       - name: Lint and format
