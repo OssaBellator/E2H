@@ -58,8 +58,12 @@ replace_once(
 )
 replace_once(
     "src/e2h/openai_responses.py",
-    "    calls: dict[str, dict[str, Any]] = {}\n",
-    "    calls = _index_function_calls(document)\n",
+    "    seen_items: set[str] = set()\n"
+    "    calls: dict[str, dict[str, Any]] = {}\n"
+    "    for record in document.responses:\n",
+    "    seen_items: set[str] = set()\n"
+    "    calls = _index_function_calls(document)\n"
+    "    for record in document.responses:\n",
 )
 replace_once(
     "tests/test_openai_responses.py",
