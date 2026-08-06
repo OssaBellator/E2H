@@ -1,0 +1,93 @@
+name: Bootstrap experiment store
+
+on:
+  push:
+    branches: [agent/experiment-store]
+    paths: [.bootstrap/store-ready]
+  pull_request:
+    branches: [agent/container-sandbox]
+    paths:
+      - .bootstrap/store-ready
+      - .github/workflows/bootstrap-store.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/experiment-store
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Apply fail-closed integration patch
+        run: python bootstrap_store.py
+      - name: Format and validate
+        run: |
+          uv sync --extra dev
+          uv run ruff check . --fix
+          uv run ruff format .
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy src
+          uv run pytest
+          mkdir -p .e2h
+          uv run e2h run examples/smoke/capsule.yaml --workspace . --output .e2h/store-run.json
+          uv run e2h experiment run examples/matrix/experiment.yaml --root . --output .e2h/store-matrix.json --require-all-pass
+          uv run e2h store init .e2h/evidence.duckdb --json > .e2h/store-initial.json
+          uv run e2h store ingest .e2h/evidence.duckdb .e2h/store-run.json .e2h/store-matrix.json --json > .e2h/store-ingest.json
+          uv run e2h store ingest .e2h/evidence.duckdb .e2h/store-run.json --json > .e2h/store-idempotent.json
+          uv run e2h store query .e2h/evidence.duckdb runs --json > .e2h/store-runs.json
+          uv run e2h store query .e2h/evidence.duckdb variants --json > .e2h/store-variants.json
+          uv run e2h store query .e2h/evidence.duckdb capsules --json > .e2h/store-capsules.json
+          uv run e2h store info .e2h/evidence.duckdb --json > .e2h/store-info.json
+          uv run e2h store export .e2h/evidence.duckdb .e2h/store-runs.parquet --view runs
+          uv run e2h store export .e2h/evidence.duckdb .e2h/store-variants.parquet --view variants
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+
+          ingestion = json.loads(Path(".e2h/store-ingest.json").read_text(encoding="utf-8"))
+          assert len(ingestion) == 2
+          assert all(item["inserted"] for item in ingestion)
+          repeated = json.loads(Path(".e2h/store-idempotent.json").read_text(encoding="utf-8"))
+          assert repeated[0]["inserted"] is False
+          info = json.loads(Path(".e2h/store-info.json").read_text(encoding="utf-8"))
+          assert info["sources"] == 2
+          assert info["runs"] >= 2
+          assert info["checks"] >= 2
+          variants = json.loads(Path(".e2h/store-variants.json").read_text(encoding="utf-8"))
+          assert variants
+          with duckdb.connect(".e2h/evidence.duckdb", read_only=True) as connection:
+              columns = [row[1] for row in connection.execute("PRAGMA table_info('checks')").fetchall()]
+              assert "stdout" not in columns
+              assert "stderr" not in columns
+          with duckdb.connect() as connection:
+              run_count = connection.execute(
+                  "SELECT count(*) FROM read_parquet('.e2h/store-runs.parquet')"
+              ).fetchone()[0]
+              variant_count = connection.execute(
+                  "SELECT count(*) FROM read_parquet('.e2h/store-variants.parquet')"
+              ).fetchone()[0]
+          assert run_count == info["runs"]
+          assert variant_count == info["variant_summaries"]
+          PY
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .bootstrap/store-ready
+          rm -rf .e2h
+          git add .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add DuckDB experiment store"
+          git push origin HEAD:agent/experiment-store
