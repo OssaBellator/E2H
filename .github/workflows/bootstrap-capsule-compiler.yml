@@ -126,6 +126,7 @@ jobs:
           PY
       - name: Format and validate
         run: |
+          python sitecustomize.py
           uv sync --extra dev
           uv run ruff check . --fix
           uv run ruff format .
