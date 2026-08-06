@@ -28,7 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-e2h = "e2h.cli:app"
+e2h = "e2h.main_cli:app"
 e2h-genome = "e2h.genome_cli:genome_app"
 
 [tool.hatch.build.targets.wheel]
