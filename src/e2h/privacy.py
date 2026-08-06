@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 from collections import Counter
+from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -18,6 +20,9 @@ from e2h.trace import Trace
 
 _MAX_POLICY_BYTES = 256 * 1024
 _MAX_REDACTIONS = 10_000
+_ACTIVE_REDACTION_LIMIT: ContextVar[int] = ContextVar(
+    "e2h_redaction_limit", default=_MAX_REDACTIONS
+)
 _MAX_CUSTOM_RULES = 100
 _MAX_ALLOW_VALUES = 1_000
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
@@ -34,6 +39,7 @@ _ASSIGNMENT = re.compile(
     r"(?i)(\b(?:api[_-]?key|access[_-]?token|secret|password)\b\s*[:=]\s*[\"']?)"
     r"([^\s,\"']{8,})"
 )
+_REDACTION_PLACEHOLDER = re.compile(r"<redacted:[^>\r\n]+>")
 
 
 class RedactionPolicyError(ValueError):
@@ -229,8 +235,9 @@ def _placeholder(
     *,
     rule_id: str | None = None,
 ) -> str:
-    if len(records) >= _MAX_REDACTIONS:
-        raise RedactionPolicyError(f"evidence exceeds {_MAX_REDACTIONS} redactions")
+    limit = _ACTIVE_REDACTION_LIMIT.get()
+    if len(records) >= limit:
+        raise RedactionPolicyError(f"evidence exceeds {limit} redactions")
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     label = f"custom:{rule_id}" if kind is RedactionKind.CUSTOM else kind.value
     value = f"<redacted:{label}:{digest[:12]}>"
@@ -275,17 +282,21 @@ def _redact_text(
 ) -> str:
     rendered = value
     for rule, pattern in custom_patterns:
-        rendered = pattern.sub(
-            lambda match, rule=rule: _replace_match(
+
+        def replace_custom(
+            match: re.Match[str],
+            current_rule: CustomRedactionRule = rule,
+        ) -> str:
+            return _replace_match(
                 match,
                 kind=RedactionKind.CUSTOM,
                 location=location,
                 records=records,
                 allowed=allowed,
-                rule_id=rule.id,
-            ),
-            rendered,
-        )
+                rule_id=current_rule.id,
+            )
+
+        rendered = pattern.sub(replace_custom, rendered)
     if policy.redact_secrets:
         rendered = _ASSIGNMENT.sub(
             lambda match: _replace_match(
@@ -442,7 +453,7 @@ def _redact_trace(
     return Trace.model_validate(copy.model_dump())
 
 
-def _iter_strings(value: Any, location: str):
+def _iter_strings(value: Any, location: str) -> Iterator[tuple[str, str]]:
     if isinstance(value, str):
         yield location, value
     elif isinstance(value, list):
@@ -457,20 +468,25 @@ def _iter_strings(value: Any, location: str):
 def _candidate_matches(
     value: str,
     custom_patterns: list[tuple[CustomRedactionRule, re.Pattern[str]]],
-):
-    for match in _ASSIGNMENT.finditer(value):
-        yield RedactionKind.SECRET, "assignment", None, match.group(2)
-    for match in _BEARER.finditer(value):
-        yield RedactionKind.SECRET, "bearer", None, match.group(2)
+) -> Iterator[tuple[RedactionKind, str, str | None, str]]:
+    scan_value = _REDACTION_PLACEHOLDER.sub("", value)
+    for match in _ASSIGNMENT.finditer(scan_value):
+        raw = match.group(2)
+        if not _is_placeholder(raw):
+            yield RedactionKind.SECRET, "assignment", None, raw
+    for match in _BEARER.finditer(scan_value):
+        raw = match.group(2)
+        if not _is_placeholder(raw):
+            yield RedactionKind.SECRET, "bearer", None, raw
     for detector, pattern in _TOKEN_PATTERNS:
-        for match in pattern.finditer(value):
+        for match in pattern.finditer(scan_value):
             yield RedactionKind.SECRET, detector, None, match.group(0)
-    for match in _EMAIL.finditer(value):
+    for match in _EMAIL.finditer(scan_value):
         yield RedactionKind.EMAIL, "email", None, match.group(0)
-    for match in _PHONE.finditer(value):
+    for match in _PHONE.finditer(scan_value):
         yield RedactionKind.PHONE, "phone", None, match.group(0)
     for rule, pattern in custom_patterns:
-        for match in pattern.finditer(value):
+        for match in pattern.finditer(scan_value):
             yield RedactionKind.CUSTOM, f"custom:{rule.id}", rule.id, match.group(0)
 
 
@@ -501,9 +517,10 @@ def _scan_residuals(
                         key = (kind, rule_id, location, digest)
                         if key in seen:
                             continue
-                        if len(findings) >= _MAX_REDACTIONS:
+                        limit = _ACTIVE_REDACTION_LIMIT.get()
+                        if len(findings) >= limit:
                             raise RedactionPolicyError(
-                                f"evidence exceeds {_MAX_REDACTIONS} residual findings"
+                                f"evidence exceeds {limit} residual findings"
                             )
                         seen.add(key)
                         findings.append(
@@ -518,7 +535,7 @@ def _scan_residuals(
     return findings
 
 
-def apply_redaction_policy(
+def _apply_redaction_policy_with_active_limit(
     traces: list[Trace],
     *,
     policy: RedactionPolicy | None = None,
@@ -543,8 +560,10 @@ def apply_redaction_policy(
             for index, trace in enumerate(traces)
         ]
     residuals = _scan_residuals(processed, custom_patterns, allowed)
-    kind_counts = Counter(record.kind.value for record in records)
-    rule_counts = Counter(record.rule_id for record in records if record.rule_id is not None)
+    kind_counts: Counter[str] = Counter(record.kind.value for record in records)
+    rule_counts: Counter[str] = Counter(
+        record.rule_id for record in records if record.rule_id is not None
+    )
     warnings = ["pattern_matching_cannot_prove_complete_deidentification"]
     if not redaction_enabled:
         warnings.append("redaction_disabled_review_only")
@@ -568,3 +587,24 @@ def apply_redaction_policy(
         manual_review_recommended=True,
     )
     return RedactionOutcome(traces=processed, records=records, review=review)
+
+
+def apply_redaction_policy(
+    traces: list[Trace],
+    *,
+    policy: RedactionPolicy | None = None,
+    redaction_enabled: bool = True,
+    max_records: int = _MAX_REDACTIONS,
+) -> RedactionOutcome:
+    """Apply a policy under a bounded, invocation-local review limit."""
+    if max_records < 1:
+        raise RedactionPolicyError("max_records must be at least 1")
+    token = _ACTIVE_REDACTION_LIMIT.set(max_records)
+    try:
+        return _apply_redaction_policy_with_active_limit(
+            traces,
+            policy=policy,
+            redaction_enabled=redaction_enabled,
+        )
+    finally:
+        _ACTIVE_REDACTION_LIMIT.reset(token)

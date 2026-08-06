@@ -14,10 +14,13 @@ from e2h.ingest import (
     EvidenceFormat,
     EvidenceIngestError,
     IngestionBundle,
-    RedactionRecord,
     SourceProvenance,
-    _apply_redaction,
     _load_json,
+)
+from e2h.privacy import (
+    RedactionPolicy,
+    RedactionPolicyError,
+    apply_redaction_policy,
 )
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
@@ -567,6 +570,7 @@ def import_openai_responses_document(
     provenance: SourceProvenance,
     *,
     capsule_id: str | None = None,
+    redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize an archived Responses export into one observable trace."""
     selected_capsule = capsule_id or document.capsule_id
@@ -642,15 +646,21 @@ def import_openai_responses_document(
                 payload=_response_metadata(response, record),
             )
         )
-    trace = Trace(trace_id=document.id, events=events)
-    redactions: list[RedactionRecord] = []
-    if provenance.redaction_enabled:
-        trace = _apply_redaction(trace, redactions, trace_index=0)
+    try:
+        outcome = apply_redaction_policy(
+            [Trace(trace_id=document.id, events=events)],
+            policy=redaction_policy,
+            redaction_enabled=provenance.redaction_enabled,
+            max_records=_MAX_PROVIDER_ITEMS,
+        )
+    except RedactionPolicyError as exc:
+        raise EvidenceIngestError(str(exc)) from exc
     return IngestionBundle(
         provenance=provenance,
-        traces=[trace],
+        traces=outcome.traces,
         corrections=[],
-        redactions=redactions,
+        redactions=outcome.records,
+        redaction_review=outcome.review,
     )
 
 
@@ -659,15 +669,17 @@ def ingest_openai_responses_file(
     *,
     capsule_id: str | None = None,
     redact: bool = True,
+    redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Load and normalize an archived OpenAI Responses export."""
-    source = _load_json(path, EvidenceFormat.OPENAI_RESPONSES_JSON, redact)
+    source = _load_json(path, EvidenceFormat.OPENAI_RESPONSES_JSON, redact, redaction_policy)
     try:
         document = OpenAIResponsesDocument.model_validate(source.data)
         return import_openai_responses_document(
             document,
             source.provenance,
             capsule_id=capsule_id,
+            redaction_policy=redaction_policy,
         )
     except ValueError as exc:
         if isinstance(exc, EvidenceIngestError):

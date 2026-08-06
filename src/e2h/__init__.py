@@ -19,6 +19,19 @@ from e2h.openai_responses import (
     ingest_openai_responses_file,
 )
 from e2h.oracles import ArtifactOracle, FileOracle, JsonOracle, OracleEvaluation
+from e2h.privacy import (
+    CustomRedactionRule,
+    RedactionKind,
+    RedactionPolicy,
+    RedactionPolicyError,
+    RedactionRecord,
+    RedactionReview,
+    ResidualFinding,
+    apply_redaction_policy,
+    default_redaction_policy,
+    load_redaction_policy,
+    redaction_policy_sha256,
+)
 from e2h.runner import ExecutionBackend, RunResult, run_capsule
 from e2h.snapshot import (
     SnapshotLimits,
@@ -45,6 +58,7 @@ __all__ = [
     "CapsuleProposal",
     "CompilerSpec",
     "ContainerSandbox",
+    "CustomRedactionRule",
     "ExecutionBackend",
     "ExperimentResult",
     "ExperimentSpec",
@@ -56,6 +70,12 @@ __all__ = [
     "OpenAIResponsesDocument",
     "OracleEvaluation",
     "QueryView",
+    "RedactionKind",
+    "RedactionPolicy",
+    "RedactionPolicyError",
+    "RedactionRecord",
+    "RedactionReview",
+    "ResidualFinding",
     "RunResult",
     "SnapshotLimits",
     "SnapshotManifest",
@@ -65,8 +85,10 @@ __all__ = [
     "Trace",
     "TraceEvent",
     "VerificationReport",
+    "apply_redaction_policy",
     "compile_proposal",
     "create_snapshot",
+    "default_redaction_policy",
     "export_parquet",
     "import_openai_responses_document",
     "ingest_artifact",
@@ -74,8 +96,10 @@ __all__ = [
     "ingest_otlp_file",
     "ingest_transcript_file",
     "initialize_store",
+    "load_redaction_policy",
     "materialize_capsule",
     "query_store",
+    "redaction_policy_sha256",
     "restore_snapshot",
     "review_proposal",
     "run_capsule",
@@ -86,4 +110,4 @@ __all__ = [
     "verify_proposal",
     "verify_snapshot",
 ]
-__version__ = "0.9.0"
+__version__ = "0.10.0"

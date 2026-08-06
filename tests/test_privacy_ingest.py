@@ -39,8 +39,7 @@ def test_transcript_import_uses_custom_policy_and_review(tmp_path: Path) -> None
     assert bundle.provenance.redaction_policy_sha256 == bundle.redaction_review.policy_sha256
     assert bundle.redaction_review.counts_by_rule == {"customer-id": 1}
     assert any(
-        finding.kind.value == "email"
-        for finding in bundle.redaction_review.residual_findings
+        finding.kind.value == "email" for finding in bundle.redaction_review.residual_findings
     )
 
 

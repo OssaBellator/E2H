@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains nine connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, a transactional **DuckDB/Parquet experiment store**, and native **OpenAI Responses evidence ingestion**.
+The repository now contains ten connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, a transactional **DuckDB/Parquet experiment store**, native **OpenAI Responses evidence ingestion**, and configurable **redaction policies with privacy review reports**.
 
 ## What works today
 
@@ -15,7 +15,8 @@ The repository now contains nine connected vertical slices: deterministic **task
 - Canonical transcript JSON, OTLP/HTTP JSON, and archived OpenAI Responses ingestion.
 - Provider-native message, function-call, function-output, usage, status, and request metadata normalization.
 - Explicit user-correction capture linked to earlier assistant messages.
-- Default-on secret, email, and phone redaction with stable non-reversible placeholders.
+- Configurable secret, email, phone, custom-regex, and exact-allowlist redaction policies.
+- Non-reversible privacy review reports with counts, policy digests, and residual findings.
 - Content-addressed source provenance without exposing local filesystem paths.
 - Immutable capsule proposals with evidence references and stable proposal IDs.
 - Controlled mutation verification plus human approval/rejection gates.
@@ -45,6 +46,8 @@ uv run e2h experiment run examples/matrix/experiment.yaml \
   --traces .e2h/matrix.jsonl \
   --require-all-pass
 uv run e2h ingest transcript examples/ingest/transcript.json \
+  --redaction-policy examples/ingest/redaction-policy.yaml \
+  --redaction-report .e2h/redaction-review.json \
   --output .e2h/transcript-bundle.json \
   --traces .e2h/transcript.jsonl
 uv run e2h ingest otlp examples/ingest/otlp.json \
@@ -172,7 +175,11 @@ The export envelope is intentionally SDK-independent and additive-field tolerant
 
 ## Privacy and provenance
 
-Ingestion redacts recognized secrets, email addresses, and phone numbers by default. Placeholders include a truncated SHA-256 digest, so repeated values remain comparable without storing the original value. Redaction records contain only the class, safe JSON-pointer location, digest, and placeholder.
+Ingestion uses the built-in `default` policy unless `--redaction-policy` selects a strict JSON or YAML policy. Policies can independently enable secret, email, and phone detectors, add trusted custom Python regular expressions, and retain exact allowlisted values. Placeholders include a truncated SHA-256 digest, so repeated values remain comparable without storing the original value. Redaction records contain only the class, rule identifier, safe JSON-pointer location, digest, and placeholder.
+
+Every ingestion bundle now includes a `redaction_review` with the canonical policy digest, counts by class and custom rule, unique-value counts, warnings, and hashed residual findings. `--redaction-report` writes that review separately. Review reports never include raw matches or allowlist values. `--no-redact` remains available and now acts as review-only mode: evidence is retained verbatim while sensitive-looking residuals are reported by digest and location.
+
+Custom rules are trusted Python regular expressions and can be computationally expensive or over-broad. Policy authors must review them like code. Exact allowlists deliberately retain matching values, and pattern matching cannot prove complete de-identification; manual review remains recommended before evidence leaves its original trust boundary.
 
 Every ingestion bundle records the source filename, byte length, SHA-256 content hash, importer format, and whether redaction was enabled. Absolute source paths are never written to the bundle. Use `--no-redact` only for trusted local workflows where raw evidence is intentionally retained.
 

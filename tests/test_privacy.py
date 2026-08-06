@@ -87,8 +87,7 @@ def test_custom_rule_and_allowlist_are_applied_without_raw_review_values() -> No
             trace_with_payload(
                 {
                     "content": (
-                        "ticket TKT-123456 belongs to allowed@example.com "
-                        "and owner@example.com"
+                        "ticket TKT-123456 belongs to allowed@example.com and owner@example.com"
                     )
                 }
             )
@@ -123,9 +122,7 @@ def test_disabled_redaction_produces_hashed_residual_review() -> None:
     assert outcome.review.redaction_enabled is False
     assert outcome.review.total_redactions == 0
     assert len(outcome.review.residual_findings) == 2
-    assert {finding.kind for finding in outcome.review.residual_findings} == {
-        RedactionKind.EMAIL
-    }
+    assert {finding.kind for finding in outcome.review.residual_findings} == {RedactionKind.EMAIL}
     assert "audit@example.com" not in report
     assert "redaction_disabled_review_only" in outcome.review.warnings
     assert "residual_sensitive_patterns_detected" in outcome.review.warnings
@@ -138,10 +135,7 @@ def test_disabled_policy_class_is_reported_as_residual() -> None:
         policy=policy,
     )
     assert "residual@example.com" in rendered_trace(outcome)
-    assert any(
-        finding.kind is RedactionKind.EMAIL
-        for finding in outcome.review.residual_findings
-    )
+    assert any(finding.kind is RedactionKind.EMAIL for finding in outcome.review.residual_findings)
 
 
 def test_policy_digest_is_canonical_and_sensitive_to_configuration() -> None:
