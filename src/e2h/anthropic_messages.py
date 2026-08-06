@@ -216,6 +216,8 @@ class AnthropicMessageRecord(StrictModel):
         if not isinstance(model, str) or not model:
             raise ValueError("response.model must be a non-empty string")
         content = self.response.get("content")
+        if not isinstance(content, list):
+            raise ValueError("response.content must be an array")
         blocks = _content_list(content, "response.content")
         if len(blocks) > _MAX_PROVIDER_ITEMS:
             raise ValueError(f"response.content exceeds {_MAX_PROVIDER_ITEMS} blocks")
