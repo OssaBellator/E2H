@@ -1,3 +1,3 @@
-from e2h.cli import app
+from e2h.main_cli import app
 
 app()

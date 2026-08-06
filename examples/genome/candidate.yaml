@@ -1,0 +1,19 @@
+schema_version: "0.1"
+id: candidate-harness
+base_capsule_sha256: be3a655c9487ec0a2fa62039cfaf1f6d4603ce33d3ac3423dbd4e428c521fc61
+patches:
+  - id: candidate-goal
+    op: goal.set
+    value: Verify the candidate harness.
+  - id: candidate-mode
+    op: check.env.set
+    check_id: contract
+    name: MODE
+    value: candidate
+  - id: candidate-timeout
+    op: check.timeout.set
+    check_id: contract
+    seconds: 10
+metadata:
+  author: example
+  purpose: deterministic typed patch smoke

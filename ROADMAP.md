@@ -33,8 +33,8 @@
 
 ## Milestone 3 — Controlled optimization
 
-- Structured failure taxonomy.
-- Typed harness genome and patch language.
+- [x] Structured failure taxonomy.
+- [x] Typed harness genome and patch language.
 - Prompt, tool, context, routing, and workflow variant types.
 - DSPy/GEPA optimizer adapters.
 - Train/validation/sealed-test partitions.
