@@ -10,6 +10,7 @@ from e2h.failures import (
     FailureCode,
     FailureImpact,
     FailureRecord,
+    FailureSummary,
     Retryability,
     launch_failure,
     output_capture_failure,
@@ -142,6 +143,10 @@ def test_failure_details_must_be_bounded_json_without_raw_output() -> None:
     }
     with pytest.raises(ValidationError, match="canonical JSON"):
         FailureRecord(**base, details={"value": object()})
+    with pytest.raises(ValidationError, match="canonical JSON"):
+        FailureRecord(**base, details={"value": ({"safe": True},)})
+    with pytest.raises(ValidationError, match="canonical JSON"):
+        FailureRecord(**base, details={"value": {1: "not a JSON object key"}})
     with pytest.raises(ValidationError, match="4096 bytes"):
         FailureRecord(**base, details={"value": "x" * 5000})
     for details in (
@@ -152,6 +157,27 @@ def test_failure_details_must_be_bounded_json_without_raw_output() -> None:
     ):
         with pytest.raises(ValidationError, match="raw command output"):
             FailureRecord(**base, details=details)
+
+
+def test_failure_summary_rejects_inconsistent_primary_and_negative_counts() -> None:
+    with pytest.raises(ValidationError, match="must not define a primary"):
+        FailureSummary(
+            primary_check_id="check",
+            primary_code=FailureCode.UNEXPECTED_EXIT,
+        )
+    with pytest.raises(ValidationError, match="require a primary"):
+        FailureSummary(
+            total=1,
+            evaluation_failures=1,
+            by_category={"task": 1},
+            by_code={"unexpected_exit": 1},
+        )
+    with pytest.raises(ValidationError, match="non-negative"):
+        FailureSummary(
+            total=0,
+            by_category={"task": -1, "resource": 1},
+            by_code={},
+        )
 
 
 def test_failure_causes_and_skipped_links_are_validated() -> None:
