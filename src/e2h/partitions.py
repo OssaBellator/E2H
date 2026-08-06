@@ -258,9 +258,7 @@ def _validated_inputs(
         validated_document = DatasetPartitionDocument.model_validate(
             document.model_dump(mode="json")
         )
-        validated_dataset = DSPyDatasetDocument.model_validate(
-            dataset.model_dump(mode="json")
-        )
+        validated_dataset = DSPyDatasetDocument.model_validate(dataset.model_dump(mode="json"))
     except ValueError as exc:
         raise DatasetPartitionError(f"invalid dataset partition inputs: {exc}") from exc
     return validated_document, validated_dataset
@@ -272,9 +270,7 @@ def _verify_validated_partitions(
 ) -> DatasetPartitionVerification:
     digest = dspy_dataset_sha256(dataset)
     if document.dataset_sha256 != digest:
-        raise DatasetPartitionError(
-            "partition dataset digest does not match the supplied dataset"
-        )
+        raise DatasetPartitionError("partition dataset digest does not match the supplied dataset")
     public_digest = dspy_dataset_public_sha256(dataset)
     if document.public_dataset_sha256 != public_digest:
         raise DatasetPartitionError(
@@ -337,9 +333,7 @@ def export_dataset_partition(
 
     for example_id in document.ids_for(role):
         example = examples_by_id[example_id]
-        values: dict[str, Any] = {
-            key: example.inputs[key] for key in sorted(example.inputs)
-        }
+        values: dict[str, Any] = {key: example.inputs[key] for key in sorted(example.inputs)}
         if labels_revealed:
             values.update({key: example.outputs[key] for key in sorted(example.outputs)})
             values = {key: values[key] for key in sorted(values)}
@@ -370,9 +364,7 @@ def evaluate_sealed_predictions(
     """Score exact-match sealed predictions without returning labels or case results."""
     document, dataset = _validated_inputs(document, dataset)
     try:
-        predictions = SealedPredictionDocument.model_validate(
-            predictions.model_dump(mode="json")
-        )
+        predictions = SealedPredictionDocument.model_validate(predictions.model_dump(mode="json"))
     except ValueError as exc:
         raise DatasetPartitionError(f"invalid sealed predictions: {exc}") from exc
     verification = _verify_validated_partitions(document, dataset)
