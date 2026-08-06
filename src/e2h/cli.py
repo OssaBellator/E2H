@@ -12,6 +12,12 @@ from rich.table import Table
 
 from e2h.experiment import resolve_under_root
 from e2h.experiment import run_experiment as execute_experiment
+from e2h.ingest import (
+    EvidenceIngestError,
+    IngestionBundle,
+    ingest_otlp_file,
+    ingest_transcript_file,
+)
 from e2h.loader import (
     CapsuleLoadError,
     ExperimentLoadError,
@@ -24,7 +30,9 @@ from e2h.trace import write_json_atomic, write_traces_jsonl
 
 app = typer.Typer(no_args_is_help=True, help="Evidence-to-Harness replay tools.")
 experiment_app = typer.Typer(no_args_is_help=True, help="Run reproducible replay matrices.")
+ingest_app = typer.Typer(no_args_is_help=True, help="Normalize observable evidence.")
 app.add_typer(experiment_app, name="experiment")
+app.add_typer(ingest_app, name="ingest")
 console = Console()
 error_console = Console(stderr=True)
 
@@ -162,3 +170,72 @@ def run_experiment_command(
 
     if require_all_pass and not execution.result.all_passed:
         raise typer.Exit(code=1)
+
+
+def _emit_ingestion(
+    bundle: IngestionBundle,
+    *,
+    output: Path | None,
+    traces: Path | None,
+    json_stdout: bool,
+) -> None:
+    rendered = bundle.model_dump_json(indent=2) + "\n"
+    if output is not None:
+        write_json_atomic(output, rendered)
+    if traces is not None:
+        write_traces_jsonl(traces, bundle.traces)
+    if json_stdout:
+        typer.echo(rendered, nl=False)
+        return
+
+    event_count = sum(len(trace.events) for trace in bundle.traces)
+    table = Table(title="E2H evidence ingestion")
+    table.add_column("Source")
+    table.add_column("Traces", justify="right")
+    table.add_column("Events", justify="right")
+    table.add_column("Corrections", justify="right")
+    table.add_column("Redactions", justify="right")
+    table.add_row(
+        bundle.provenance.source_name,
+        str(len(bundle.traces)),
+        str(event_count),
+        str(len(bundle.corrections)),
+        str(len(bundle.redactions)),
+    )
+    console.print(table)
+
+
+@ingest_app.command("transcript")
+def ingest_transcript_command(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    capsule_id: Annotated[str | None, typer.Option("--capsule-id")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
+    traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
+    redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
+) -> None:
+    """Import a canonical transcript JSON document."""
+    try:
+        bundle = ingest_transcript_file(source, capsule_id=capsule_id, redact=redact)
+    except EvidenceIngestError as exc:
+        error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    _emit_ingestion(bundle, output=output, traces=traces, json_stdout=json_stdout)
+
+
+@ingest_app.command("otlp")
+def ingest_otlp_command(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    capsule_id: Annotated[str, typer.Option("--capsule-id")] = "unassigned",
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
+    traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
+    redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
+) -> None:
+    """Import an OTLP/HTTP JSON trace export."""
+    try:
+        bundle = ingest_otlp_file(source, capsule_id=capsule_id, redact=redact)
+    except EvidenceIngestError as exc:
+        error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    _emit_ingestion(bundle, output=output, traces=traces, json_stdout=json_stdout)

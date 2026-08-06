@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "id": "example-conversation",
+  "capsule_id": "e2h-smoke",
+  "metadata": {"channel": "web-chat"},
+  "messages": [
+    {
+      "id": "m1",
+      "role": "user",
+      "content": "Run the smoke evaluation for alex@example.com.",
+      "timestamp": "2026-08-05T12:00:00Z"
+    },
+    {
+      "id": "m2",
+      "role": "assistant",
+      "content": "The API key is sk-example1234567890 and the task passed.",
+      "timestamp": "2026-08-05T12:00:01Z"
+    },
+    {
+      "id": "m3",
+      "role": "user",
+      "content": "That result is wrong; rerun the second check.",
+      "timestamp": "2026-08-05T12:00:02Z",
+      "correction_of": "m2"
+    }
+  ]
+}
