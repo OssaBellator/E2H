@@ -15,6 +15,21 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.privacy import (
+    RedactionKind as RedactionKind,
+)
+from e2h.privacy import (
+    RedactionOutcome,
+    RedactionPolicy,
+    RedactionPolicyError,
+    RedactionReview,
+    apply_redaction_policy,
+    default_redaction_policy,
+    redaction_policy_sha256,
+)
+from e2h.privacy import (
+    RedactionRecord as RedactionRecord,
+)
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 _MAX_SOURCE_BYTES = 10 * 1024 * 1024
@@ -25,19 +40,6 @@ _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$"
 _HEX_TRACE_ID = re.compile(r"^[0-9a-fA-F]{32}$")
 _HEX_SPAN_ID = re.compile(r"^[0-9a-fA-F]{16}$")
 _INTEGER_TEXT = re.compile(r"^-?\d+$")
-_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}\b")
-_PHONE = re.compile(
-    r"(?<!\w)(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)|\d{2,4})[ .-]\d{3,4}[ .-]\d{3,4}(?!\w)"
-)
-_TOKEN_PATTERNS = (
-    re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
-)
-_BEARER = re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})")
-_ASSIGNMENT = re.compile(
-    r"(?i)(\b(?:api[_-]?key|access[_-]?token|secret|password)\b\s*[:=]\s*[\"']?)"
-    r"([^\s,\"']{8,})"
-)
 
 
 class EvidenceIngestError(ValueError):
@@ -50,14 +52,6 @@ class EvidenceFormat(StrEnum):
     TRANSCRIPT_JSON = "transcript-json"
     OTLP_JSON = "otlp-json"
     OPENAI_RESPONSES_JSON = "openai-responses-json"
-
-
-class RedactionKind(StrEnum):
-    """Classes of sensitive values removed by the built-in redactor."""
-
-    SECRET = "secret"
-    EMAIL = "email"
-    PHONE = "phone"
 
 
 class TranscriptRole(StrEnum):
@@ -81,15 +75,8 @@ class SourceProvenance(StrictModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=0, le=_MAX_SOURCE_BYTES)
     redaction_enabled: bool
-
-
-class RedactionRecord(StrictModel):
-    """Non-reversible record of one removed sensitive value."""
-
-    kind: RedactionKind
-    location: str
-    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    placeholder: str
+    redaction_policy_id: str | None = Field(default=None, pattern=_ID_PATTERN)
+    redaction_policy_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class CorrectionRecord(StrictModel):
@@ -109,6 +96,7 @@ class IngestionBundle(StrictModel):
     traces: list[Trace] = Field(min_length=1)
     corrections: list[CorrectionRecord] = Field(default_factory=list)
     redactions: list[RedactionRecord] = Field(default_factory=list)
+    redaction_review: RedactionReview | None = None
 
 
 class TranscriptMessage(StrictModel):
@@ -203,7 +191,12 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-standard JSON constant: {value}")
 
 
-def _load_json(path: Path, source_format: EvidenceFormat, redact: bool) -> _LoadedSource:
+def _load_json(
+    path: Path,
+    source_format: EvidenceFormat,
+    redact: bool,
+    redaction_policy: RedactionPolicy | None = None,
+) -> _LoadedSource:
     try:
         raw = path.read_bytes()
     except OSError as exc:
@@ -220,105 +213,33 @@ def _load_json(path: Path, source_format: EvidenceFormat, redact: bool) -> _Load
         raise EvidenceIngestError(f"invalid evidence JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise EvidenceIngestError("evidence root must be an object")
+    active_policy = redaction_policy or default_redaction_policy()
     provenance = SourceProvenance(
         format=source_format,
         source_name=path.name,
         sha256=hashlib.sha256(raw).hexdigest(),
         size_bytes=len(raw),
         redaction_enabled=redact,
+        redaction_policy_id=active_policy.id,
+        redaction_policy_sha256=redaction_policy_sha256(active_policy),
     )
     return _LoadedSource(data=data, provenance=provenance)
 
 
-def _pointer_child(location: str, key: str) -> str:
-    escaped = key.replace("~", "~0").replace("/", "~1")
-    return f"{location}/{escaped}"
-
-
-def _placeholder(
-    kind: RedactionKind,
-    raw: str,
-    location: str,
-    records: list[RedactionRecord],
-) -> str:
-    if len(records) >= _MAX_RECORDS:
-        raise EvidenceIngestError(f"evidence exceeds {_MAX_RECORDS} redactions")
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    value = f"<redacted:{kind.value}:{digest[:12]}>"
-    records.append(RedactionRecord(kind=kind, location=location, digest=digest, placeholder=value))
-    return value
-
-
-def _redact_text(value: str, location: str, records: list[RedactionRecord]) -> str:
-    def assignment(match: re.Match[str]) -> str:
-        return match.group(1) + _placeholder(
-            RedactionKind.SECRET, match.group(2), location, records
+def _apply_privacy_policy(
+    traces: list[Trace],
+    provenance: SourceProvenance,
+    redaction_policy: RedactionPolicy | None,
+) -> RedactionOutcome:
+    try:
+        return apply_redaction_policy(
+            traces,
+            policy=redaction_policy,
+            redaction_enabled=provenance.redaction_enabled,
+            max_records=_MAX_RECORDS,
         )
-
-    def bearer(match: re.Match[str]) -> str:
-        return match.group(1) + _placeholder(
-            RedactionKind.SECRET, match.group(2), location, records
-        )
-
-    rendered = _ASSIGNMENT.sub(assignment, value)
-    rendered = _BEARER.sub(bearer, rendered)
-    for pattern in _TOKEN_PATTERNS:
-        rendered = pattern.sub(
-            lambda match: _placeholder(RedactionKind.SECRET, match.group(0), location, records),
-            rendered,
-        )
-    rendered = _EMAIL.sub(
-        lambda match: _placeholder(RedactionKind.EMAIL, match.group(0), location, records),
-        rendered,
-    )
-    return _PHONE.sub(
-        lambda match: _placeholder(RedactionKind.PHONE, match.group(0), location, records),
-        rendered,
-    )
-
-
-def _redact_value(value: Any, location: str, records: list[RedactionRecord]) -> Any:
-    if isinstance(value, str):
-        return _redact_text(value, location, records)
-    if isinstance(value, list):
-        return [
-            _redact_value(item, _pointer_child(location, str(index)), records)
-            for index, item in enumerate(value)
-        ]
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for index, (key, item) in enumerate(value.items()):
-            string_key = str(key)
-            key_record_location = f"{location}/<key:{index}>"
-            redacted_key = _redact_text(string_key, key_record_location, records)
-            if redacted_key in redacted:
-                raise EvidenceIngestError("redaction produced duplicate object keys")
-            item_location = _pointer_child(location, redacted_key)
-            redacted[redacted_key] = _redact_value(item, item_location, records)
-        return redacted
-    return value
-
-
-def _apply_redaction(
-    trace: Trace,
-    records: list[RedactionRecord],
-    *,
-    trace_index: int,
-) -> Trace:
-    copy = trace.model_copy(deep=True)
-    for event in copy.events:
-        prefix = f"/traces/{trace_index}/events/{event.sequence}"
-        event.context.metadata = cast(
-            dict[str, Any],
-            _redact_value(event.context.metadata, f"{prefix}/context/metadata", records),
-        )
-        event.attributes = cast(
-            dict[str, Any], _redact_value(event.attributes, f"{prefix}/attributes", records)
-        )
-        event.payload = cast(
-            dict[str, Any], _redact_value(event.payload, f"{prefix}/payload", records)
-        )
-    return Trace.model_validate(copy.model_dump())
+    except RedactionPolicyError as exc:
+        raise EvidenceIngestError(str(exc)) from exc
 
 
 def import_transcript_document(
@@ -326,6 +247,7 @@ def import_transcript_document(
     provenance: SourceProvenance,
     *,
     capsule_id: str | None = None,
+    redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize a validated canonical transcript into observable trace events."""
     selected_capsule = capsule_id or document.capsule_id
@@ -388,15 +310,17 @@ def import_transcript_document(
                 )
             )
 
-    trace = Trace(trace_id=document.id, events=events)
-    redactions: list[RedactionRecord] = []
-    if provenance.redaction_enabled:
-        trace = _apply_redaction(trace, redactions, trace_index=0)
+    outcome = _apply_privacy_policy(
+        [Trace(trace_id=document.id, events=events)],
+        provenance,
+        redaction_policy,
+    )
     return IngestionBundle(
         provenance=provenance,
-        traces=[trace],
+        traces=outcome.traces,
         corrections=corrections,
-        redactions=redactions,
+        redactions=outcome.records,
+        redaction_review=outcome.review,
     )
 
 
@@ -405,12 +329,18 @@ def ingest_transcript_file(
     *,
     capsule_id: str | None = None,
     redact: bool = True,
+    redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Load and normalize a canonical transcript JSON file."""
-    source = _load_json(path, EvidenceFormat.TRANSCRIPT_JSON, redact)
+    source = _load_json(path, EvidenceFormat.TRANSCRIPT_JSON, redact, redaction_policy)
     try:
         document = TranscriptDocument.model_validate(source.data)
-        return import_transcript_document(document, source.provenance, capsule_id=capsule_id)
+        return import_transcript_document(
+            document,
+            source.provenance,
+            capsule_id=capsule_id,
+            redaction_policy=redaction_policy,
+        )
     except ValueError as exc:
         if isinstance(exc, EvidenceIngestError):
             raise
@@ -724,6 +654,7 @@ def import_otlp_data(
     provenance: SourceProvenance,
     *,
     capsule_id: str = "unassigned",
+    redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize an OTLP/HTTP JSON trace export into one E2H trace per trace ID."""
     try:
@@ -734,13 +665,13 @@ def import_otlp_data(
         _trace_from_spans(trace_id, spans, capsule_id)
         for trace_id, spans in sorted(_parse_otlp(data).items())
     ]
-    redactions: list[RedactionRecord] = []
-    if provenance.redaction_enabled:
-        traces = [
-            _apply_redaction(trace, redactions, trace_index=index)
-            for index, trace in enumerate(traces)
-        ]
-    return IngestionBundle(provenance=provenance, traces=traces, redactions=redactions)
+    outcome = _apply_privacy_policy(traces, provenance, redaction_policy)
+    return IngestionBundle(
+        provenance=provenance,
+        traces=outcome.traces,
+        redactions=outcome.records,
+        redaction_review=outcome.review,
+    )
 
 
 def ingest_otlp_file(
@@ -748,11 +679,17 @@ def ingest_otlp_file(
     *,
     capsule_id: str = "unassigned",
     redact: bool = True,
+    redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Load and normalize an OTLP/HTTP JSON trace export."""
-    source = _load_json(path, EvidenceFormat.OTLP_JSON, redact)
+    source = _load_json(path, EvidenceFormat.OTLP_JSON, redact, redaction_policy)
     try:
-        return import_otlp_data(source.data, source.provenance, capsule_id=capsule_id)
+        return import_otlp_data(
+            source.data,
+            source.provenance,
+            capsule_id=capsule_id,
+            redaction_policy=redaction_policy,
+        )
     except ValueError as exc:
         if isinstance(exc, EvidenceIngestError):
             raise

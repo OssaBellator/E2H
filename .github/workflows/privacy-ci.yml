@@ -1,0 +1,89 @@
+name: Privacy policy CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.2"
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - name: Test repository with coverage
+        run: uv run pytest
+      - name: Validate redacted policy evidence
+        run: |
+          mkdir -p .e2h
+          uv run e2h ingest transcript examples/ingest/transcript.json \
+            --redaction-policy examples/ingest/redaction-policy.yaml \
+            --redaction-report .e2h/redaction-review.json \
+            --output .e2h/redaction-bundle.json \
+            --traces .e2h/redaction-trace.jsonl
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle = json.loads(Path(".e2h/redaction-bundle.json").read_text(encoding="utf-8"))
+          review = json.loads(Path(".e2h/redaction-review.json").read_text(encoding="utf-8"))
+          rendered = json.dumps(bundle)
+          rendered_review = json.dumps(review)
+          assert bundle["provenance"]["redaction_policy_id"] == "support-review"
+          assert bundle["provenance"]["redaction_policy_sha256"] == review["policy_sha256"]
+          assert bundle["redaction_review"] == review
+          assert review["redaction_enabled"] is True
+          assert review["counts_by_kind"] == {"email": 1, "secret": 1}
+          assert review["residual_findings"] == []
+          assert review["allow_value_count"] == 1
+          assert review["manual_review_recommended"] is True
+          assert "alex@example.com" not in rendered
+          assert "sk-example1234567890" not in rendered
+          assert "alex@example.com" not in rendered_review
+          assert "support@example.com" not in rendered_review
+          assert len(Path(".e2h/redaction-trace.jsonl").read_text().splitlines()) == 5
+          PY
+      - name: Validate review-only evidence
+        run: |
+          uv run e2h ingest transcript examples/ingest/transcript.json \
+            --no-redact \
+            --redaction-report .e2h/review-only.json \
+            --output .e2h/review-only-bundle.json
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle = json.loads(Path(".e2h/review-only-bundle.json").read_text(encoding="utf-8"))
+          review = json.loads(Path(".e2h/review-only.json").read_text(encoding="utf-8"))
+          assert bundle["redactions"] == []
+          assert review["redaction_enabled"] is False
+          assert review["total_redactions"] == 0
+          assert review["residual_findings"]
+          assert "redaction_disabled_review_only" in review["warnings"]
+          assert "alex@example.com" not in json.dumps(review)
+          PY
+      - uses: actions/upload-artifact@v6
+        with:
+          name: privacy-policy-python-${{ matrix.python-version }}
+          path: |
+            .e2h/redaction-bundle.json
+            .e2h/redaction-review.json
+            .e2h/redaction-trace.jsonl
+            .e2h/review-only-bundle.json
+            .e2h/review-only.json
+          if-no-files-found: error

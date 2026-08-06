@@ -1,0 +1,10 @@
+schema_version: "0.1"
+id: support-review
+redact_secrets: true
+redact_emails: true
+redact_phones: false
+custom_rules:
+  - id: customer-id
+    pattern: "\\bCUS-\\d{6}\\b"
+allow_values:
+  - support@example.com

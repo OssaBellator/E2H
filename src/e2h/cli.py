@@ -27,6 +27,11 @@ from e2h.loader import (
 )
 from e2h.models import TaskCapsule
 from e2h.openai_responses import ingest_openai_responses_file
+from e2h.privacy import (
+    RedactionPolicy,
+    RedactionPolicyError,
+    load_redaction_policy,
+)
 from e2h.runner import (
     CheckStatus,
     ExecutionBackend,
@@ -217,6 +222,7 @@ def _emit_ingestion(
     *,
     output: Path | None,
     traces: Path | None,
+    redaction_report: Path | None,
     json_stdout: bool,
 ) -> None:
     rendered = bundle.model_dump_json(indent=2) + "\n"
@@ -224,6 +230,11 @@ def _emit_ingestion(
         write_json_atomic(output, rendered)
     if traces is not None:
         write_traces_jsonl(traces, bundle.traces)
+    if redaction_report is not None and bundle.redaction_review is not None:
+        write_json_atomic(
+            redaction_report,
+            bundle.redaction_review.model_dump_json(indent=2) + "\n",
+        )
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
@@ -243,6 +254,15 @@ def _emit_ingestion(
         str(len(bundle.redactions)),
     )
     console.print(table)
+    review = bundle.redaction_review
+    privacy_table = Table(title="E2H privacy review")
+    privacy_table.add_column("Policy")
+    privacy_table.add_column("Residuals", justify="right")
+    privacy_table.add_row(
+        review.policy_id if review is not None else "-",
+        str(len(review.residual_findings) if review is not None else 0),
+    )
+    console.print(privacy_table)
 
 
 @ingest_app.command("transcript")
@@ -252,15 +272,38 @@ def ingest_transcript_command(
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
     traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
     redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    redaction_policy_path: Annotated[
+        Path | None,
+        typer.Option("--redaction-policy", exists=True, dir_okay=False),
+    ] = None,
+    redaction_report: Annotated[
+        Path | None, typer.Option("--redaction-report", dir_okay=False)
+    ] = None,
     json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
 ) -> None:
     """Import a canonical transcript JSON document."""
     try:
-        bundle = ingest_transcript_file(source, capsule_id=capsule_id, redact=redact)
-    except EvidenceIngestError as exc:
+        redaction_policy: RedactionPolicy | None = (
+            load_redaction_policy(redaction_policy_path)
+            if redaction_policy_path is not None
+            else None
+        )
+        bundle = ingest_transcript_file(
+            source,
+            capsule_id=capsule_id,
+            redact=redact,
+            redaction_policy=redaction_policy,
+        )
+    except (EvidenceIngestError, RedactionPolicyError) as exc:
         error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    _emit_ingestion(bundle, output=output, traces=traces, json_stdout=json_stdout)
+    _emit_ingestion(
+        bundle,
+        output=output,
+        traces=traces,
+        redaction_report=redaction_report,
+        json_stdout=json_stdout,
+    )
 
 
 @ingest_app.command("openai-responses")
@@ -270,19 +313,38 @@ def ingest_openai_responses_command(
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
     traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
     redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    redaction_policy_path: Annotated[
+        Path | None,
+        typer.Option("--redaction-policy", exists=True, dir_okay=False),
+    ] = None,
+    redaction_report: Annotated[
+        Path | None, typer.Option("--redaction-report", dir_okay=False)
+    ] = None,
     json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
 ) -> None:
     """Import an archived OpenAI Responses API export."""
     try:
+        redaction_policy: RedactionPolicy | None = (
+            load_redaction_policy(redaction_policy_path)
+            if redaction_policy_path is not None
+            else None
+        )
         bundle = ingest_openai_responses_file(
             source,
             capsule_id=capsule_id,
             redact=redact,
+            redaction_policy=redaction_policy,
         )
-    except EvidenceIngestError as exc:
+    except (EvidenceIngestError, RedactionPolicyError) as exc:
         error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    _emit_ingestion(bundle, output=output, traces=traces, json_stdout=json_stdout)
+    _emit_ingestion(
+        bundle,
+        output=output,
+        traces=traces,
+        redaction_report=redaction_report,
+        json_stdout=json_stdout,
+    )
 
 
 @ingest_app.command("otlp")
@@ -292,12 +354,35 @@ def ingest_otlp_command(
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
     traces: Annotated[Path | None, typer.Option("--traces", dir_okay=False)] = None,
     redact: Annotated[bool, typer.Option("--redact/--no-redact")] = True,
+    redaction_policy_path: Annotated[
+        Path | None,
+        typer.Option("--redaction-policy", exists=True, dir_okay=False),
+    ] = None,
+    redaction_report: Annotated[
+        Path | None, typer.Option("--redaction-report", dir_okay=False)
+    ] = None,
     json_stdout: Annotated[bool, typer.Option("--json", help="Write the bundle as JSON.")] = False,
 ) -> None:
     """Import an OTLP/HTTP JSON trace export."""
     try:
-        bundle = ingest_otlp_file(source, capsule_id=capsule_id, redact=redact)
-    except EvidenceIngestError as exc:
+        redaction_policy: RedactionPolicy | None = (
+            load_redaction_policy(redaction_policy_path)
+            if redaction_policy_path is not None
+            else None
+        )
+        bundle = ingest_otlp_file(
+            source,
+            capsule_id=capsule_id,
+            redact=redact,
+            redaction_policy=redaction_policy,
+        )
+    except (EvidenceIngestError, RedactionPolicyError) as exc:
         error_console.print(f"[red]Unable to ingest evidence:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    _emit_ingestion(bundle, output=output, traces=traces, json_stdout=json_stdout)
+    _emit_ingestion(
+        bundle,
+        output=output,
+        traces=traces,
+        redaction_report=redaction_report,
+        json_stdout=json_stdout,
+    )
