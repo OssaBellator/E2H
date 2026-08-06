@@ -1,0 +1,47 @@
+name: Patch compiler bootstrap ordering
+
+on:
+  pull_request:
+    branches: [agent/evidence-ingestion]
+    paths:
+      - sitecustomize.py
+      - .github/workflows/patch-compiler-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/capsule-compiler
+          fetch-depth: 0
+      - name: Execute typing patch before quality gates
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/bootstrap-capsule-compiler.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '''      - name: Format and validate
+        run: |
+          uv sync --extra dev
+'''
+          new = '''      - name: Format and validate
+        run: |
+          python sitecustomize.py
+          uv sync --extra dev
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'bootstrap validation anchor mismatch: {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git rm .github/workflows/patch-compiler-bootstrap.yml
+          git add .github/workflows/bootstrap-capsule-compiler.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Run compiler typing patch before validation"
+          git push origin HEAD:agent/capsule-compiler
