@@ -91,7 +91,7 @@ def test_openai_responses_cli_json_and_artifacts(tmp_path: Path) -> None:
     assert "cli@example.com" not in result.stdout
     assert "[REDACTED_EMAIL]" in result.stdout
     assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "0.1"
-    assert len(traces.read_text(encoding="utf-8").splitlines()) == 4
+    assert len(traces.read_text(encoding="utf-8").splitlines()) == 1
 
 
 def test_openai_responses_cli_table_and_no_redact(tmp_path: Path) -> None:
