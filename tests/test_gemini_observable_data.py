@@ -10,8 +10,9 @@ from e2h.ingest import EvidenceFormat, SourceProvenance
 from e2h.trace import TraceEventType
 
 
-def test_function_arguments_preserve_nested_data_fields() -> None:
+def test_function_arguments_and_results_preserve_nested_data_fields() -> None:
     args = {"data": {"customer_id": "CUS-123"}}
+    response = {"data": {"status": "active"}}
     document = GeminiGenerateContentDocument.model_validate(
         {
             "id": "gemini-data",
@@ -32,7 +33,14 @@ def test_function_arguments_preserve_nested_data_fields() -> None:
                                                 "name": "lookup_customer",
                                                 "args": args,
                                             }
-                                        }
+                                        },
+                                        {
+                                            "functionResponse": {
+                                                "id": "call-1",
+                                                "name": "lookup_customer",
+                                                "response": response,
+                                            }
+                                        },
                                     ],
                                 }
                             }
@@ -56,5 +64,11 @@ def test_function_arguments_preserve_nested_data_fields() -> None:
         for event in bundle.traces[0].events
         if event.event_type is TraceEventType.TOOL_CALLED
     )
+    completed = next(
+        event
+        for event in bundle.traces[0].events
+        if event.event_type is TraceEventType.TOOL_COMPLETED
+    )
 
     assert called.payload["args"] == args
+    assert completed.payload["response"] == response
