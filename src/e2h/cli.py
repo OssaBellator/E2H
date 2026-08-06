@@ -27,12 +27,14 @@ from e2h.loader import (
 )
 from e2h.models import TaskCapsule
 from e2h.runner import CheckStatus, RunnerError, RunStatus, run_capsule
+from e2h.snapshot_cli import snapshot_app
 from e2h.trace import write_json_atomic, write_traces_jsonl
 
 app = typer.Typer(no_args_is_help=True, help="Evidence-to-Harness replay tools.")
 experiment_app = typer.Typer(no_args_is_help=True, help="Run reproducible replay matrices.")
 ingest_app = typer.Typer(no_args_is_help=True, help="Normalize observable evidence.")
 app.add_typer(compiler_app, name="compile")
+app.add_typer(snapshot_app, name="snapshot")
 app.add_typer(experiment_app, name="experiment")
 app.add_typer(ingest_app, name="ingest")
 console = Console()
