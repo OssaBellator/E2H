@@ -18,9 +18,7 @@ def test_partition_contracts_are_available_from_package_root() -> None:
     assert DatasetPartitionError is partitions.DatasetPartitionError
     assert PartitionRole is partitions.PartitionRole
     assert SealedPredictionDocument is partitions.SealedPredictionDocument
-    assert dataset_partition_public_sha256 is (
-        partitions.dataset_partition_public_sha256
-    )
+    assert dataset_partition_public_sha256 is (partitions.dataset_partition_public_sha256)
     assert dspy_dataset_public_sha256 is partitions.dspy_dataset_public_sha256
     assert evaluate_sealed_predictions is partitions.evaluate_sealed_predictions
     assert export_dataset_partition is partitions.export_dataset_partition
