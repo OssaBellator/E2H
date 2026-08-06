@@ -14,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from e2h.models import TaskCapsule
 from e2h.runner import ExecutionBackend, RunResult, RunStatus, run_capsule
 from e2h.trace import Trace, trace_from_run_result
+from e2h.variants import HarnessVariant, variant_sha256
 
-_RESERVED_VARIANT_ENV = frozenset({"E2H_VARIANT_ID", "E2H_REPETITION"})
 _MAX_TRACE_ID_LENGTH = 256
 
 
@@ -39,28 +39,6 @@ def _matrix_run_id(experiment_id: str, variant_id: str, repetition: int) -> str:
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-class HarnessVariant(StrictModel):
-    """One harness configuration represented by deterministic environment overrides."""
-
-    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
-    env: dict[str, str] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("env")
-    @classmethod
-    def environment_must_be_process_safe(cls, value: dict[str, str]) -> dict[str, str]:
-        for key, item in value.items():
-            if not key or "=" in key or "\x00" in key:
-                raise ValueError(
-                    "environment keys must be non-empty and contain neither '=' nor NUL"
-                )
-            if key.upper() in _RESERVED_VARIANT_ENV:
-                raise ValueError("environment keys must not override reserved E2H slot identifiers")
-            if "\x00" in item:
-                raise ValueError("environment values must not contain NUL")
-        return value
 
 
 class ExperimentSpec(StrictModel):
@@ -94,6 +72,7 @@ class ExperimentRun(StrictModel):
 
     run_id: str
     variant_id: str
+    variant_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     repetition: int = Field(ge=0)
     trace_id: str
     result: RunResult
@@ -155,6 +134,7 @@ def _variant_capsule(
     injected = {
         **variant.env,
         "E2H_VARIANT_ID": variant.id,
+        "E2H_VARIANT_SHA256": variant_sha256(variant),
         "E2H_REPETITION": str(repetition),
     }
     for command in copy.success.commands:
@@ -192,6 +172,7 @@ def run_experiment(
     traces: list[Trace] = []
 
     for variant in spec.variants:
+        digest = variant_sha256(variant)
         for repetition in range(spec.repetitions):
             run_id = _matrix_run_id(spec.id, variant.id, repetition)
             result = run_capsule(
@@ -212,6 +193,7 @@ def run_experiment(
                 ExperimentRun(
                     run_id=run_id,
                     variant_id=variant.id,
+                    variant_sha256=digest,
                     repetition=repetition,
                     trace_id=trace.trace_id,
                     result=result,
