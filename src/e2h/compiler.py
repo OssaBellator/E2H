@@ -21,12 +21,20 @@ from e2h.models import (
     SuccessSpec,
     TaskCapsule,
 )
+from e2h.oracles import (
+    ORACLE_MUTATION_ENV,
+    OracleTemplate,
+    compile_oracle,
+    oracle_mutation_id,
+    oracle_mutation_operator,
+)
 from e2h.runner import RunResult, RunStatus, run_capsule
 from e2h.trace import TraceEvent, TraceEventType
 
 _MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 _MAX_MUTATIONS = 100
 _RESERVED_MUTATION_ENV = frozenset({"E2H_MUTATION_ID", "E2H_PROPOSAL_ID"})
+_RESERVED_CHECK_ENV = _RESERVED_MUTATION_ENV | {ORACLE_MUTATION_ENV}
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -105,6 +113,20 @@ class EnvironmentMutation(StrictModel):
         return value
 
 
+def _generated_oracle_mutations(
+    oracles: list[OracleTemplate],
+) -> list[EnvironmentMutation]:
+    return [
+        EnvironmentMutation(
+            id=oracle_mutation_id(oracle),
+            description=f"Mutate {oracle.kind} oracle {oracle.id}",
+            env={ORACLE_MUTATION_ENV: oracle_mutation_operator(oracle)},
+            check_ids=[oracle.id],
+        )
+        for oracle in oracles
+    ]
+
+
 class CompilerSpec(StrictModel):
     """Human-authored constraints for producing a reviewable capsule proposal."""
 
@@ -114,7 +136,9 @@ class CompilerSpec(StrictModel):
     initial_state: InitialState = Field(default_factory=InitialState)
     allowed_actions: AllowedActions = Field(default_factory=AllowedActions)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
-    checks: list[CommandCheck] = Field(min_length=1, max_length=1000)
+    checks: list[CommandCheck] = Field(default_factory=list, max_length=1000)
+    oracles: list[OracleTemplate] = Field(default_factory=list, max_length=100)
+    auto_mutate_oracles: bool = True
     mutations: list[EnvironmentMutation] = Field(default_factory=list, max_length=_MAX_MUTATIONS)
     allow_unredacted: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -122,26 +146,35 @@ class CompilerSpec(StrictModel):
     @model_validator(mode="after")
     def checks_and_mutations_must_be_consistent(self) -> CompilerSpec:
         _ensure_json(self.metadata, "compiler metadata")
-        check_ids = [check.id for check in self.checks]
+        compiled_oracles = [compile_oracle(oracle) for oracle in self.oracles]
+        check_ids = [check.id for check in self.checks] + [check.id for check in compiled_oracles]
+        if not check_ids:
+            raise ValueError("at least one command check or oracle is required")
         if len(check_ids) != len(set(check_ids)):
-            raise ValueError("command check ids must be unique")
-        mutation_ids = [mutation.id for mutation in self.mutations]
+            raise ValueError("check and oracle ids must be unique")
+        generated_mutations = (
+            _generated_oracle_mutations(self.oracles) if self.auto_mutate_oracles else []
+        )
+        all_mutations = [*self.mutations, *generated_mutations]
+        if len(all_mutations) > _MAX_MUTATIONS:
+            raise ValueError(f"combined mutations exceeds {_MAX_MUTATIONS}")
+        mutation_ids = [mutation.id for mutation in all_mutations]
         if len(mutation_ids) != len(set(mutation_ids)):
             raise ValueError("mutation ids must be unique")
         known = set(check_ids)
         for check in self.checks:
-            reserved = sorted(key for key in check.env if key.upper() in _RESERVED_MUTATION_ENV)
+            reserved = sorted(key for key in check.env if key.upper() in _RESERVED_CHECK_ENV)
             if reserved:
                 raise ValueError(
                     "command environments must not override reserved E2H mutation identifiers: "
                     + ", ".join(reserved)
                 )
-        for mutation in self.mutations:
+        for mutation in all_mutations:
             missing = sorted(set(mutation.check_ids) - known)
             if missing:
                 raise ValueError(f"mutation references unknown checks: {', '.join(missing)}")
-        if len(self.checks) > self.limits.max_commands:
-            raise ValueError("checks exceeds limits.max_commands")
+        if len(check_ids) > self.limits.max_commands:
+            raise ValueError("checks and oracles exceeds limits.max_commands")
         return self
 
 
@@ -406,6 +439,11 @@ def _select_goal(
 
 def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProposal:
     """Compile sanitized evidence and trusted check declarations into a draft proposal."""
+    compiled_checks = [*spec.checks, *(compile_oracle(oracle) for oracle in spec.oracles)]
+    compiled_mutations = [
+        *spec.mutations,
+        *(_generated_oracle_mutations(spec.oracles) if spec.auto_mutate_oracles else []),
+    ]
     if not bundle.provenance.redaction_enabled and not spec.allow_unredacted:
         raise CapsuleCompileError(
             "bundle is unredacted; set allow_unredacted only for an intentional trusted workflow"
@@ -420,6 +458,7 @@ def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProp
             "source_sha256": bundle.provenance.sha256,
             "source_format": bundle.provenance.format.value,
             "evidence": [reference.model_dump(mode="json") for reference in references],
+            "oracles": [oracle.model_dump(mode="json") for oracle in spec.oracles],
         },
     }
     capsule = TaskCapsule(
@@ -428,11 +467,11 @@ def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProp
         initial_state=spec.initial_state,
         allowed_actions=spec.allowed_actions,
         limits=spec.limits,
-        success=SuccessSpec(commands=spec.checks),
+        success=SuccessSpec(commands=compiled_checks),
         metadata=metadata,
     )
     warnings: list[str] = []
-    if not spec.mutations:
+    if not compiled_mutations:
         warnings.append("no mutation probes are declared; strong verification cannot pass")
     if not bundle.provenance.redaction_enabled:
         warnings.append("proposal was compiled from an explicitly allowed unredacted bundle")
@@ -443,7 +482,7 @@ def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProp
         provenance=bundle.provenance,
         bundle_sha256=source_digest,
         evidence=references,
-        mutations=spec.mutations,
+        mutations=compiled_mutations,
         warnings=warnings,
     )
     return CapsuleProposal(proposal_id=proposal_digest(core), core=core)

@@ -27,7 +27,7 @@
 - [x] Review-gated capsule proposals with immutable evidence provenance.
 - [x] Controlled environment mutation verification.
 - [x] Human approval/rejection and gated capsule materialization.
-- [ ] Richer file, JSON, and artifact oracle templates and mutation operators.
+- [x] Richer file, JSON, and artifact oracle templates and mutation operators.
 
 ## Milestone 3 — Controlled optimization
 

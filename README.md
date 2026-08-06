@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains four connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, and a review-gated **capsule compiler**.
+The repository now contains five connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, and declarative **file, JSON, and artifact oracles**.
 
 ## What works today
 
@@ -19,6 +19,8 @@ The repository now contains four connected vertical slices: deterministic **task
 - Immutable capsule proposals with evidence references and stable proposal IDs.
 - Controlled mutation verification plus human approval/rejection gates.
 - Capsule materialization only after matching review and verification evidence.
+- Declarative file, RFC 6901 JSON, and artifact digest/size oracle templates.
+- Automatic operator-specific oracle mutations for strong verification.
 - Atomic JSON reports and deterministic JSONL trace evidence.
 - CLI commands for validation, replay, experiments, and evidence ingestion.
 - Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
@@ -152,6 +154,14 @@ The compiler turns a sanitized ingestion bundle plus a human-authored compiler s
 Each proposal ID is the SHA-256 digest of its immutable core. Verification binds to that exact capsule and ordered mutation plan. A strong report requires the baseline capsule to pass and every declared controlled environment mutation to make the oracle fail. Human reviews are append-only, and the latest approval or rejection determines whether materialization is allowed.
 
 `e2h compile materialize` rejects stale or mismatched reports, weak verification, and unapproved proposals by default. Mutation verification executes the proposed commands, so it has the same security boundary as ordinary task capsule replay and should run in an external sandbox for untrusted workloads.
+
+## Declarative oracles
+
+Compiler specifications may declare `file`, `json`, and `artifact` oracles alongside command checks. Oracles are compiled into ordinary bounded `CommandCheck` entries that execute without shell interpolation, so materialized capsules remain compatible with the replay runner and trace model.
+
+File oracles support presence, absence, exact UTF-8 text, contained text, and SHA-256 checks. JSON oracles use RFC 6901 pointers with equality, presence, and absence modes. Artifact oracles enforce byte-size bounds and optional SHA-256 digests. All paths remain relative, reject parent traversal, and are resolved against the check working directory to prevent symlink escapes.
+
+By default, each oracle receives a generated mutation probe. Presence checks are inverted, JSON equality values are structurally changed, and content/artifact checks receive a digest mismatch. Strong verification therefore proves that the baseline passes and every declared oracle detects its operator-specific regression. Set `auto_mutate_oracles: false` only when mutations are supplied by another trusted workflow.
 
 ## Architecture direction
 

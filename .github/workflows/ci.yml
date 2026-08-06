@@ -79,6 +79,33 @@ jobs:
           --workspace .
           --output .e2h/compiled-run.json
       - run: >-
+          uv run e2h compile proposal
+          .e2h/transcript-bundle.json
+          examples/compile/oracles.yaml
+          --output .e2h/oracle-proposal.json
+      - run: >-
+          uv run e2h compile verify
+          .e2h/oracle-proposal.json
+          --workspace .
+          --output .e2h/oracle-verification.json
+          --require-strong
+      - run: >-
+          uv run e2h compile review
+          .e2h/oracle-proposal.json
+          --reviewer ci
+          --decision approve
+          --output .e2h/oracle-approved.json
+      - run: >-
+          uv run e2h compile materialize
+          .e2h/oracle-approved.json
+          .e2h/oracle-verification.json
+          --output .e2h/oracle-capsule.yaml
+      - run: >-
+          uv run e2h run
+          .e2h/oracle-capsule.yaml
+          --workspace .
+          --output .e2h/oracle-run.json
+      - run: >-
           uv run e2h ingest otlp examples/ingest/otlp.json
           --output .e2h/otlp-bundle.json
           --traces .e2h/otlp.jsonl
@@ -98,3 +125,8 @@ jobs:
             .e2h/compiler-approved.json
             .e2h/compiled-capsule.yaml
             .e2h/compiled-run.json
+            .e2h/oracle-proposal.json
+            .e2h/oracle-verification.json
+            .e2h/oracle-approved.json
+            .e2h/oracle-capsule.yaml
+            .e2h/oracle-run.json
