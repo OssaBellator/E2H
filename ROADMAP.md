@@ -12,7 +12,7 @@
 - [x] Multi-configuration variant × repetition replay matrix.
 - [x] Atomic JSON result and JSONL trace persistence baseline.
 - [x] Container sandbox adapter with filesystem, network, identity, and resource controls.
-- [ ] DuckDB/Parquet experiment store and query layer.
+- [x] DuckDB/Parquet experiment store and query layer.
 
 ## Milestone 2 — Evidence and capsule compiler
 

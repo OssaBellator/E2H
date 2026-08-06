@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains seven connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, and an optional **container sandbox backend**.
+The repository now contains eight connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, and a transactional **DuckDB/Parquet experiment store**.
 
 ## What works today
 
@@ -25,6 +25,8 @@ The repository now contains seven connected vertical slices: deterministic **tas
 - Snapshot verification, safe restoration, and portable compiler references.
 - Optional immutable-image container execution with filesystem, network, user, and resource controls.
 - Backend selection for direct replay, matrices, and compiler mutation verification.
+- Transactional DuckDB ingestion for run and replay-matrix result artifacts.
+- Stable analytical views and compressed Parquet export without retaining raw command output.
 - Atomic JSON reports and deterministic JSONL trace evidence.
 - CLI commands for validation, replay, experiments, and evidence ingestion.
 - Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
@@ -60,6 +62,10 @@ uv run e2h snapshot create examples .e2h/examples.e2hsnap \
 uv run e2h snapshot verify .e2h/examples.e2hsnap
 uv run e2h snapshot restore .e2h/examples.e2hsnap .e2h/restored-examples
 uv run e2h run examples/sandbox/capsule.yaml --backend container --workspace .
+uv run e2h store init .e2h/evidence.duckdb
+uv run e2h store ingest .e2h/evidence.duckdb .e2h/result.json .e2h/matrix.json
+uv run e2h store query .e2h/evidence.duckdb variants --json
+uv run e2h store export .e2h/evidence.duckdb .e2h/runs.parquet --view runs
 ```
 
 Run all checks:
@@ -191,6 +197,16 @@ The Docker adapter invokes the runtime directly as an argument vector—never th
 Each container run uses a private CID file. When the attached runtime process exceeds the command timeout, E2H terminates that client process and then force-removes the recorded container. Cleanup failures are promoted to infrastructure errors rather than hidden behind an ordinary timeout result.
 
 The Docker daemon, runtime binary, image registry, and host kernel remain trusted infrastructure. Do not allow untrusted capsule authors to choose the runtime binary or Docker socket. An immutable image reference prevents tag drift but does not establish that the image itself is safe; curate and scan permitted images separately.
+
+## Experiment store
+
+`e2h store ingest` transactionally normalizes standalone `RunResult` artifacts and complete replay-matrix `ExperimentResult` artifacts into DuckDB. Source artifacts are identified by their SHA-256 bytes, so re-ingesting an identical file is idempotent. A failed validation or multi-row insertion rolls back without leaving a partial source, run, check, or summary record.
+
+The normalized schema separates provenance sources, runs, per-check outcomes, and variant summaries. Stable query views expose runs, checks, failures, variants, capsule aggregates, and source provenance. Queries are bounded to 10,000 rows and selected from a fixed enum rather than accepting arbitrary SQL through the CLI.
+
+For privacy, the store does not retain command stdout or stderr. Check rows contain character lengths, SHA-256 digests, truncation flags, exit status, duration, working directory, and canonical argument JSON. Source provenance records only the artifact basename, content digest, kind, schema version, and ingestion time; absolute source paths are not stored.
+
+`e2h store export` uses DuckDB to write Zstandard-compressed Parquet for any stable view. This produces portable analytical datasets without requiring a separate Arrow dependency. The DuckDB file and Parquet outputs inherit the confidentiality of their source evidence and should be retained accordingly.
 
 ## Architecture direction
 

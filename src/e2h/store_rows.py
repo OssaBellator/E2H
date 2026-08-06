@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from e2h.experiment import ExperimentResult
 from e2h.runner import RunResult
-from e2h.store_models import ArtifactKind, MAX_ARTIFACT_BYTES
+from e2h.store_models import MAX_ARTIFACT_BYTES, ArtifactKind
 
 RunItem: TypeAlias = tuple[str | None, str | None, str | None, int | None, RunResult]
 RunRow: TypeAlias = tuple[Any, ...]

@@ -64,9 +64,7 @@ def _info(connection: duckdb.DuckDBPyConnection) -> StoreInfo:
         sources=_scalar_int(connection, "SELECT count(*) FROM sources"),
         runs=_scalar_int(connection, "SELECT count(*) FROM runs"),
         checks=_scalar_int(connection, "SELECT count(*) FROM checks"),
-        variant_summaries=_scalar_int(
-            connection, "SELECT count(*) FROM variant_summaries"
-        ),
+        variant_summaries=_scalar_int(connection, "SELECT count(*) FROM variant_summaries"),
     )
 
 
@@ -200,10 +198,7 @@ def query_store(
             return []
         columns = [str(item[0]) for item in cursor.description]
         return [
-            {
-                column: _normalize(value)
-                for column, value in zip(columns, row, strict=True)
-            }
+            {column: _normalize(value) for column, value in zip(columns, row, strict=True)}
             for row in cursor.fetchall()
         ]
     except duckdb.Error as exc:
@@ -234,8 +229,7 @@ def export_parquet(
     try:
         count = _scalar_int(connection, f"SELECT count(*) FROM ({sql} LIMIT {limit})")
         connection.execute(
-            f"COPY ({sql} LIMIT {limit}) TO '{escaped_output}' "
-            "(FORMAT PARQUET, COMPRESSION ZSTD)"
+            f"COPY ({sql} LIMIT {limit}) TO '{escaped_output}' (FORMAT PARQUET, COMPRESSION ZSTD)"
         )
         return count
     except duckdb.Error as exc:

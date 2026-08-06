@@ -23,9 +23,18 @@ from e2h.snapshot import (
     snapshot_reference,
     verify_snapshot,
 )
+from e2h.store import (
+    export_parquet,
+    ingest_artifact,
+    initialize_store,
+    query_store,
+    store_info,
+)
+from e2h.store_models import ArtifactKind, IngestResult, QueryView, StoreInfo
 from e2h.trace import Trace, TraceEvent, trace_from_run_result
 
 __all__ = [
+    "ArtifactKind",
     "ArtifactOracle",
     "CapsuleProposal",
     "CompilerSpec",
@@ -34,29 +43,37 @@ __all__ = [
     "ExperimentResult",
     "ExperimentSpec",
     "FileOracle",
+    "IngestResult",
     "IngestionBundle",
     "JsonOracle",
     "OracleEvaluation",
+    "QueryView",
     "RunResult",
     "SnapshotLimits",
     "SnapshotManifest",
     "SnapshotReference",
+    "StoreInfo",
     "TaskCapsule",
     "Trace",
     "TraceEvent",
     "VerificationReport",
     "compile_proposal",
     "create_snapshot",
+    "export_parquet",
+    "ingest_artifact",
     "ingest_otlp_file",
     "ingest_transcript_file",
+    "initialize_store",
     "materialize_capsule",
+    "query_store",
     "restore_snapshot",
     "review_proposal",
     "run_capsule",
     "run_experiment",
     "snapshot_reference",
+    "store_info",
     "trace_from_run_result",
     "verify_proposal",
     "verify_snapshot",
 ]
-__version__ = "0.7.0"
+__version__ = "0.8.0"

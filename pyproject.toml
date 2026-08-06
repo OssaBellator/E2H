@@ -4,14 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "e2h"
-version = "0.7.0"
+version = "0.8.0"
 description = "Evidence-to-Harness: reproducible task capsules and deterministic replay for AI harness improvement."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "E2H contributors" }]
 dependencies = [
+  "duckdb>=1.4,<2",
   "pydantic>=2.10,<3",
+  "pytz>=2024,<2027",
   "pyyaml>=6.0.2,<7",
   "typer>=0.16,<1",
 ]
