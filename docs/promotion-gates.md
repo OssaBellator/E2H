@@ -46,7 +46,7 @@ The committed one-example policy is only a reproducible fixture. Production poli
 - names the exact baseline variant as the rollback target
 - contains at least one observable trigger
 
-The resulting `PromotionReceipt` records the policy and proposal digests and embeds the rollback plan and its digest. Any change to the decision chain, target, locator, thresholds, or triggers invalidates the materialized artifacts.
+The resulting `PromotionReceipt` embeds the verified decision, records the policy and proposal digests, and embeds the rollback plan and its digest. Loading the receipt revalidates both chains. Any change to the decision, target, locator, thresholds, or triggers invalidates the materialized artifacts.
 
 ## Rollback records
 
