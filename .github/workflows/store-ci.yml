@@ -1,0 +1,115 @@
+name: Experiment Store CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - run: mkdir -p .e2h
+      - run: >-
+          uv run e2h run examples/smoke/capsule.yaml
+          --workspace .
+          --output .e2h/store-run.json
+      - run: >-
+          uv run e2h experiment run examples/matrix/experiment.yaml
+          --root .
+          --output .e2h/store-matrix.json
+          --require-all-pass
+      - run: uv run e2h store init .e2h/evidence.duckdb --json > .e2h/store-initial.json
+      - run: >-
+          uv run e2h store ingest .e2h/evidence.duckdb
+          .e2h/store-run.json
+          .e2h/store-matrix.json
+          --json
+          > .e2h/store-ingest.json
+      - run: >-
+          uv run e2h store ingest .e2h/evidence.duckdb
+          .e2h/store-run.json
+          --json
+          > .e2h/store-idempotent.json
+      - run: uv run e2h store query .e2h/evidence.duckdb runs --json > .e2h/store-runs.json
+      - run: uv run e2h store query .e2h/evidence.duckdb checks --json > .e2h/store-checks.json
+      - run: uv run e2h store query .e2h/evidence.duckdb failures --json > .e2h/store-failures.json
+      - run: uv run e2h store query .e2h/evidence.duckdb variants --json > .e2h/store-variants.json
+      - run: uv run e2h store query .e2h/evidence.duckdb capsules --json > .e2h/store-capsules.json
+      - run: uv run e2h store query .e2h/evidence.duckdb sources --json > .e2h/store-sources.json
+      - run: uv run e2h store info .e2h/evidence.duckdb --json > .e2h/store-info.json
+      - run: uv run e2h store export .e2h/evidence.duckdb .e2h/store-runs.parquet --view runs
+      - run: >-
+          uv run e2h store export .e2h/evidence.duckdb
+          .e2h/store-variants.parquet
+          --view variants
+      - name: Verify store and Parquet evidence
+        run: |
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+
+          ingestion = json.loads(Path(".e2h/store-ingest.json").read_text(encoding="utf-8"))
+          assert len(ingestion) == 2
+          assert all(item["inserted"] for item in ingestion)
+          repeated = json.loads(Path(".e2h/store-idempotent.json").read_text(encoding="utf-8"))
+          assert repeated[0]["inserted"] is False
+          info = json.loads(Path(".e2h/store-info.json").read_text(encoding="utf-8"))
+          assert info["sources"] == 2
+          assert info["runs"] == 5
+          assert info["checks"] >= 5
+          assert info["variant_summaries"] == 2
+          variants = json.loads(Path(".e2h/store-variants.json").read_text(encoding="utf-8"))
+          assert {item["variant_id"] for item in variants} == {"baseline", "candidate"}
+          with duckdb.connect(".e2h/evidence.duckdb", read_only=True) as connection:
+              columns = [
+                  row[1]
+                  for row in connection.execute("PRAGMA table_info('checks')").fetchall()
+              ]
+              assert "stdout" not in columns
+              assert "stderr" not in columns
+          with duckdb.connect() as connection:
+              run_count = connection.execute(
+                  "SELECT count(*) FROM read_parquet('.e2h/store-runs.parquet')"
+              ).fetchone()[0]
+              variant_count = connection.execute(
+                  "SELECT count(*) FROM read_parquet('.e2h/store-variants.parquet')"
+              ).fetchone()[0]
+          assert run_count == info["runs"]
+          assert variant_count == info["variant_summaries"]
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: experiment-store-python-${{ matrix.python-version }}
+          path: |
+            .e2h/evidence.duckdb
+            .e2h/store-run.json
+            .e2h/store-matrix.json
+            .e2h/store-initial.json
+            .e2h/store-ingest.json
+            .e2h/store-idempotent.json
+            .e2h/store-runs.json
+            .e2h/store-checks.json
+            .e2h/store-failures.json
+            .e2h/store-variants.json
+            .e2h/store-capsules.json
+            .e2h/store-sources.json
+            .e2h/store-info.json
+            .e2h/store-runs.parquet
+            .e2h/store-variants.parquet
