@@ -93,5 +93,20 @@ replace_once(
         ),
 ''',
 )
+replace_once(
+    "tests/test_openai_responses.py",
+    '    assert "[REDACTED_EMAIL]" in rendered\n',
+    '    assert "<redacted:email:" in rendered\n',
+)
+replace_once(
+    "tests/test_openai_responses.py",
+    '    with pytest.raises(EvidenceIngestError, match="invalid JSON"):\n',
+    '    with pytest.raises(EvidenceIngestError, match="invalid evidence JSON"):\n',
+)
+replace_once(
+    "tests/test_openai_responses_cli.py",
+    '    assert "[REDACTED_EMAIL]" in result.stdout\n',
+    '    assert "<redacted:email:" in result.stdout\n',
+)
 
 Path(__file__).unlink()
