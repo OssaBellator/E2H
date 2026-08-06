@@ -1,0 +1,19 @@
+schema_version: "0.1"
+id: optimizer-example
+examples:
+  - id: baseline-task
+    inputs:
+      task: Verify the baseline harness.
+    outputs:
+      expected_status: passed
+    metadata:
+      source: example
+  - id: correction-task
+    inputs:
+      task: Preserve observable task constraints.
+    outputs:
+      expected_status: passed
+    metadata:
+      source: example
+metadata:
+  purpose: demonstrate stable dspy.Example payload export
