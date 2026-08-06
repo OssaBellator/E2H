@@ -60,9 +60,7 @@ def test_function_arguments_and_results_preserve_nested_data_fields() -> None:
 
     bundle = import_gemini_generate_content_document(document, provenance)
     called = next(
-        event
-        for event in bundle.traces[0].events
-        if event.event_type is TraceEventType.TOOL_CALLED
+        event for event in bundle.traces[0].events if event.event_type is TraceEventType.TOOL_CALLED
     )
     completed = next(
         event
