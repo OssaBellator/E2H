@@ -137,8 +137,14 @@ def test_decision_round_trip_recomputes_embedded_source_chain() -> None:
 def test_receipt_preserves_policy_and_proposal_digests() -> None:
     decision = evaluate_promotion(_policy(), _proposal())
     receipt = materialize_promotion(decision, _rollback(decision))
+    assert receipt.decision == decision
     assert receipt.policy_sha256 == decision.policy_sha256
     assert receipt.proposal_sha256 == decision.proposal_sha256
+
+    payload = receipt.model_dump(mode="json")
+    payload["policy_sha256"] = "5" * 64
+    with pytest.raises(ValidationError, match="policy does not match"):
+        type(receipt).model_validate(payload)
 
 
 def test_rollback_observation_window_is_recorded_and_verified() -> None:
