@@ -16,7 +16,6 @@ from e2h.genome import (
     GenomeError,
     HarnessGenome,
     apply_genome,
-    genome_sha256,
     load_genome,
     load_genome_application,
     materialize_application,
@@ -138,10 +137,5 @@ def materialize_genome_command(
         error_console.print(f"[red]Unable to materialize genome:[/red] {exc}")
         raise typer.Exit(code=2) from exc
     console.print(
-        f"Materialized {loaded.genome_id} ({genome_sha256(HarnessGenome.model_validate({
-            'schema_version': '0.1',
-            'id': loaded.genome_id,
-            'base_capsule_sha256': loaded.base_capsule_sha256,
-            'patches': [],
-        })) if False else loaded.genome_sha256}) to {output}"
+        f"Materialized {loaded.genome_id} ({loaded.genome_sha256}) to {output}"
     )
