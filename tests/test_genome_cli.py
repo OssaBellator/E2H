@@ -57,7 +57,8 @@ def write_genome(path: Path, capsule: TaskCapsule) -> HarnessGenome:
             ],
         }
     )
-    path.write_text(yaml.safe_dump(genome.model_dump(mode="json"), sort_keys=False), encoding="utf-8")
+    rendered = yaml.safe_dump(genome.model_dump(mode="json"), sort_keys=False)
+    path.write_text(rendered, encoding="utf-8")
     return genome
 
 
@@ -185,7 +186,8 @@ def test_cli_returns_two_for_invalid_genome_and_materialization(tmp_path: Path) 
         ],
     )
     assert result.exit_code == 2
-    assert "must use .json, .yaml, or .yml" in result.stderr
+    assert "materialized capsule must use" in result.stderr
+    assert ".json" in result.stderr
 
     tampered = json.loads(application_path.read_text(encoding="utf-8"))
     tampered["capsule"]["goal"] = "tampered"
