@@ -1,21 +1,31 @@
-"""One-use lint correction for the oracle prototype."""
+"""One-use lint and typing corrections for the oracle prototype."""
 
 from pathlib import Path
 
 path = Path("src/e2h/oracles.py")
 text = path.read_text(encoding="utf-8")
-old = '''        if self.min_bytes is not None and self.max_bytes is not None:
+replacements = (
+    (
+        '''        if self.min_bytes is not None and self.max_bytes is not None:
             if self.min_bytes > self.max_bytes:
                 raise ValueError("min_bytes must not exceed max_bytes")
-'''
-new = '''        if (
+''',
+        '''        if (
             self.min_bytes is not None
             and self.max_bytes is not None
             and self.min_bytes > self.max_bytes
         ):
             raise ValueError("min_bytes must not exceed max_bytes")
-'''
-if text.count(old) != 1:
-    raise RuntimeError("artifact bound lint anchor mismatch")
-path.write_text(text.replace(old, new, 1), encoding="utf-8")
+''',
+    ),
+    (
+        "ORACLE_ADAPTER = TypeAdapter(OracleTemplate)\n",
+        "ORACLE_ADAPTER: TypeAdapter[OracleTemplate] = TypeAdapter(OracleTemplate)\n",
+    ),
+)
+for old, new in replacements:
+    if text.count(old) != 1:
+        raise RuntimeError("oracle correction anchor mismatch")
+    text = text.replace(old, new, 1)
+path.write_text(text, encoding="utf-8")
 Path(__file__).unlink()
