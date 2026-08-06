@@ -4,6 +4,11 @@ on:
   push:
     branches: [agent/oracle-templates]
     paths: [.bootstrap/oracles-ready]
+  pull_request:
+    branches: [agent/capsule-compiler]
+    paths:
+      - .bootstrap/oracles-ready
+      - .github/workflows/bootstrap-oracles.yml
 
 permissions:
   contents: write
