@@ -6,10 +6,11 @@ import os
 import signal
 import subprocess
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Thread
 from time import monotonic, sleep
 from typing import BinaryIO
@@ -17,6 +18,7 @@ from typing import BinaryIO
 from pydantic import BaseModel, ConfigDict, Field
 
 from e2h.models import CommandCheck, TaskCapsule
+from e2h.sandbox import SandboxError, build_container_argv, force_remove_container
 
 _OUTPUT_MARKER = "\n... <output truncated> ...\n"
 _READ_CHUNK_BYTES = 64 * 1024
@@ -36,6 +38,14 @@ class RunStatus(StrEnum):
     PASSED = "passed"
     FAILED = "failed"
     ERROR = "error"
+
+
+class ExecutionBackend(StrEnum):
+    """Execution backend selected for capsule checks."""
+
+    AUTO = "auto"
+    LOCAL = "local"
+    CONTAINER = "container"
 
 
 class CommandResult(BaseModel):
@@ -172,16 +182,17 @@ def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=_READER_JOIN_SECONDS)
 
 
-def _execute_command(
-    check: CommandCheck,
+def _execute_process(
+    argv: list[str],
     cwd: Path,
+    env: dict[str, str],
     timeout: float,
     max_output_chars: int,
 ) -> _ProcessOutcome:
     process = subprocess.Popen(
-        check.argv,
+        argv,
         cwd=cwd,
-        env={**os.environ, **check.env},
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=os.name == "posix",
@@ -242,6 +253,58 @@ def _execute_command(
     )
 
 
+def _execute_local_command(
+    check: CommandCheck,
+    cwd: Path,
+    timeout: float,
+    max_output_chars: int,
+) -> _ProcessOutcome:
+    return _execute_process(
+        check.argv,
+        cwd,
+        {**os.environ, **check.env},
+        timeout,
+        max_output_chars,
+    )
+
+
+def _execute_container_command(
+    capsule: TaskCapsule,
+    check: CommandCheck,
+    workspace_root: Path,
+    relative_cwd: str,
+    timeout: float,
+    max_output_chars: int,
+    runtime_binary: str | None,
+) -> _ProcessOutcome:
+    if capsule.sandbox is None:
+        raise SandboxError("container execution requires capsule.sandbox")
+    runtime = runtime_binary or capsule.sandbox.engine
+    with TemporaryDirectory(prefix="e2h-container-") as temporary:
+        cidfile = Path(temporary) / "container.cid"
+        argv = build_container_argv(
+            capsule,
+            check,
+            workspace_root,
+            relative_cwd,
+            cidfile,
+            runtime_binary=runtime,
+        )
+        outcome = _execute_process(
+            argv,
+            workspace_root,
+            os.environ.copy(),
+            timeout,
+            max_output_chars,
+        )
+        if outcome.timed_out:
+            cleanup_error = force_remove_container(runtime, cidfile)
+            if cleanup_error is not None:
+                combined = "; ".join(item for item in (outcome.error, cleanup_error) if item)
+                outcome = replace(outcome, error=combined)
+        return outcome
+
+
 def _skipped(check: CommandCheck, cwd: str) -> CommandResult:
     return CommandResult(
         id=check.id,
@@ -253,7 +316,13 @@ def _skipped(check: CommandCheck, cwd: str) -> CommandResult:
     )
 
 
-def run_capsule(capsule: TaskCapsule, workspace: Path) -> RunResult:
+def run_capsule(
+    capsule: TaskCapsule,
+    workspace: Path,
+    *,
+    backend: ExecutionBackend = ExecutionBackend.AUTO,
+    container_runtime: str | None = None,
+) -> RunResult:
     """Execute all command checks in a capsule inside a bounded workspace."""
     started_at = datetime.now(UTC)
     started_clock = monotonic()
@@ -264,6 +333,16 @@ def run_capsule(capsule: TaskCapsule, workspace: Path) -> RunResult:
     task_root = _safe_child(workspace_root, capsule.initial_state.working_directory)
     if not task_root.is_dir():
         raise RunnerError(f"working directory does not exist: {task_root}")
+    try:
+        selected_backend = ExecutionBackend(backend)
+    except ValueError as exc:
+        raise RunnerError(f"unknown execution backend: {backend}") from exc
+    if selected_backend is ExecutionBackend.AUTO:
+        selected_backend = (
+            ExecutionBackend.CONTAINER if capsule.sandbox is not None else ExecutionBackend.LOCAL
+        )
+    if selected_backend is ExecutionBackend.CONTAINER and capsule.sandbox is None:
+        raise RunnerError("container backend requires capsule.sandbox")
 
     results: list[CommandResult] = []
     halt = False
@@ -293,13 +372,24 @@ def run_capsule(capsule: TaskCapsule, workspace: Path) -> RunResult:
         timeout = check.timeout_seconds or capsule.limits.default_timeout_seconds
         command_started = monotonic()
         try:
-            outcome = _execute_command(
-                check,
-                check_dir,
-                timeout,
-                capsule.limits.max_output_chars,
-            )
-        except OSError as exc:
+            if selected_backend is ExecutionBackend.CONTAINER:
+                outcome = _execute_container_command(
+                    capsule,
+                    check,
+                    workspace_root,
+                    relative_cwd,
+                    timeout,
+                    capsule.limits.max_output_chars,
+                    container_runtime,
+                )
+            else:
+                outcome = _execute_local_command(
+                    check,
+                    check_dir,
+                    timeout,
+                    capsule.limits.max_output_chars,
+                )
+        except (OSError, SandboxError) as exc:
             results.append(
                 CommandResult(
                     id=check.id,
@@ -317,6 +407,9 @@ def run_capsule(capsule: TaskCapsule, workspace: Path) -> RunResult:
         if outcome.timed_out:
             status = CheckStatus.TIMED_OUT
             error = f"command exceeded {timeout:g} seconds"
+            if outcome.error is not None:
+                error = f"{error}; {outcome.error}"
+                infrastructure_error = True
         elif outcome.error is not None:
             status = CheckStatus.ERROR
             error = f"unable to capture command output: {outcome.error}"

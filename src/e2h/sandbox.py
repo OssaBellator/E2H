@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
-from e2h.models import CommandCheck, ContainerSandbox, TaskCapsule
+from e2h.models import CommandCheck, TaskCapsule
 
 _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
@@ -40,8 +40,9 @@ def build_container_argv(
     if sandbox is None:
         raise SandboxError("container execution requires capsule.sandbox")
     runtime = runtime_binary or sandbox.engine
-    mount_mode = "readonly" if sandbox.workspace_access == "read_only" else "rw"
-    mount = f"type=bind,src={workspace_root},dst={_CONTAINER_ROOT},{mount_mode}"
+    mount = f"type=bind,src={workspace_root},dst={_CONTAINER_ROOT}"
+    if sandbox.workspace_access == "read_only":
+        mount += ",readonly"
     argv = [
         runtime,
         "run",
@@ -97,8 +98,7 @@ def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
         completed = subprocess.run(
             [runtime_binary, "rm", "-f", container_id],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=_CLEANUP_TIMEOUT_SECONDS,
             check=False,
         )

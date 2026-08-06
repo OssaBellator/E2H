@@ -23,7 +23,7 @@ from e2h.compiler import (
     review_proposal,
     verify_proposal,
 )
-from e2h.runner import RunnerError
+from e2h.runner import ExecutionBackend, RunnerError
 from e2h.trace import write_json_atomic
 
 compiler_app = typer.Typer(
@@ -127,10 +127,23 @@ def verify_proposal_command(
         bool,
         typer.Option("--require-strong", help="Return exit code 1 unless all gates pass."),
     ] = False,
+    backend: Annotated[
+        ExecutionBackend,
+        typer.Option("--backend", case_sensitive=False, help="Execution backend."),
+    ] = ExecutionBackend.AUTO,
+    container_runtime: Annotated[
+        str | None,
+        typer.Option("--container-runtime", help="Trusted Docker-compatible runtime binary."),
+    ] = None,
 ) -> None:
     """Run the baseline capsule and every declared mutation probe."""
     try:
-        report = verify_proposal(load_proposal(proposal_path), workspace)
+        report = verify_proposal(
+            load_proposal(proposal_path),
+            workspace,
+            backend=backend,
+            container_runtime=container_runtime,
+        )
         rendered = report.model_dump_json(indent=2) + "\n"
         _emit_json(rendered, output=output, json_stdout=json_stdout)
     except (CapsuleCompileError, RunnerError) as exc:

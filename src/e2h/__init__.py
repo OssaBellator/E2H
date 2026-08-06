@@ -11,9 +11,9 @@ from e2h.compiler import (
 )
 from e2h.experiment import ExperimentResult, ExperimentSpec, run_experiment
 from e2h.ingest import IngestionBundle, ingest_otlp_file, ingest_transcript_file
-from e2h.models import TaskCapsule
+from e2h.models import ContainerSandbox, TaskCapsule
 from e2h.oracles import ArtifactOracle, FileOracle, JsonOracle, OracleEvaluation
-from e2h.runner import RunResult, run_capsule
+from e2h.runner import ExecutionBackend, RunResult, run_capsule
 from e2h.snapshot import (
     SnapshotLimits,
     SnapshotManifest,
@@ -29,6 +29,8 @@ __all__ = [
     "ArtifactOracle",
     "CapsuleProposal",
     "CompilerSpec",
+    "ContainerSandbox",
+    "ExecutionBackend",
     "ExperimentResult",
     "ExperimentSpec",
     "FileOracle",
@@ -57,4 +59,4 @@ __all__ = [
     "verify_proposal",
     "verify_snapshot",
 ]
-__version__ = "0.6.0"
+__version__ = "0.7.0"

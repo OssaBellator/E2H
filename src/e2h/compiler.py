@@ -16,6 +16,7 @@ from e2h.ingest import IngestionBundle, SourceProvenance
 from e2h.models import (
     AllowedActions,
     CommandCheck,
+    ContainerSandbox,
     ExecutionLimits,
     InitialState,
     SuccessSpec,
@@ -28,7 +29,7 @@ from e2h.oracles import (
     oracle_mutation_id,
     oracle_mutation_operator,
 )
-from e2h.runner import RunResult, RunStatus, run_capsule
+from e2h.runner import ExecutionBackend, RunResult, RunStatus, run_capsule
 from e2h.snapshot import SnapshotReference
 from e2h.trace import TraceEvent, TraceEventType
 
@@ -137,6 +138,7 @@ class CompilerSpec(StrictModel):
     initial_state: InitialState = Field(default_factory=InitialState)
     allowed_actions: AllowedActions = Field(default_factory=AllowedActions)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
+    sandbox: ContainerSandbox | None = None
     checks: list[CommandCheck] = Field(default_factory=list, max_length=1000)
     oracles: list[OracleTemplate] = Field(default_factory=list, max_length=100)
     snapshots: list[SnapshotReference] = Field(default_factory=list, max_length=100)
@@ -473,6 +475,7 @@ def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProp
         initial_state=spec.initial_state,
         allowed_actions=spec.allowed_actions,
         limits=spec.limits,
+        sandbox=spec.sandbox,
         success=SuccessSpec(commands=compiled_checks),
         metadata=metadata,
     )
@@ -511,12 +514,28 @@ def _mutated_capsule(
     return capsule
 
 
-def verify_proposal(proposal: CapsuleProposal, workspace: Path) -> VerificationReport:
+def verify_proposal(
+    proposal: CapsuleProposal,
+    workspace: Path,
+    *,
+    backend: ExecutionBackend = ExecutionBackend.AUTO,
+    container_runtime: str | None = None,
+) -> VerificationReport:
     """Run the baseline capsule and ensure each controlled mutation is detected."""
-    baseline = run_capsule(proposal.core.capsule, workspace)
+    baseline = run_capsule(
+        proposal.core.capsule,
+        workspace,
+        backend=backend,
+        container_runtime=container_runtime,
+    )
     mutation_results: list[MutationResult] = []
     for mutation in proposal.core.mutations:
-        result = run_capsule(_mutated_capsule(proposal, mutation), workspace)
+        result = run_capsule(
+            _mutated_capsule(proposal, mutation),
+            workspace,
+            backend=backend,
+            container_runtime=container_runtime,
+        )
         mutation_results.append(
             MutationResult(
                 mutation_id=mutation.id,

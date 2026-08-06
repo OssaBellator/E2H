@@ -14,7 +14,7 @@ from e2h.models import (
     SuccessSpec,
     TaskCapsule,
 )
-from e2h.runner import CheckStatus, ExecutionBackend, RunStatus, RunnerError, run_capsule
+from e2h.runner import CheckStatus, ExecutionBackend, RunnerError, RunStatus, run_capsule
 from e2h.sandbox import build_container_argv, force_remove_container
 
 IMAGE = "python@sha256:" + "0" * 64
@@ -87,7 +87,7 @@ def test_builder_enforces_declared_boundaries(tmp_path: Path) -> None:
         runtime_binary="docker-test",
     )
     assert argv[:3] == ["docker-test", "run", "--rm"]
-    assert ["--network", "none"] == argv[argv.index("--network") : argv.index("--network") + 2]
+    assert argv[argv.index("--network") : argv.index("--network") + 2] == ["--network", "none"]
     assert "--read-only" in argv
     assert "type=bind" in argv[argv.index("--mount") + 1]
     assert "readonly" in argv[argv.index("--mount") + 1]
@@ -108,10 +108,12 @@ def test_builder_allows_explicit_network_and_workspace_write(tmp_path: Path) -> 
     )
     assert argv[argv.index("--network") + 1] == "bridge"
     assert argv[argv.index("--workdir") + 1] == "/workspace"
-    assert argv[argv.index("--mount") + 1].endswith(",rw")
+    assert "readonly" not in argv[argv.index("--mount") + 1]
 
 
-def test_auto_backend_runs_declared_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auto_backend_runs_declared_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     runtime, log = _fake_runtime(tmp_path)
     monkeypatch.setenv("FAKE_DOCKER_LOG", str(log))
     result = run_capsule(
@@ -141,9 +143,11 @@ def test_container_backend_requires_sandbox(tmp_path: Path) -> None:
     capsule = TaskCapsule(
         id="local-only",
         goal="Local check.",
-        success=SuccessSpec(commands=[CommandCheck(id="pass", argv=[sys.executable, "-c", "pass"])]),
+        success=SuccessSpec(
+            commands=[CommandCheck(id="pass", argv=[sys.executable, "-c", "pass"])]
+        ),
     )
-    with pytest.raises(RunnerError, match="requires capsule.sandbox"):
+    with pytest.raises(RunnerError, match=r"requires capsule\.sandbox"):
         run_capsule(capsule, tmp_path, backend=ExecutionBackend.CONTAINER)
 
 
@@ -169,4 +173,7 @@ def test_timeout_force_removes_container(tmp_path: Path, monkeypatch: pytest.Mon
 def test_cleanup_rejects_invalid_container_id(tmp_path: Path) -> None:
     cidfile = tmp_path / "cid"
     cidfile.write_text("not-a-container", encoding="utf-8")
-    assert force_remove_container("docker", cidfile) == "container runtime wrote an invalid container ID"
+    assert (
+        force_remove_container("docker", cidfile)
+        == "container runtime wrote an invalid container ID"
+    )
