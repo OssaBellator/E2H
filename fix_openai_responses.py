@@ -119,8 +119,9 @@ replace_once(
 
 def test_conflicting_function_call_metadata_is_rejected() -> None:
     data = export_document()
-    second_call = data["responses"][1]["input_items"][1]
+    second_call = dict(data["responses"][1]["input_items"][1])
     second_call["name"] = "different_tool"
+    data["responses"][1]["input_items"][1] = second_call
     document = OpenAIResponsesDocument.model_validate(data)
     with pytest.raises(EvidenceIngestError, match="conflicting provider metadata"):
         import_openai_responses_document(document, provenance())
