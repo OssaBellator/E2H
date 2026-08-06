@@ -37,21 +37,21 @@ Command arguments remain argument vectors; there is no shell-string patch. Worki
 ## CLI flow
 
 ```bash
-e2h-genome validate examples/genome/candidate.yaml examples/genome/base.yaml
+e2h genome validate examples/genome/candidate.yaml examples/genome/base.yaml
 
-e2h-genome apply \
+e2h genome apply \
   examples/genome/candidate.yaml \
   examples/genome/base.yaml \
   --output .e2h/genome-application.json
 
-e2h-genome materialize \
+e2h genome materialize \
   .e2h/genome-application.json \
   --output .e2h/candidate-capsule.yaml
 
 e2h run .e2h/candidate-capsule.yaml --workspace .
 ```
 
-`e2h-genome schema` emits the complete JSON Schema for optimizer and editor integrations.
+`e2h genome schema` emits the complete JSON Schema for optimizer and editor integrations. The focused `e2h-genome` entry point exposes the same four subcommands for integrations that need only the genome surface.
 
 ## Optimization boundary
 
