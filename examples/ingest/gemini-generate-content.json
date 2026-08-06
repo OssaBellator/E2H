@@ -1,0 +1,164 @@
+{
+  "schema_version": "0.1",
+  "id": "gemini-support-demo",
+  "capsule_id": "support-regression",
+  "metadata": {
+    "source": "archived-api-export"
+  },
+  "records": [
+    {
+      "timestamp": "2026-08-06T08:00:00Z",
+      "request_id": "req_gemini_1",
+      "model": "gemini-2.5-pro",
+      "system_instruction": {
+        "id": "system_1",
+        "role": "system",
+        "parts": [
+          {
+            "text": "Never reveal sk-example1234567890"
+          }
+        ]
+      },
+      "contents": [
+        {
+          "id": "user_1",
+          "role": "user",
+          "parts": [
+            {
+              "text": "Look up demo@example.com"
+            }
+          ]
+        }
+      ],
+      "candidate_ids": [
+        "model_1"
+      ],
+      "response": {
+        "responseId": "response_1",
+        "modelVersion": "gemini-2.5-pro-001",
+        "candidates": [
+          {
+            "index": 0,
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "thought": true,
+                  "text": "private reasoning must never enter evidence",
+                  "thoughtSignature": "opaque-thought-signature"
+                },
+                {
+                  "functionCall": {
+                    "id": "call_1",
+                    "name": "lookup_customer",
+                    "args": {
+                      "email": "demo@example.com"
+                    }
+                  }
+                }
+              ]
+            },
+            "finishReason": "STOP",
+            "tokenCount": 9
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 18,
+          "candidatesTokenCount": 9,
+          "thoughtsTokenCount": 3,
+          "totalTokenCount": 30
+        }
+      }
+    },
+    {
+      "timestamp": "2026-08-06T08:00:01Z",
+      "request_id": "req_gemini_2",
+      "model": "gemini-2.5-pro",
+      "contents": [
+        {
+          "id": "user_1",
+          "role": "user",
+          "parts": [
+            {
+              "text": "Look up demo@example.com"
+            }
+          ]
+        },
+        {
+          "id": "model_1",
+          "role": "model",
+          "parts": [
+            {
+              "thought": true,
+              "text": "private reasoning must never enter evidence",
+              "thoughtSignature": "opaque-thought-signature"
+            },
+            {
+              "functionCall": {
+                "id": "call_1",
+                "name": "lookup_customer",
+                "args": {
+                  "email": "demo@example.com"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "user_2",
+          "role": "user",
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "call_1",
+                "name": "lookup_customer",
+                "response": {
+                  "phone": "+61 412 345 678"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "candidate_ids": [
+        "model_2"
+      ],
+      "response": {
+        "responseId": "response_2",
+        "modelVersion": "gemini-2.5-pro-001",
+        "candidates": [
+          {
+            "index": 0,
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "Customer located."
+                },
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "raw-image-bytes-must-not-be-retained"
+                  }
+                }
+              ]
+            },
+            "finishReason": "STOP",
+            "tokenCount": 5,
+            "groundingMetadata": {
+              "webSearchQueries": [
+                "customer lookup"
+              ]
+            }
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 31,
+          "candidatesTokenCount": 5,
+          "toolUsePromptTokenCount": 7,
+          "totalTokenCount": 43
+        }
+      }
+    }
+  ]
+}

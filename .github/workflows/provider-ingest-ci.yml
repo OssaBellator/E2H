@@ -82,6 +82,51 @@ jobs:
           assert "opaque-thinking-signature" not in rendered
           assert len(Path(".e2h/anthropic-trace.jsonl").read_text().splitlines()) == 12
           PY
+      - name: Validate Gemini GenerateContent evidence
+        run: |
+          uv run e2h ingest gemini-generate-content examples/ingest/gemini-generate-content.json \
+            --output .e2h/gemini-bundle.json \
+            --traces .e2h/gemini-trace.jsonl \
+            --redaction-report .e2h/gemini-review.json
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle = json.loads(Path(".e2h/gemini-bundle.json").read_text(encoding="utf-8"))
+          review = json.loads(Path(".e2h/gemini-review.json").read_text(encoding="utf-8"))
+          rendered = json.dumps(bundle)
+          events = bundle["traces"][0]["events"]
+          event_types = [event["event_type"] for event in events]
+          assert bundle["provenance"]["format"] == "gemini-generate-content-json"
+          assert bundle["redaction_review"] == review
+          assert event_types.count("message.observed") == 5
+          assert event_types.count("tool.called") == 1
+          assert event_types.count("tool.completed") == 1
+          assert len([
+              event
+              for event in events
+              if event["attributes"].get("artifact_kind") == "gemini.candidate"
+          ]) == 2
+          completed = next(event for event in events if event["event_type"] == "tool.completed")
+          assert completed["attributes"]["linked_call"] is True
+          assert completed["attributes"]["tool_name"] == "lookup_customer"
+          thought = next(
+              event
+              for event in events
+              if event["attributes"].get("artifact_kind") == "gemini.thought_presence"
+          )
+          assert thought["payload"]["text_present"] is True
+          assert thought["payload"]["thought_signature_present"] is True
+          assert review["counts_by_kind"] == {"email": 2, "phone": 1, "secret": 1}
+          assert review["residual_findings"] == []
+          assert "demo@example.com" not in rendered
+          assert "+61 412 345 678" not in rendered
+          assert "sk-example1234567890" not in rendered
+          assert "private reasoning must never enter evidence" not in rendered
+          assert "opaque-thought-signature" not in rendered
+          assert "raw-image-bytes-must-not-be-retained" not in rendered
+          assert len(Path(".e2h/gemini-trace.jsonl").read_text().splitlines()) == 15
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: provider-ingest-python-${{ matrix.python-version }}
@@ -92,4 +137,7 @@ jobs:
             .e2h/anthropic-bundle.json
             .e2h/anthropic-trace.jsonl
             .e2h/anthropic-review.json
+            .e2h/gemini-bundle.json
+            .e2h/gemini-trace.jsonl
+            .e2h/gemini-review.json
           if-no-files-found: error

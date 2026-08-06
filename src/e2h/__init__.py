@@ -17,6 +17,13 @@ from e2h.compiler import (
     verify_proposal,
 )
 from e2h.experiment import ExperimentResult, ExperimentSpec, run_experiment
+from e2h.gemini_generate_content import (
+    GeminiContentRecord,
+    GeminiGenerateContentDocument,
+    GeminiGenerateContentRecord,
+    import_gemini_generate_content_document,
+    ingest_gemini_generate_content_file,
+)
 from e2h.ingest import IngestionBundle, ingest_otlp_file, ingest_transcript_file
 from e2h.models import ContainerSandbox, TaskCapsule
 from e2h.openai_responses import (
@@ -73,6 +80,9 @@ __all__ = [
     "ExperimentResult",
     "ExperimentSpec",
     "FileOracle",
+    "GeminiContentRecord",
+    "GeminiGenerateContentDocument",
+    "GeminiGenerateContentRecord",
     "IngestResult",
     "IngestionBundle",
     "JsonOracle",
@@ -101,9 +111,11 @@ __all__ = [
     "default_redaction_policy",
     "export_parquet",
     "import_anthropic_messages_document",
+    "import_gemini_generate_content_document",
     "import_openai_responses_document",
     "ingest_anthropic_messages_file",
     "ingest_artifact",
+    "ingest_gemini_generate_content_file",
     "ingest_openai_responses_file",
     "ingest_otlp_file",
     "ingest_transcript_file",
@@ -122,4 +134,4 @@ __all__ = [
     "verify_proposal",
     "verify_snapshot",
 ]
-__version__ = "0.11.0"
+__version__ = "0.12.0"

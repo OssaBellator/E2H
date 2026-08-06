@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "e2h"
-version = "0.11.0"
+version = "0.12.0"
 description = "Evidence-to-Harness: reproducible task capsules and deterministic replay for AI harness improvement."
 readme = "README.md"
 requires-python = ">=3.11"
