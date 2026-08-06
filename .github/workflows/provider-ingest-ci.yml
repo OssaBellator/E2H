@@ -1,0 +1,95 @@
+name: Provider ingestion CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  providers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.2"
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - name: Test repository with coverage
+        run: uv run pytest
+      - name: Validate OpenAI Responses evidence
+        run: |
+          mkdir -p .e2h
+          uv run e2h ingest openai-responses examples/ingest/openai-responses.json \
+            --output .e2h/openai-bundle.json \
+            --traces .e2h/openai-trace.jsonl \
+            --redaction-report .e2h/openai-review.json
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle = json.loads(Path(".e2h/openai-bundle.json").read_text(encoding="utf-8"))
+          review = json.loads(Path(".e2h/openai-review.json").read_text(encoding="utf-8"))
+          rendered = json.dumps(bundle)
+          events = bundle["traces"][0]["events"]
+          assert bundle["provenance"]["format"] == "openai-responses-json"
+          assert bundle["redaction_review"] == review
+          assert len([event for event in events if event["event_type"] == "tool.called"]) == 1
+          assert len([event for event in events if event["event_type"] == "tool.completed"]) == 1
+          assert "demo@example.com" not in rendered
+          assert "opaque-round-trip-data" not in rendered
+          assert review["residual_findings"] == []
+          PY
+      - name: Validate Anthropic Messages evidence
+        run: |
+          uv run e2h ingest anthropic-messages examples/ingest/anthropic-messages.json \
+            --output .e2h/anthropic-bundle.json \
+            --traces .e2h/anthropic-trace.jsonl \
+            --redaction-report .e2h/anthropic-review.json
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle = json.loads(Path(".e2h/anthropic-bundle.json").read_text(encoding="utf-8"))
+          review = json.loads(Path(".e2h/anthropic-review.json").read_text(encoding="utf-8"))
+          rendered = json.dumps(bundle)
+          events = bundle["traces"][0]["events"]
+          event_types = [event["event_type"] for event in events]
+          assert bundle["provenance"]["format"] == "anthropic-messages-json"
+          assert bundle["redaction_review"] == review
+          assert event_types.count("message.observed") == 5
+          assert event_types.count("tool.called") == 1
+          assert event_types.count("tool.completed") == 1
+          completed = next(event for event in events if event["event_type"] == "tool.completed")
+          assert completed["attributes"]["linked_call"] is True
+          assert completed["attributes"]["tool_name"] == "lookup_customer"
+          assert review["counts_by_kind"] == {"email": 2, "phone": 1, "secret": 1}
+          assert review["residual_findings"] == []
+          assert "demo@example.com" not in rendered
+          assert "+61 412 345 678" not in rendered
+          assert "sk-example1234567890" not in rendered
+          assert "private reasoning must never enter evidence" not in rendered
+          assert "opaque-thinking-signature" not in rendered
+          assert len(Path(".e2h/anthropic-trace.jsonl").read_text().splitlines()) == 12
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: provider-ingest-python-${{ matrix.python-version }}
+          path: |
+            .e2h/openai-bundle.json
+            .e2h/openai-trace.jsonl
+            .e2h/openai-review.json
+            .e2h/anthropic-bundle.json
+            .e2h/anthropic-trace.jsonl
+            .e2h/anthropic-review.json
+          if-no-files-found: error
