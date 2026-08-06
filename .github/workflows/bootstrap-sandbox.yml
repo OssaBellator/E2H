@@ -1,0 +1,127 @@
+name: Bootstrap container sandbox
+
+on:
+  push:
+    branches: [agent/container-sandbox]
+    paths: [.bootstrap/sandbox-ready]
+  pull_request:
+    branches: [agent/workspace-snapshots]
+    paths:
+      - .bootstrap/sandbox-ready
+      - .github/workflows/bootstrap-sandbox.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/container-sandbox
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Apply fail-closed integration patch
+        run: python bootstrap_sandbox.py
+      - name: Format and validate
+        run: |
+          uv sync --extra dev
+          uv run ruff check . --fix
+          uv run ruff format .
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy src
+          uv run pytest
+          mkdir -p .e2h
+          cat > .e2h/fake-docker <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          args = sys.argv[1:]
+          log = Path(os.environ["FAKE_DOCKER_LOG"])
+          with log.open("a", encoding="utf-8") as handle:
+              handle.write(json.dumps(args) + "\n")
+          if args and args[0] == "rm":
+              raise SystemExit(0)
+          if "--cidfile" in args:
+              Path(args[args.index("--cidfile") + 1]).write_text("a" * 64, encoding="utf-8")
+          env_values = [args[index + 1] for index, item in enumerate(args[:-1]) if item == "--env"]
+          if "MODE=bad" in env_values:
+              raise SystemExit(7)
+          print("sandbox-ok")
+          PY
+          chmod +x .e2h/fake-docker
+          export FAKE_DOCKER_LOG="$PWD/.e2h/fake-docker.jsonl"
+          uv run e2h validate examples/sandbox/capsule.yaml
+          uv run e2h run examples/sandbox/capsule.yaml --workspace . --backend container --container-runtime "$PWD/.e2h/fake-docker" --output .e2h/sandbox-run.json
+          cat > .e2h/sandbox-experiment.yaml <<'YAML'
+          schema_version: "0.1"
+          id: sandbox-matrix
+          capsule: examples/sandbox/capsule.yaml
+          workspace: .
+          repetitions: 2
+          variants:
+            - id: baseline
+            - id: profiled
+              env:
+                HARNESS_PROFILE: profiled
+          YAML
+          uv run e2h experiment run .e2h/sandbox-experiment.yaml --root . --backend container --container-runtime "$PWD/.e2h/fake-docker" --output .e2h/sandbox-matrix.json --require-all-pass
+          uv run e2h ingest transcript examples/ingest/transcript.json --output .e2h/sandbox-bundle.json
+          cat > .e2h/sandbox-spec.yaml <<'YAML'
+          schema_version: "0.1"
+          id: sandbox-compiled
+          goal:
+            strategy: explicit
+            text: Verify a mutation inside the declared container sandbox.
+          sandbox:
+            image: "python@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            workspace_access: read_only
+          checks:
+            - id: contract
+              argv: [python, -c, "print('ok')"]
+          mutations:
+            - id: break-mode
+              env:
+                MODE: bad
+              check_ids: [contract]
+          YAML
+          uv run e2h compile proposal .e2h/sandbox-bundle.json .e2h/sandbox-spec.yaml --output .e2h/sandbox-proposal.json
+          uv run e2h compile verify .e2h/sandbox-proposal.json --workspace . --backend container --container-runtime "$PWD/.e2h/fake-docker" --output .e2h/sandbox-verification.json --require-strong
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          records = [json.loads(line) for line in Path(".e2h/fake-docker.jsonl").read_text(encoding="utf-8").splitlines()]
+          runs = [record for record in records if record and record[0] == "run"]
+          assert len(runs) >= 7
+          for args in runs:
+              assert args[args.index("--network") + 1] == "none"
+              assert "--read-only" in args
+              assert args[args.index("--cap-drop") + 1] == "ALL"
+              assert args[args.index("--user") + 1] == "65532:65532"
+              assert "readonly" in args[args.index("--mount") + 1]
+              assert "python@sha256:" + "0" * 64 in args
+          assert any("HARNESS_PROFILE=profiled" in args for args in runs)
+          assert any("MODE=bad" in args for args in runs)
+          PY
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .bootstrap/sandbox-ready
+          rm -rf .e2h
+          git add .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add container sandbox backend"
+          git push origin HEAD:agent/container-sandbox
