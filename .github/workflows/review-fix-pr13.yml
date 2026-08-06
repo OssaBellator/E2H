@@ -1,0 +1,89 @@
+name: Apply PR 13 review fixes
+
+on:
+  push:
+    branches: ["agent/redaction-policies"]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.2"
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Apply reviewed privacy fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("src/e2h/privacy.py")
+          source = source_path.read_text(encoding="utf-8")
+          old_redact = '''            redacted[redacted_key] = _redact_value(
+                item,
+                _pointer_child(location, redacted_key),
+                records,
+                policy,
+                custom_patterns,
+                allowed,
+            )'''
+          new_redact = '''            redacted[redacted_key] = _redact_value(
+                item,
+                f"{location}/<value:{index}>",
+                records,
+                policy,
+                custom_patterns,
+                allowed,
+            )'''
+          old_scan = '''            yield f"{location}/<key:{index}>", str(key)
+            yield from _iter_strings(item, _pointer_child(location, str(key)))'''
+          new_scan = '''            yield f"{location}/<key:{index}>", str(key)
+            yield from _iter_strings(item, f"{location}/<value:{index}>")'''
+          if source.count(old_redact) != 1 or source.count(old_scan) != 1:
+              raise SystemExit("privacy integration anchors changed")
+          source = source.replace(old_redact, new_redact).replace(old_scan, new_scan)
+          source_path.write_text(source, encoding="utf-8")
+
+          test_path = Path("tests/test_privacy.py")
+          tests = test_path.read_text(encoding="utf-8")
+          anchor = "\ndef test_disabled_redaction_produces_hashed_residual_review() -> None:\n"
+          addition = '''
+
+def test_review_locations_never_expose_raw_mapping_keys() -> None:
+    sensitive_key = "allowed@example.com"
+    policy = RedactionPolicy(allow_values=[sensitive_key])
+    outcome = apply_redaction_policy(
+        [trace_with_payload({sensitive_key: "password=supersecret123"})],
+        policy=policy,
+    )
+    report = outcome.review.model_dump_json()
+    records = json.dumps([record.model_dump(mode="json") for record in outcome.records])
+    assert sensitive_key not in report
+    assert sensitive_key not in records
+    assert all("<value:" in record.location for record in outcome.records)
+'''
+          if anchor not in tests or "test_review_locations_never_expose_raw_mapping_keys" in tests:
+              raise SystemExit("privacy test integration anchor changed")
+          test_path.write_text(tests.replace(anchor, addition + anchor), encoding="utf-8")
+          Path(".github/workflows/review-fix-pr13.yml").unlink()
+          PY
+      - run: uv sync --extra dev
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest tests/test_privacy.py tests/test_privacy_ingest.py tests/test_privacy_cli.py
+      - name: Commit reviewed fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: keep privacy report locations non-reversible"
+          git push
