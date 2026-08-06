@@ -427,9 +427,7 @@ def load_genome(path: Path) -> HarnessGenome:
 def load_genome_application(path: Path) -> GenomeApplication:
     """Load and verify a prior genome application document."""
     try:
-        return GenomeApplication.model_validate(
-            _read_document(path, noun="genome application")
-        )
+        return GenomeApplication.model_validate(_read_document(path, noun="genome application"))
     except ValueError as exc:
         if isinstance(exc, GenomeError):
             raise
