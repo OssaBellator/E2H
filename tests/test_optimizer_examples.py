@@ -40,6 +40,6 @@ def test_committed_optimizer_examples_are_digest_bound() -> None:
     assert result.variant.workflow == variant.variant.workflow
 
     exported = dspy_dataset_payload(dataset)
-    assert len(exported) == 2
+    assert len(exported) == 3
     assert exported[0].input_fields == ["task"]
     assert exported[0].values["expected_status"] == "passed"

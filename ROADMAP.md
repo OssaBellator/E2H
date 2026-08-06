@@ -37,7 +37,7 @@
 - [x] Typed harness genome and patch language.
 - [x] Prompt, tool, context, routing, and workflow variant types.
 - [x] DSPy/GEPA optimizer adapters.
-- Train/validation/sealed-test partitions.
+- [x] Train/validation/sealed-test partitions.
 - Statistical promotion gates and rollback metadata.
 
 ## Milestone 4 — Frontier integrations

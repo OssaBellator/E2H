@@ -31,6 +31,7 @@ dev = [
 e2h = "e2h.main_cli:app"
 e2h-genome = "e2h.genome_cli:genome_app"
 e2h-optimizer = "e2h.optimizer_cli:optimizer_app"
+e2h-partition = "e2h.partition_cli:partition_app"
 e2h-variant = "e2h.variant_cli:variant_app"
 
 [tool.hatch.build.targets.wheel]
