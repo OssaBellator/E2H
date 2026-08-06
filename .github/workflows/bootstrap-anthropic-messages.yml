@@ -29,7 +29,9 @@ jobs:
         with:
           python-version: "3.13"
       - name: Apply fail-closed integration patch
-        run: python bootstrap_anthropic_messages.py
+        run: |
+          python bootstrap_anthropic_messages.py
+          python fix_anthropic_validation.py
       - name: Sync dependencies
         run: uv sync --extra dev
       - name: Lint and format
