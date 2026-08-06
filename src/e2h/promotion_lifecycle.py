@@ -154,6 +154,7 @@ class PromotionReceipt(StrictModel):
 
     schema_version: Literal["0.1"] = "0.1"
     promotion_decision_sha256: str = Field(pattern=_SHA256_PATTERN)
+    decision: PromotionDecision
     policy_id: str = Field(pattern=_ID_PATTERN)
     policy_sha256: str = Field(pattern=_SHA256_PATTERN)
     proposal_id: str = Field(pattern=_ID_PATTERN)
@@ -166,7 +167,29 @@ class PromotionReceipt(StrictModel):
     rollback: RollbackPlan
 
     @model_validator(mode="after")
-    def embedded_plan_must_match(self) -> PromotionReceipt:
+    def embedded_artifacts_must_match(self) -> PromotionReceipt:
+        if self.promotion_decision_sha256 != promotion_decision_sha256(self.decision):
+            raise ValueError("promotion receipt decision digest does not match embedded decision")
+        if (
+            self.policy_id != self.decision.policy_id
+            or self.policy_sha256 != self.decision.policy_sha256
+        ):
+            raise ValueError("promotion receipt policy does not match embedded decision")
+        if (
+            self.proposal_id != self.decision.proposal_id
+            or self.proposal_sha256 != self.decision.proposal_sha256
+        ):
+            raise ValueError("promotion receipt proposal does not match embedded decision")
+        if (
+            self.active_variant_id != self.decision.candidate_variant_id
+            or self.active_variant_sha256 != self.decision.candidate_variant_sha256
+        ):
+            raise ValueError("promotion receipt active variant does not match embedded decision")
+        if (
+            self.previous_variant_id != self.decision.baseline_variant_id
+            or self.previous_variant_sha256 != self.decision.baseline_variant_sha256
+        ):
+            raise ValueError("promotion receipt previous variant does not match embedded decision")
         if self.rollback_plan_sha256 != rollback_plan_sha256(self.rollback):
             raise ValueError("promotion receipt rollback digest does not match embedded plan")
         if self.rollback.promotion_decision_sha256 != self.promotion_decision_sha256:
