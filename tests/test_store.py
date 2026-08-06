@@ -135,14 +135,15 @@ def test_standalone_run_ingestion_is_idempotent(tmp_path: Path) -> None:
     second = ingest_artifact(database, artifact)
 
     assert first.inserted is True
-    assert (first.runs, first.checks, first.summaries) == (1, 1, 0)
+    assert (first.runs, first.checks, first.summaries, first.failures) == (1, 1, 0, 0)
     assert second.inserted is False
     assert store_info(database).model_dump() == {
-        "schema_version": "1",
+        "schema_version": "2",
         "sources": 1,
         "runs": 1,
         "checks": 1,
         "variant_summaries": 0,
+        "failure_records": 0,
     }
     rows = query_store(database, QueryView.RUNS)
     assert rows[0]["capsule_id"] == "standalone"
@@ -155,7 +156,7 @@ def test_experiment_views_and_output_privacy(tmp_path: Path) -> None:
     artifact.write_text(experiment_result().model_dump_json(indent=2), encoding="utf-8")
 
     result = ingest_artifact(database, artifact, kind=ArtifactKind.EXPERIMENT)
-    assert (result.runs, result.checks, result.summaries) == (2, 2, 2)
+    assert (result.runs, result.checks, result.summaries, result.failures) == (2, 2, 2, 0)
 
     variants = query_store(database, QueryView.VARIANTS)
     assert [(row["variant_id"], row["pass_rate"]) for row in variants] == [
