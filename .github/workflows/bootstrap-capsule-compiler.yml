@@ -4,6 +4,11 @@ on:
   push:
     branches: [agent/capsule-compiler]
     paths: [.bootstrap/ready]
+  pull_request:
+    branches: [agent/evidence-ingestion]
+    paths:
+      - .bootstrap/ready
+      - .github/workflows/bootstrap-capsule-compiler.yml
 
 permissions:
   contents: write
