@@ -68,6 +68,10 @@ jobs:
               ],
               Path("src/e2h/optimizer_cli.py"): [
                   (
+                      "import typer\n",
+                      "import typer\nfrom pydantic import BaseModel\n",
+                  ),
+                  (
                       '    if hasattr(value, "model_dump"):\n'
                       '        payload = value.model_dump(mode="json")\n'
                       '    else:\n'
@@ -75,6 +79,10 @@ jobs:
                       '    payload = (\n'
                       '        value.model_dump(mode="json") if hasattr(value, "model_dump") else value\n'
                       '    )',
+                  ),
+                  (
+                      "    models = {\n",
+                      "    models: dict[str, type[BaseModel]] = {\n",
                   ),
               ],
               Path("tests/test_optimizer_adapters.py"): [
