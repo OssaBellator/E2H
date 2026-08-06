@@ -28,7 +28,9 @@ jobs:
         with:
           python-version: "3.13"
       - name: Apply fail-closed integration patch
-        run: python bootstrap_oracles.py
+        run: |
+          python bootstrap_oracles.py
+          python fix_oracles.py
       - name: Format and validate
         run: |
           uv sync --extra dev
