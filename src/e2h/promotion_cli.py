@@ -135,7 +135,7 @@ def rollback_command(
     observed_samples: Annotated[int, typer.Option("--samples", min=1)],
     event_id: Annotated[str, typer.Option("--event-id")],
     actor: Annotated[str, typer.Option("--actor")],
-    occurred_at: Annotated[datetime, typer.Option("--occurred-at")],
+    occurred_at: Annotated[str, typer.Option("--occurred-at")],
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
 ) -> None:
     """Record an auditable rollback event only when a declared trigger fires."""
@@ -147,9 +147,9 @@ def rollback_command(
             observed_value,
             observed_samples,
             actor,
-            occurred_at,
+            datetime.fromisoformat(occurred_at),
         )
-    except PromotionError as exc:
+    except ValueError as exc:
         error_console.print(f"[red]Invalid rollback event:[/red] {exc}")
         raise typer.Exit(code=2) from exc
     _write_or_echo(event, output)
