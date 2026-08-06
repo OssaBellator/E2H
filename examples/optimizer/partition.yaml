@@ -1,0 +1,12 @@
+schema_version: "0.1"
+id: optimizer-example-split
+dataset_sha256: 8609e6cb8e3dd4bbafa35687e129dd4bd9221860bfb90389680a477f4d095dd5
+public_dataset_sha256: 9fd91bc4ab83d87e6a7054aafb8c2d970d8850dffb0131b68a28bb789b123aea
+train:
+  - baseline-task
+validation:
+  - correction-task
+sealed_test:
+  - sealed-task
+metadata:
+  purpose: demonstrate train, validation, and sealed-test isolation
