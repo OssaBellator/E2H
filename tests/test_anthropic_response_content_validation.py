@@ -9,7 +9,7 @@ from e2h.anthropic_messages import AnthropicMessageRecord
 
 
 def test_response_content_string_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="response.content must be an array"):
+    with pytest.raises(ValidationError, match=r"response\.content must be an array"):
         AnthropicMessageRecord.model_validate(
             {
                 "timestamp": datetime(2026, 8, 6, 10, 0, tzinfo=UTC),
