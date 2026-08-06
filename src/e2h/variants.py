@@ -58,6 +58,12 @@ def _validate_text(value: str, *, noun: str) -> str:
     return value
 
 
+def _routing_matches_overlap(left: dict[str, str], right: dict[str, str]) -> bool:
+    """Return whether one metadata mapping could satisfy both match predicates."""
+    shared_keys = left.keys() & right.keys()
+    return all(left[key] == right[key] for key in shared_keys)
+
+
 class PromptMessage(StrictModel):
     """One ordered provider-neutral prompt message template."""
 
@@ -295,16 +301,18 @@ class RoutingVariant(StrictModel):
         rule_ids = [rule.id for rule in self.rules]
         if len(rule_ids) != len(set(rule_ids)):
             raise ValueError("routing rule ids must be unique")
-        signatures: set[tuple[int, tuple[tuple[str, str], ...]]] = set()
+        rules_by_priority: dict[int, list[RoutingRule]] = {}
         for rule in self.rules:
             if rule.target_id not in target_set:
                 raise ValueError(f"routing rule {rule.id} references an unknown target")
-            signature = (rule.priority, tuple(sorted(rule.match.items())))
-            if signature in signatures:
-                raise ValueError(
-                    "routing rules must not have duplicate priority and match criteria"
-                )
-            signatures.add(signature)
+            peers = rules_by_priority.setdefault(rule.priority, [])
+            for peer in peers:
+                if _routing_matches_overlap(peer.match, rule.match):
+                    raise ValueError(
+                        f"routing rules {peer.id} and {rule.id} overlap at priority "
+                        f"{rule.priority}"
+                    )
+            peers.append(rule)
         _validate_metadata(self.metadata, noun="routing variant")
         return self
 
@@ -407,7 +415,20 @@ class HarnessVariant(StrictModel):
         return value
 
     @model_validator(mode="after")
-    def metadata_must_be_bounded(self) -> HarnessVariant:
+    def variant_must_be_internally_consistent(self) -> HarnessVariant:
+        if self.workflow is not None:
+            available_dimensions = {
+                name
+                for name in ("prompt", "tools", "context", "routing")
+                if getattr(self, name) is not None
+            }
+            for stage in self.workflow.stages:
+                unavailable = sorted(set(stage.uses) - available_dimensions)
+                if unavailable:
+                    raise ValueError(
+                        f"workflow stage {stage.id} uses unavailable variant dimensions: "
+                        f"{', '.join(unavailable)}"
+                    )
         _validate_metadata(self.metadata, noun="harness variant")
         return self
 
