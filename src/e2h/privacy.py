@@ -383,6 +383,7 @@ def _redact_value(
         for index, (key, item) in enumerate(value.items()):
             string_key = str(key)
             key_location = f"{location}/<key:{index}>"
+            value_location = f"{location}/<value:{index}>"
             redacted_key = _redact_text(
                 string_key,
                 key_location,
@@ -395,7 +396,7 @@ def _redact_value(
                 raise RedactionPolicyError("redaction produced duplicate object keys")
             redacted[redacted_key] = _redact_value(
                 item,
-                _pointer_child(location, redacted_key),
+                value_location,
                 records,
                 policy,
                 custom_patterns,
@@ -462,7 +463,7 @@ def _iter_strings(value: Any, location: str) -> Iterator[tuple[str, str]]:
     elif isinstance(value, dict):
         for index, (key, item) in enumerate(value.items()):
             yield f"{location}/<key:{index}>", str(key)
-            yield from _iter_strings(item, _pointer_child(location, str(key)))
+            yield from _iter_strings(item, f"{location}/<value:{index}>")
 
 
 def _candidate_matches(
