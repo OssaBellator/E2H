@@ -13,6 +13,7 @@ from e2h.experiment import ExperimentResult
 from e2h.runner import RunResult
 from e2h.store_models import ArtifactKind, MAX_ARTIFACT_BYTES
 
+RunItem: TypeAlias = tuple[str | None, str | None, str | None, int | None, RunResult]
 RunRow: TypeAlias = tuple[Any, ...]
 CheckRow: TypeAlias = tuple[Any, ...]
 SummaryRow: TypeAlias = tuple[Any, ...]
@@ -74,6 +75,7 @@ def normalize_rows(
     artifact: RunResult | ExperimentResult,
 ) -> tuple[list[RunRow], list[CheckRow], list[SummaryRow]]:
     """Normalize a validated artifact into deterministic relational rows."""
+    run_items: list[RunItem]
     if kind == "run":
         if not isinstance(artifact, RunResult):
             raise ArtifactError("run artifact type does not match selected kind")
