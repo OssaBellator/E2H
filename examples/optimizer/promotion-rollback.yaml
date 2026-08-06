@@ -1,6 +1,6 @@
 schema_version: "0.1"
 id: optimizer-example-rollback
-promotion_decision_sha256: 1edcac46fdc35e0fb4ca195b13e0c1f039eae9be489c20a2b069bb66add4418b
+promotion_decision_sha256: 5f9bcc7354d0fc02aaf793e0b6eb4b5e82da0934d5333042cbe60b36b031d8e4
 active_variant_id: typed-candidate-gepa
 active_variant_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
 target_variant_id: typed-candidate
