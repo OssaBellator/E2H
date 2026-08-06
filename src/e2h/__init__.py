@@ -40,6 +40,17 @@ from e2h.gemini_generate_content import (
     import_gemini_generate_content_document,
     ingest_gemini_generate_content_file,
 )
+from e2h.genome import (
+    GenomeApplication,
+    GenomeError,
+    HarnessGenome,
+    apply_genome,
+    capsule_sha256,
+    genome_sha256,
+    load_genome,
+    load_genome_application,
+    materialize_application,
+)
 from e2h.ingest import IngestionBundle, ingest_otlp_file, ingest_transcript_file
 from e2h.models import ContainerSandbox, TaskCapsule
 from e2h.openai_responses import (
@@ -104,6 +115,9 @@ __all__ = [
     "GeminiContentRecord",
     "GeminiGenerateContentDocument",
     "GeminiGenerateContentRecord",
+    "GenomeApplication",
+    "GenomeError",
+    "HarnessGenome",
     "IngestResult",
     "IngestionBundle",
     "JsonOracle",
@@ -127,11 +141,14 @@ __all__ = [
     "Trace",
     "TraceEvent",
     "VerificationReport",
+    "apply_genome",
     "apply_redaction_policy",
+    "capsule_sha256",
     "compile_proposal",
     "create_snapshot",
     "default_redaction_policy",
     "export_parquet",
+    "genome_sha256",
     "import_anthropic_messages_document",
     "import_gemini_generate_content_document",
     "import_openai_responses_document",
@@ -143,7 +160,10 @@ __all__ = [
     "ingest_transcript_file",
     "initialize_store",
     "launch_failure",
+    "load_genome",
+    "load_genome_application",
     "load_redaction_policy",
+    "materialize_application",
     "materialize_capsule",
     "output_capture_failure",
     "query_store",
@@ -164,4 +184,4 @@ __all__ = [
     "verify_snapshot",
     "working_directory_failure",
 ]
-__version__ = "0.13.0"
+__version__ = "0.14.0"
