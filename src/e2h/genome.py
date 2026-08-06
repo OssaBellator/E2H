@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.models import TaskCapsule
+from e2h.models import CommandCheck, TaskCapsule
 
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_METADATA_BYTES = 65_536
@@ -278,7 +278,7 @@ def genome_sha256(genome: HarnessGenome) -> str:
     return hashlib.sha256(_canonical_json_bytes(genome.model_dump(mode="json"))).hexdigest()
 
 
-def _find_check(capsule: TaskCapsule, check_id: str):
+def _find_check(capsule: TaskCapsule, check_id: str) -> CommandCheck:
     for check in capsule.success.commands:
         if check.id == check_id:
             return check
