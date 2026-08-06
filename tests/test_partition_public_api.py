@@ -8,9 +8,9 @@ from e2h import (
     evaluate_sealed_predictions,
     export_dataset_partition,
     load_dataset_partitions,
+    partitions,
     verify_dataset_partitions,
 )
-from e2h import partitions
 
 
 def test_partition_contracts_are_available_from_package_root() -> None:
