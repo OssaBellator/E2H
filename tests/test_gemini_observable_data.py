@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from e2h.gemini_generate_content import (
+    GeminiContentRecord,
     GeminiGenerateContentDocument,
     import_gemini_generate_content_document,
 )
@@ -70,3 +73,31 @@ def test_function_arguments_and_results_preserve_nested_data_fields() -> None:
 
     assert called.payload["args"] == args
     assert completed.payload["response"] == response
+
+
+def test_part_rejects_multiple_observable_payload_fields() -> None:
+    with pytest.raises(ValueError, match="exactly one observable part field"):
+        GeminiContentRecord(
+            id="ambiguous-part",
+            role="user",
+            parts=[
+                {
+                    "text": "visible text",
+                    "functionCall": {
+                        "id": "call-1",
+                        "name": "lookup_customer",
+                        "args": {},
+                    },
+                }
+            ],
+        )
+
+
+def test_part_rejects_duplicate_snake_and_camel_aliases() -> None:
+    call = {"id": "call-1", "name": "lookup_customer", "args": {}}
+    with pytest.raises(ValueError, match="must not define both function_call and functionCall"):
+        GeminiContentRecord(
+            id="duplicate-aliases",
+            role="user",
+            parts=[{"function_call": call, "functionCall": call}],
+        )
