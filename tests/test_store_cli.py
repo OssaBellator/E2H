@@ -89,6 +89,36 @@ def test_store_cli_full_flow(tmp_path: Path) -> None:
     assert count == (1,)
 
 
+def test_store_cli_human_readable_tables(tmp_path: Path) -> None:
+    database = tmp_path / "evidence.duckdb"
+    artifact = tmp_path / "run.json"
+    write_run(artifact)
+
+    result = runner.invoke(app, ["store", "init", str(database)])
+    assert result.exit_code == 0, result.output
+    assert "Ready" in result.output
+
+    result = runner.invoke(app, ["store", "query", str(database), "runs"])
+    assert result.exit_code == 0, result.output
+    assert "No rows" in result.output
+
+    result = runner.invoke(
+        app,
+        ["store", "ingest", str(database), str(artifact)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "E2H store ingestion" in result.output
+    assert "yes" in result.output
+
+    result = runner.invoke(app, ["store", "query", str(database), "runs"])
+    assert result.exit_code == 0, result.output
+    assert "cli-capsule" in result.output
+
+    result = runner.invoke(app, ["store", "info", str(database)])
+    assert result.exit_code == 0, result.output
+    assert "variant_summaries" in result.output
+
+
 def test_store_cli_reports_invalid_artifact(tmp_path: Path) -> None:
     database = tmp_path / "evidence.duckdb"
     artifact = tmp_path / "bad.json"
@@ -99,3 +129,24 @@ def test_store_cli_reports_invalid_artifact(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "Unable to ingest artifact" in result.output
+
+
+def test_store_cli_reports_invalid_database(tmp_path: Path) -> None:
+    database = tmp_path / "invalid.duckdb"
+    database.write_text("not-a-database", encoding="utf-8")
+    output = tmp_path / "runs.parquet"
+
+    result = runner.invoke(app, ["store", "query", str(database), "runs"])
+    assert result.exit_code == 2
+    assert "Unable to query store" in result.output
+
+    result = runner.invoke(
+        app,
+        ["store", "export", str(database), str(output), "--view", "runs"],
+    )
+    assert result.exit_code == 2
+    assert "Unable to export store" in result.output
+
+    result = runner.invoke(app, ["store", "info", str(database)])
+    assert result.exit_code == 2
+    assert "Unable to inspect store" in result.output
