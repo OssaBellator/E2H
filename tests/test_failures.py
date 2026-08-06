@@ -147,6 +147,9 @@ def test_failure_details_must_be_bounded_json_without_raw_output() -> None:
         FailureRecord(**base, details={"value": ({"safe": True},)})
     with pytest.raises(ValidationError, match="canonical JSON"):
         FailureRecord(**base, details={"value": {1: "not a JSON object key"}})
+    for value in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValidationError, match="canonical JSON"):
+            FailureRecord(**base, details={"value": value})
     with pytest.raises(ValidationError, match="4096 bytes"):
         FailureRecord(**base, details={"value": "x" * 5000})
     for details in (
