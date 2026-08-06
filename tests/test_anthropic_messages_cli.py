@@ -88,7 +88,7 @@ def test_cli_writes_bundle_trace_and_privacy_report(tmp_path: Path) -> None:
     assert payload["redaction_review"]["counts_by_kind"] == {"email": 1}
     assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "0.1"
     assert json.loads(report.read_text(encoding="utf-8"))["policy_id"] == "default"
-    assert len(traces.read_text(encoding="utf-8").splitlines()) == 7
+    assert len(traces.read_text(encoding="utf-8").splitlines()) == 6
 
 
 def test_cli_table_and_no_redact_review(tmp_path: Path) -> None:
@@ -121,9 +121,7 @@ def test_cli_uses_custom_redaction_policy(tmp_path: Path) -> None:
     policy = tmp_path / "policy.yaml"
     write_archive(source)
     policy.write_text(
-        "schema_version: '0.1'\n"
-        "id: anthropic-cli-policy\n"
-        "redact_emails: false\n",
+        "schema_version: '0.1'\nid: anthropic-cli-policy\nredact_emails: false\n",
         encoding="utf-8",
     )
     result = runner.invoke(

@@ -86,7 +86,7 @@ def _provider_safe(value: Any, *, hidden_keys: frozenset[str] = frozenset()) -> 
         return {
             str(key): _provider_safe(item, hidden_keys=hidden_keys)
             for key, item in value.items()
-            if str(key) not in hidden_keys
+            if str(key) not in hidden_keys and str(key) != "encrypted_content"
         }
     return value
 
@@ -260,13 +260,13 @@ class AnthropicMessagesDocument(StrictModel):
         previous_timestamp: datetime | None = None
         provider_items = 0
         for record in self.records:
-            if previous_timestamp is not None and record.timestamp < previous_timestamp:
-                raise ValueError("record timestamps must be nondecreasing")
-            previous_timestamp = record.timestamp
             response_id = cast(str, record.response["id"])
             if response_id in response_ids:
                 raise ValueError("response ids must be unique")
             response_ids.add(response_id)
+            if previous_timestamp is not None and record.timestamp < previous_timestamp:
+                raise ValueError("record timestamps must be nondecreasing")
+            previous_timestamp = record.timestamp
             messages = list(record.messages)
             if record.system is not None:
                 system_signature = _observable_content_signature("system", record.system)
@@ -285,11 +285,6 @@ class AnthropicMessagesDocument(StrictModel):
                 )
             )
             for message in messages:
-                signature = _observable_content_signature(message.role, message.content)
-                existing = observable_messages.get(message.id)
-                if existing is not None and existing != signature:
-                    raise ValueError("message ids must retain identical observable content")
-                observable_messages[message.id] = signature
                 blocks = _content_list(message.content, "message.content")
                 provider_items += len(blocks)
                 for block in blocks:
@@ -319,6 +314,11 @@ class AnthropicMessagesDocument(StrictModel):
                     if existing_tool is not None and existing_tool != signature:
                         raise ValueError("tool use ids must retain identical definitions")
                     tool_uses[tool_id] = signature
+                message_signature = _observable_content_signature(message.role, message.content)
+                existing_message = observable_messages.get(message.id)
+                if existing_message is not None and existing_message != message_signature:
+                    raise ValueError("message ids must retain identical observable content")
+                observable_messages[message.id] = message_signature
                 if provider_items > _MAX_PROVIDER_ITEMS:
                     raise ValueError(f"document exceeds {_MAX_PROVIDER_ITEMS} provider items")
         return self
@@ -566,8 +566,7 @@ def _response_artifact(record: AnthropicMessageRecord) -> dict[str, Any]:
         "request_id": record.request_id,
         "record_metadata": record.metadata,
         "content_block_types": [
-            block.get("type")
-            for block in cast(list[dict[str, Any]], response["content"])
+            block.get("type") for block in cast(list[dict[str, Any]], response["content"])
         ],
     }
 

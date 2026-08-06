@@ -1,5 +1,12 @@
 """Evidence-to-Harness core package."""
 
+from e2h.anthropic_messages import (
+    AnthropicInputMessage,
+    AnthropicMessageRecord,
+    AnthropicMessagesDocument,
+    import_anthropic_messages_document,
+    ingest_anthropic_messages_file,
+)
 from e2h.compiler import (
     CapsuleProposal,
     CompilerSpec,
@@ -53,6 +60,9 @@ from e2h.store_models import ArtifactKind, IngestResult, QueryView, StoreInfo
 from e2h.trace import Trace, TraceEvent, trace_from_run_result
 
 __all__ = [
+    "AnthropicInputMessage",
+    "AnthropicMessageRecord",
+    "AnthropicMessagesDocument",
     "ArtifactKind",
     "ArtifactOracle",
     "CapsuleProposal",
@@ -90,7 +100,9 @@ __all__ = [
     "create_snapshot",
     "default_redaction_policy",
     "export_parquet",
+    "import_anthropic_messages_document",
     "import_openai_responses_document",
+    "ingest_anthropic_messages_file",
     "ingest_artifact",
     "ingest_openai_responses_file",
     "ingest_otlp_file",
@@ -110,4 +122,4 @@ __all__ = [
     "verify_proposal",
     "verify_snapshot",
 ]
-__version__ = "0.10.0"
+__version__ = "0.11.0"

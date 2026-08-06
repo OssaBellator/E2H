@@ -102,7 +102,7 @@ def archive_document() -> dict:
                     {
                         "id": "msg_assistant_1",
                         "role": "assistant",
-                        "content": first_response_content,
+                        "content": copy.deepcopy(first_response_content),
                     },
                     {
                         "id": "msg_user_2",
@@ -299,6 +299,7 @@ def test_server_tool_use_and_result_are_linked() -> None:
     assert completed.attributes["server_tool"] is True
     assert completed.attributes["linked_call"] is True
     assert completed.attributes["tool_name"] == "web_search"
+    assert "opaque-search-token" not in bundle.model_dump_json()
 
 
 def test_unlinked_tool_result_is_preserved_explicitly() -> None:
@@ -382,9 +383,7 @@ def test_capsule_override_and_provenance_are_preserved(tmp_path: Path) -> None:
             "response ids must be unique",
         ),
         (
-            lambda data: data["records"][1].update(
-                {"timestamp": "2026-08-06T07:59:00Z"}
-            ),
+            lambda data: data["records"][1].update({"timestamp": "2026-08-06T07:59:00Z"}),
             "record timestamps must be nondecreasing",
         ),
         (
@@ -426,6 +425,7 @@ def test_naive_record_timestamp_is_rejected() -> None:
 def test_malformed_content_is_reported_as_ingest_error() -> None:
     data = archive_document()
     data["records"][0]["messages"][0]["content"] = "plain string"
+    data["records"][1]["messages"][0]["content"] = "plain string"
     document = AnthropicMessagesDocument.model_validate(data)
     bundle = import_anthropic_messages_document(document, provenance())
     assert "plain string" in bundle.traces[0].events[2].payload["content"]
