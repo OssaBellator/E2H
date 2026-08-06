@@ -2,7 +2,7 @@
 
 E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
 
-The repository now contains six connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, and content-addressed **workspace snapshots**.
+The repository now contains seven connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, and an optional **container sandbox backend**.
 
 ## What works today
 
@@ -23,6 +23,8 @@ The repository now contains six connected vertical slices: deterministic **task 
 - Automatic operator-specific oracle mutations for strong verification.
 - Deterministic content-addressed workspace and artifact snapshot bundles.
 - Snapshot verification, safe restoration, and portable compiler references.
+- Optional immutable-image container execution with filesystem, network, user, and resource controls.
+- Backend selection for direct replay, matrices, and compiler mutation verification.
 - Atomic JSON reports and deterministic JSONL trace evidence.
 - CLI commands for validation, replay, experiments, and evidence ingestion.
 - Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
@@ -57,6 +59,7 @@ uv run e2h snapshot create examples .e2h/examples.e2hsnap \
   --include compile --include ingest
 uv run e2h snapshot verify .e2h/examples.e2hsnap
 uv run e2h snapshot restore .e2h/examples.e2hsnap .e2h/restored-examples
+uv run e2h run examples/sandbox/capsule.yaml --backend container --workspace .
 ```
 
 Run all checks:
@@ -179,6 +182,16 @@ Creation rejects symbolic links, special filesystem entries, unsafe include path
 
 Default creation excludes `.git`, `.venv`, `.e2h`, Python caches, and bytecode. Supplying `--exclude` replaces that default list, so trusted workflows can define an explicit capture policy.
 
+## Container sandbox
+
+Capsules may declare a `sandbox` policy with an immutable `name@sha256:<digest>` image. The default `auto` backend selects container execution when that policy is present and otherwise preserves the existing local runner. Operators may explicitly choose `--backend local` or `--backend container`; replay matrices and compiler mutation verification expose the same selection. `--container-runtime` is a trusted-administrator override for a Docker-compatible CLI binary.
+
+The Docker adapter invokes the runtime directly as an argument vector—never through a shell. It bind-mounts the selected workspace read-only by default, uses `/workspace` as the container root, maps capsule working directories into that mount, disables networking when `allowed_actions.network` is `deny`, drops all Linux capabilities, sets `no-new-privileges`, requires a non-root numeric user, bounds PIDs, memory, CPUs, and `/tmp`, and makes the image root filesystem read-only by default. Workspace write access and bridge networking require explicit capsule declarations.
+
+Each container run uses a private CID file. When the attached runtime process exceeds the command timeout, E2H terminates that client process and then force-removes the recorded container. Cleanup failures are promoted to infrastructure errors rather than hidden behind an ordinary timeout result.
+
+The Docker daemon, runtime binary, image registry, and host kernel remain trusted infrastructure. Do not allow untrusted capsule authors to choose the runtime binary or Docker socket. An immutable image reference prevents tag drift but does not establish that the image itself is safe; curate and scan permitted images separately.
+
 ## Architecture direction
 
 ```text
@@ -196,7 +209,7 @@ See [`ROADMAP.md`](ROADMAP.md) for planned milestones.
 
 ## Security model
 
-Task capsules should be treated as code. The current runner verifies that capsule-declared working directories resolve within the selected workspace, avoids shell expansion, bounds retained output in memory, and terminates POSIX process groups on timeout. It does not restrict a command's filesystem access, provide OS-level isolation, or enforce the declared network policy. Run untrusted capsules only inside an external sandbox or disposable CI worker until sandbox backends land.
+Task capsules should be treated as code. The local runner verifies that capsule-declared working directories resolve within the selected workspace, avoids shell expansion, bounds retained output in memory, and terminates POSIX process groups on timeout, but it does not provide OS-level isolation or enforce network policy. The optional container backend adds declared filesystem, network, identity, and resource controls; its Docker daemon, image supply chain, and host kernel remain trusted boundaries. Use disposable workers and curated immutable images for untrusted capsules.
 
 Evidence importers parse data rather than execute it, but imported content can still contain sensitive or adversarial text. Redaction is pattern-based and cannot guarantee removal of every possible identifier. Review sanitized evidence before publishing it or using it outside the original trust boundary.
 

@@ -26,7 +26,13 @@ from e2h.loader import (
     load_experiment,
 )
 from e2h.models import TaskCapsule
-from e2h.runner import CheckStatus, RunnerError, RunStatus, run_capsule
+from e2h.runner import (
+    CheckStatus,
+    ExecutionBackend,
+    RunnerError,
+    RunStatus,
+    run_capsule,
+)
 from e2h.snapshot_cli import snapshot_app
 from e2h.trace import write_json_atomic, write_traces_jsonl
 
@@ -73,11 +79,24 @@ def run(
     workspace: Annotated[Path, typer.Option("--workspace", "-w", file_okay=False)] = Path("."),
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
     json_stdout: Annotated[bool, typer.Option("--json", help="Write the result as JSON.")] = False,
+    backend: Annotated[
+        ExecutionBackend,
+        typer.Option("--backend", case_sensitive=False, help="Execution backend."),
+    ] = ExecutionBackend.AUTO,
+    container_runtime: Annotated[
+        str | None,
+        typer.Option("--container-runtime", help="Trusted Docker-compatible runtime binary."),
+    ] = None,
 ) -> None:
     """Execute a capsule's deterministic checks."""
     try:
         loaded = load_capsule(capsule)
-        result = run_capsule(loaded, workspace)
+        result = run_capsule(
+            loaded,
+            workspace,
+            backend=backend,
+            container_runtime=container_runtime,
+        )
     except (CapsuleLoadError, RunnerError) as exc:
         error_console.print(f"[red]Unable to run capsule:[/red] {exc}")
         raise typer.Exit(code=2) from exc
@@ -133,6 +152,14 @@ def run_experiment_command(
         bool,
         typer.Option("--require-all-pass", help="Return exit code 1 when any matrix cell fails."),
     ] = False,
+    backend: Annotated[
+        ExecutionBackend,
+        typer.Option("--backend", case_sensitive=False, help="Execution backend."),
+    ] = ExecutionBackend.AUTO,
+    container_runtime: Annotated[
+        str | None,
+        typer.Option("--container-runtime", help="Trusted Docker-compatible runtime binary."),
+    ] = None,
 ) -> None:
     """Execute every declared variant and repetition."""
     try:
@@ -140,7 +167,13 @@ def run_experiment_command(
         capsule_path = resolve_under_root(root, spec.capsule)
         workspace = resolve_under_root(root, spec.workspace)
         capsule = load_capsule(capsule_path)
-        execution = execute_experiment(spec, capsule, workspace)
+        execution = execute_experiment(
+            spec,
+            capsule,
+            workspace,
+            backend=backend,
+            container_runtime=container_runtime,
+        )
     except (RunnerError, ValueError) as exc:
         error_console.print(f"[red]Unable to run experiment:[/red] {exc}")
         raise typer.Exit(code=2) from exc

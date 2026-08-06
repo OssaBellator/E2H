@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from e2h.models import TaskCapsule
-from e2h.runner import RunResult, RunStatus, run_capsule
+from e2h.runner import ExecutionBackend, RunResult, RunStatus, run_capsule
 from e2h.trace import Trace, trace_from_run_result
 
 _RESERVED_VARIANT_ENV = frozenset({"E2H_VARIANT_ID", "E2H_REPETITION"})
@@ -181,6 +181,9 @@ def run_experiment(
     spec: ExperimentSpec,
     capsule: TaskCapsule,
     workspace: Path,
+    *,
+    backend: ExecutionBackend = ExecutionBackend.AUTO,
+    container_runtime: str | None = None,
 ) -> ExperimentExecution:
     """Execute every variant and repetition in deterministic declaration order."""
     started_at = datetime.now(UTC)
@@ -191,7 +194,12 @@ def run_experiment(
     for variant in spec.variants:
         for repetition in range(spec.repetitions):
             run_id = _matrix_run_id(spec.id, variant.id, repetition)
-            result = run_capsule(_variant_capsule(capsule, variant, repetition), workspace)
+            result = run_capsule(
+                _variant_capsule(capsule, variant, repetition),
+                workspace,
+                backend=backend,
+                container_runtime=container_runtime,
+            )
             trace = trace_from_run_result(
                 result,
                 run_id=run_id,

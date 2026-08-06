@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -48,6 +49,38 @@ class ExecutionLimits(StrictModel):
     max_commands: int = Field(default=50, ge=1, le=1000)
     default_timeout_seconds: float = Field(default=30.0, gt=0, le=3600)
     max_output_chars: int = Field(default=20_000, ge=256, le=5_000_000)
+
+
+class ContainerSandbox(StrictModel):
+    """Immutable container image and bounded runtime policy for capsule checks."""
+
+    engine: Literal["docker"] = "docker"
+    image: str = Field(min_length=1, max_length=500)
+    workspace_access: Literal["read_only", "read_write"] = "read_only"
+    user: str = Field(default="65532:65532", max_length=64)
+    read_only_root: bool = True
+    pull_policy: Literal["never", "missing"] = "never"
+    pids_limit: int = Field(default=256, ge=16, le=4096)
+    memory_mb: int = Field(default=1024, ge=64, le=1_048_576)
+    cpus: float = Field(default=1.0, ge=0.1, le=128)
+    tmpfs_mb: int = Field(default=64, ge=16, le=4096)
+
+    @field_validator("image")
+    @classmethod
+    def image_must_be_immutable(cls, value: str) -> str:
+        if re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", value) is None:
+            raise ValueError("container image must use an immutable digest reference")
+        return value
+
+    @field_validator("user")
+    @classmethod
+    def user_must_be_non_root(cls, value: str) -> str:
+        parts = value.split(":")
+        if len(parts) not in {1, 2} or any(not part.isdigit() for part in parts):
+            raise ValueError("container user must be a numeric uid or uid:gid")
+        if int(parts[0]) == 0:
+            raise ValueError("container user must be non-root")
+        return value
 
 
 class CommandCheck(StrictModel):
@@ -97,6 +130,7 @@ class TaskCapsule(StrictModel):
     initial_state: InitialState = Field(default_factory=InitialState)
     allowed_actions: AllowedActions = Field(default_factory=AllowedActions)
     limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
+    sandbox: ContainerSandbox | None = None
     success: SuccessSpec
     metadata: dict[str, Any] = Field(default_factory=dict)
 
