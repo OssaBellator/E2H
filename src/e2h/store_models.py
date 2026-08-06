@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-STORE_SCHEMA_VERSION = "1"
+STORE_SCHEMA_VERSION = "2"
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 MAX_QUERY_ROWS = 10_000
 
@@ -30,6 +30,7 @@ class QueryView(StrEnum):
     RUNS = "runs"
     CHECKS = "checks"
     FAILURES = "failures"
+    FAILURE_TAXONOMY = "failure-taxonomy"
     VARIANTS = "variants"
     CAPSULES = "capsules"
     SOURCES = "sources"
@@ -42,6 +43,7 @@ class IngestResult(StrictModel):
     runs: int = Field(ge=0)
     checks: int = Field(ge=0)
     summaries: int = Field(ge=0)
+    failures: int = Field(ge=0)
 
 
 class StoreInfo(StrictModel):
@@ -50,6 +52,7 @@ class StoreInfo(StrictModel):
     runs: int = Field(ge=0)
     checks: int = Field(ge=0)
     variant_summaries: int = Field(ge=0)
+    failure_records: int = Field(ge=0)
 
 
 SCHEMA_SQL = """
@@ -97,6 +100,20 @@ CREATE TABLE IF NOT EXISTS checks (
     stderr_truncated BOOLEAN NOT NULL,
     error_message VARCHAR
 );
+CREATE TABLE IF NOT EXISTS failure_records (
+    failure_key VARCHAR PRIMARY KEY,
+    check_key VARCHAR NOT NULL,
+    run_key VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    category VARCHAR NOT NULL,
+    code VARCHAR NOT NULL,
+    impact VARCHAR NOT NULL,
+    retryability VARCHAR NOT NULL,
+    summary VARCHAR NOT NULL,
+    details_json VARCHAR NOT NULL,
+    caused_by_check_id VARCHAR,
+    causes_json VARCHAR NOT NULL
+);
 CREATE TABLE IF NOT EXISTS variant_summaries (
     summary_key VARCHAR PRIMARY KEY,
     source_sha256 VARCHAR NOT NULL,
@@ -132,11 +149,29 @@ VIEW_SQL: dict[QueryView, str] = {
         SELECT r.run_key, r.experiment_id, r.run_id, r.variant_id, r.repetition,
                r.capsule_id, r.status AS run_status, c.check_id,
                c.status AS check_status, c.exit_code, c.duration_seconds,
-               c.error_message
+               c.error_message, f.category AS failure_category,
+               f.code AS failure_code, f.impact AS failure_impact,
+               f.retryability, f.summary AS failure_summary,
+               f.details_json AS failure_details_json,
+               f.caused_by_check_id, f.causes_json
         FROM runs AS r
         LEFT JOIN checks AS c ON c.run_key = r.run_key
+        LEFT JOIN failure_records AS f ON f.check_key = c.check_key
         WHERE r.status <> 'passed' OR c.status <> 'passed'
         ORDER BY r.started_at, r.run_key, c.check_index
+    """,
+    QueryView.FAILURE_TAXONOMY: """
+        SELECT f.category AS failure_category, f.code AS failure_code,
+               f.impact AS failure_impact, f.retryability,
+               count(*) AS occurrences,
+               count(DISTINCT f.run_key) AS runs,
+               count(DISTINCT r.capsule_id) AS capsules,
+               avg(c.duration_seconds) AS mean_duration_seconds
+        FROM failure_records AS f
+        JOIN checks AS c ON c.check_key = f.check_key
+        JOIN runs AS r ON r.run_key = f.run_key
+        GROUP BY f.category, f.code, f.impact, f.retryability
+        ORDER BY occurrences DESC, failure_category, failure_code
     """,
     QueryView.VARIANTS: """
         SELECT experiment_id, capsule_id, variant_id, runs, passed, failed, errors,

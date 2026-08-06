@@ -155,6 +155,7 @@ def trace_from_run_result(
                 "status": result.status.value,
                 "duration_seconds": result.duration_seconds,
                 "check_count": len(result.checks),
+                "failure_summary": result.failure_summary.model_dump(mode="json"),
             },
         )
     )

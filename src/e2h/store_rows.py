@@ -17,6 +17,7 @@ RunItem: TypeAlias = tuple[str | None, str | None, str | None, int | None, RunRe
 RunRow: TypeAlias = tuple[Any, ...]
 CheckRow: TypeAlias = tuple[Any, ...]
 SummaryRow: TypeAlias = tuple[Any, ...]
+FailureRow: TypeAlias = tuple[Any, ...]
 
 
 class ArtifactError(ValueError):
@@ -73,7 +74,7 @@ def normalize_rows(
     source_sha256: str,
     kind: Literal["run", "experiment"],
     artifact: RunResult | ExperimentResult,
-) -> tuple[list[RunRow], list[CheckRow], list[SummaryRow]]:
+) -> tuple[list[RunRow], list[CheckRow], list[SummaryRow], list[FailureRow]]:
     """Normalize a validated artifact into deterministic relational rows."""
     run_items: list[RunItem]
     if kind == "run":
@@ -113,8 +114,10 @@ def normalize_rows(
 
     runs: list[RunRow] = []
     checks: list[CheckRow] = []
+    failures: list[FailureRow] = []
     run_keys: set[str] = set()
     check_keys: set[str] = set()
+    failure_keys: set[str] = set()
     for experiment_id, run_id, variant_id, repetition, result in run_items:
         natural_id = run_id if run_id is not None else "standalone"
         run_key = _key(source_sha256, natural_id)
@@ -163,7 +166,36 @@ def normalize_rows(
                     check.error,
                 )
             )
+            if check.failure is not None:
+                failure_key = _key(check_key, check.failure.code.value)
+                if failure_key in failure_keys:
+                    raise ArtifactError(f"artifact contains duplicate failure identity: {check.id}")
+                failure_keys.add(failure_key)
+                failures.append(
+                    (
+                        failure_key,
+                        check_key,
+                        run_key,
+                        source_sha256,
+                        check.failure.category.value,
+                        check.failure.code.value,
+                        check.failure.impact.value,
+                        check.failure.retryability.value,
+                        check.failure.summary,
+                        json.dumps(
+                            check.failure.details,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                        ),
+                        check.failure.caused_by_check_id,
+                        json.dumps(
+                            [cause.value for cause in check.failure.causes],
+                            separators=(",", ":"),
+                        ),
+                    )
+                )
     summary_keys = [str(row[0]) for row in summaries]
     if len(summary_keys) != len(set(summary_keys)):
         raise ArtifactError("artifact contains duplicate variant summaries")
-    return runs, checks, summaries
+    return runs, checks, summaries, failures

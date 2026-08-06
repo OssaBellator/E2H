@@ -47,7 +47,7 @@ def test_store_cli_full_flow(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["store", "init", str(database), "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["schema_version"] == "1"
+    assert json.loads(result.output)["schema_version"] == "2"
 
     result = runner.invoke(
         app,
@@ -118,6 +118,7 @@ def test_store_cli_human_readable_tables(tmp_path: Path) -> None:
     result = runner.invoke(app, ["store", "info", str(database)])
     assert result.exit_code == 0, result.output
     assert "variant_summaries" in result.output
+    assert "failure_records" in result.output
 
 
 def test_store_cli_reports_invalid_artifact(tmp_path: Path) -> None:

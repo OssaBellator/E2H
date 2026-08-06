@@ -57,7 +57,7 @@ def initialize_store_command(
     else:
         console.print(
             f"[green]Ready[/green] schema {info.schema_version} "
-            f"({info.sources} sources, {info.runs} runs)"
+            f"({info.sources} sources, {info.runs} runs, {info.failure_records} failures)"
         )
 
 
@@ -90,6 +90,7 @@ def ingest_store_command(
     table.add_column("Runs", justify="right")
     table.add_column("Checks", justify="right")
     table.add_column("Summaries", justify="right")
+    table.add_column("Failures", justify="right")
     for result in results:
         table.add_row(
             result.source_sha256[:12],
@@ -98,6 +99,7 @@ def ingest_store_command(
             str(result.runs),
             str(result.checks),
             str(result.summaries),
+            str(result.failures),
         )
     console.print(table)
 
@@ -158,4 +160,5 @@ def store_info_command(
     table.add_row("runs", str(info.runs))
     table.add_row("checks", str(info.checks))
     table.add_row("variant_summaries", str(info.variant_summaries))
+    table.add_row("failure_records", str(info.failure_records))
     console.print(table)

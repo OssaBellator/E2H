@@ -17,6 +17,20 @@ from typing import BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from e2h.failures import (
+    FailureCode,
+    FailureImpact,
+    FailureRecord,
+    FailureSummary,
+    launch_failure,
+    output_capture_failure,
+    sandbox_failure,
+    skipped_failure,
+    summarize_failures,
+    timeout_failure,
+    unexpected_exit_failure,
+    working_directory_failure,
+)
 from e2h.models import CommandCheck, TaskCapsule
 from e2h.sandbox import SandboxError, build_container_argv, force_remove_container
 
@@ -62,6 +76,7 @@ class CommandResult(BaseModel):
     stdout_truncated: bool = False
     stderr_truncated: bool = False
     error: str | None = None
+    failure: FailureRecord | None = None
 
 
 class RunResult(BaseModel):
@@ -73,6 +88,7 @@ class RunResult(BaseModel):
     finished_at: datetime
     duration_seconds: float = Field(ge=0)
     checks: list[CommandResult]
+    failure_summary: FailureSummary = Field(default_factory=FailureSummary)
 
 
 class RunnerError(RuntimeError):
@@ -127,6 +143,7 @@ class _ProcessOutcome:
     stdout_truncated: bool
     stderr_truncated: bool
     error: str | None = None
+    failure_code: FailureCode | None = None
 
 
 def _safe_child(root: Path, relative: str) -> Path:
@@ -241,6 +258,7 @@ def _execute_process(
     capture_errors = [error for error in (stdout_capture.error, stderr_capture.error) if error]
     if any(reader.is_alive() for reader in readers):
         capture_errors.append("output reader did not terminate")
+    capture_error = "; ".join(capture_errors) or None
 
     return _ProcessOutcome(
         exit_code=None if timed_out else process.returncode,
@@ -249,7 +267,8 @@ def _execute_process(
         stderr=stderr,
         stdout_truncated=stdout_truncated,
         stderr_truncated=stderr_truncated,
-        error="; ".join(capture_errors) or None,
+        error=capture_error,
+        failure_code=FailureCode.OUTPUT_CAPTURE if capture_error is not None else None,
     )
 
 
@@ -301,11 +320,15 @@ def _execute_container_command(
             cleanup_error = force_remove_container(runtime, cidfile)
             if cleanup_error is not None:
                 combined = "; ".join(item for item in (outcome.error, cleanup_error) if item)
-                outcome = replace(outcome, error=combined)
+                outcome = replace(
+                    outcome,
+                    error=combined,
+                    failure_code=FailureCode.SANDBOX_CLEANUP,
+                )
         return outcome
 
 
-def _skipped(check: CommandCheck, cwd: str) -> CommandResult:
+def _skipped(check: CommandCheck, cwd: str, blocked_by_check_id: str) -> CommandResult:
     return CommandResult(
         id=check.id,
         argv=check.argv,
@@ -313,6 +336,7 @@ def _skipped(check: CommandCheck, cwd: str) -> CommandResult:
         status=CheckStatus.SKIPPED,
         duration_seconds=0,
         error="skipped after an earlier check failed",
+        failure=skipped_failure(blocked_by_check_id),
     )
 
 
@@ -346,13 +370,16 @@ def run_capsule(
 
     results: list[CommandResult] = []
     halt = False
+    blocked_by_check_id: str | None = None
     infrastructure_error = False
 
     for check in capsule.success.commands:
         check_dir = _safe_child(task_root, check.cwd)
         relative_cwd = str(check_dir.relative_to(workspace_root)) or "."
         if halt:
-            results.append(_skipped(check, relative_cwd))
+            if blocked_by_check_id is None:
+                raise RunnerError("halted replay is missing its blocking check")
+            results.append(_skipped(check, relative_cwd, blocked_by_check_id))
             continue
         if not check_dir.is_dir():
             results.append(
@@ -363,14 +390,17 @@ def run_capsule(
                     status=CheckStatus.ERROR,
                     duration_seconds=0,
                     error=f"check directory does not exist: {check_dir}",
+                    failure=working_directory_failure(),
                 )
             )
             infrastructure_error = True
+            blocked_by_check_id = check.id
             halt = not check.continue_on_failure
             continue
 
         timeout = check.timeout_seconds or capsule.limits.default_timeout_seconds
         command_started = monotonic()
+        failure: FailureRecord | None = None
         try:
             if selected_backend is ExecutionBackend.CONTAINER:
                 outcome = _execute_container_command(
@@ -389,54 +419,74 @@ def run_capsule(
                     timeout,
                     capsule.limits.max_output_chars,
                 )
-        except (OSError, SandboxError) as exc:
-            results.append(
-                CommandResult(
-                    id=check.id,
-                    argv=check.argv,
-                    cwd=relative_cwd,
-                    status=CheckStatus.ERROR,
-                    duration_seconds=monotonic() - command_started,
-                    error=str(exc),
-                )
-            )
-            infrastructure_error = True
-            halt = not check.continue_on_failure
-            continue
-
-        if outcome.timed_out:
-            status = CheckStatus.TIMED_OUT
-            error = f"command exceeded {timeout:g} seconds"
-            if outcome.error is not None:
-                error = f"{error}; {outcome.error}"
-                infrastructure_error = True
-        elif outcome.error is not None:
+        except SandboxError as exc:
             status = CheckStatus.ERROR
-            error = f"unable to capture command output: {outcome.error}"
-            infrastructure_error = True
-        elif outcome.exit_code in check.expected_exit_codes:
-            status = CheckStatus.PASSED
-            error = None
-        else:
-            status = CheckStatus.FAILED
-            error = None
-
-        results.append(
-            CommandResult(
-                id=check.id,
-                argv=check.argv,
-                cwd=relative_cwd,
-                status=status,
-                exit_code=outcome.exit_code,
-                duration_seconds=monotonic() - command_started,
-                stdout=outcome.stdout,
-                stderr=outcome.stderr,
-                stdout_truncated=outcome.stdout_truncated,
-                stderr_truncated=outcome.stderr_truncated,
-                error=error,
+            outcome = _ProcessOutcome(
+                exit_code=None,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                stdout_truncated=False,
+                stderr_truncated=False,
+                error=str(exc),
             )
+            failure = sandbox_failure()
+            infrastructure_error = True
+        except OSError as exc:
+            status = CheckStatus.ERROR
+            outcome = _ProcessOutcome(
+                exit_code=None,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                stdout_truncated=False,
+                stderr_truncated=False,
+                error=str(exc),
+            )
+            failure = launch_failure(exc, selected_backend.value)
+            infrastructure_error = True
+        else:
+            if outcome.timed_out:
+                status = CheckStatus.TIMED_OUT
+                failure = timeout_failure(
+                    timeout,
+                    selected_backend.value,
+                    infrastructure_code=outcome.failure_code,
+                )
+                if failure.impact is FailureImpact.INFRASTRUCTURE_ERROR:
+                    infrastructure_error = True
+            elif outcome.error is not None:
+                status = CheckStatus.ERROR
+                failure = output_capture_failure(selected_backend.value)
+                infrastructure_error = True
+            elif outcome.exit_code in check.expected_exit_codes:
+                status = CheckStatus.PASSED
+            else:
+                status = CheckStatus.FAILED
+                if outcome.exit_code is None:
+                    raise RunnerError("completed command is missing an exit code")
+                failure = unexpected_exit_failure(
+                    outcome.exit_code,
+                    sorted(check.expected_exit_codes),
+                )
+
+        result = CommandResult(
+            id=check.id,
+            argv=check.argv,
+            cwd=relative_cwd,
+            status=status,
+            exit_code=outcome.exit_code,
+            duration_seconds=monotonic() - command_started,
+            stdout=outcome.stdout,
+            stderr=outcome.stderr,
+            stdout_truncated=outcome.stdout_truncated,
+            stderr_truncated=outcome.stderr_truncated,
+            error=outcome.error,
+            failure=failure,
         )
+        results.append(result)
         if status is not CheckStatus.PASSED:
+            blocked_by_check_id = check.id
             halt = not check.continue_on_failure
 
     failed = any(result.status is not CheckStatus.PASSED for result in results)
@@ -454,4 +504,5 @@ def run_capsule(
         finished_at=finished_at,
         duration_seconds=monotonic() - started_clock,
         checks=results,
+        failure_summary=summarize_failures((result.id, result.failure) for result in results),
     )
