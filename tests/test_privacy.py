@@ -235,6 +235,6 @@ def test_residual_findings_are_deduplicated_by_location_and_digest() -> None:
     content_findings = [
         finding
         for finding in outcome.review.residual_findings
-        if finding.location.endswith("/payload/content")
+        if finding.location.endswith("/payload/<value:0>")
     ]
     assert len(content_findings) == 1
