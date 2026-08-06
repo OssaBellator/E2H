@@ -91,9 +91,7 @@ def _parts(value: Any, location: str) -> list[dict[str, Any]]:
                 populated.append(group[0])
         thought = bool(part.get("thought", False))
         if not populated and not thought:
-            raise EvidenceIngestError(
-                f"{part_location} must contain an observable part field"
-            )
+            raise EvidenceIngestError(f"{part_location} must contain an observable part field")
         if len(populated) > 1:
             raise EvidenceIngestError(
                 f"{part_location} must contain exactly one observable part field"
