@@ -66,19 +66,28 @@ def test_json_pointer_modes_and_escaping(tmp_path: Path) -> None:
         expected=None,
     )
     assert evaluate_oracle(equal, root=tmp_path).passed is True
-    assert evaluate_oracle(
-        equal,
-        root=tmp_path,
-        mutation_operator=oracle_mutation_operator(equal),
-    ).passed is False
-    assert evaluate_oracle(
-        JsonOracle(id="present", path="result.json", pointer="/a~1b", mode="exists"),
-        root=tmp_path,
-    ).passed is True
-    assert evaluate_oracle(
-        JsonOracle(id="absent", path="result.json", pointer="/missing", mode="absent"),
-        root=tmp_path,
-    ).passed is True
+    assert (
+        evaluate_oracle(
+            equal,
+            root=tmp_path,
+            mutation_operator=oracle_mutation_operator(equal),
+        ).passed
+        is False
+    )
+    assert (
+        evaluate_oracle(
+            JsonOracle(id="present", path="result.json", pointer="/a~1b", mode="exists"),
+            root=tmp_path,
+        ).passed
+        is True
+    )
+    assert (
+        evaluate_oracle(
+            JsonOracle(id="absent", path="result.json", pointer="/missing", mode="absent"),
+            root=tmp_path,
+        ).passed
+        is True
+    )
 
 
 def test_artifact_oracle_digest_and_size(tmp_path: Path) -> None:
@@ -95,11 +104,14 @@ def test_artifact_oracle_digest_and_size(tmp_path: Path) -> None:
     result = evaluate_oracle(oracle, root=tmp_path)
     assert result.passed is True
     assert result.observed == {"sha256": digest, "bytes": 8}
-    assert evaluate_oracle(
-        oracle,
-        root=tmp_path,
-        mutation_operator=oracle_mutation_operator(oracle),
-    ).passed is False
+    assert (
+        evaluate_oracle(
+            oracle,
+            root=tmp_path,
+            mutation_operator=oracle_mutation_operator(oracle),
+        ).passed
+        is False
+    )
 
 
 def test_oracle_paths_and_json_are_strict(tmp_path: Path) -> None:

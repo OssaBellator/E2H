@@ -73,9 +73,11 @@ def validate_compiler_spec(
     except CapsuleCompileError as exc:
         error_console.print(f"[red]Invalid compiler specification:[/red] {exc}")
         raise typer.Exit(code=2) from exc
+    generated_mutations = len(spec.oracles) if spec.auto_mutate_oracles else 0
     console.print(
         f"[green]Valid[/green] {spec.id} "
-        f"({len(spec.checks)} checks, {len(spec.mutations)} mutations)"
+        f"({len(spec.checks) + len(spec.oracles)} checks, "
+        f"{len(spec.mutations) + generated_mutations} mutations)"
     )
 
 

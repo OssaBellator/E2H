@@ -12,15 +12,20 @@ from e2h.compiler import (
 from e2h.experiment import ExperimentResult, ExperimentSpec, run_experiment
 from e2h.ingest import IngestionBundle, ingest_otlp_file, ingest_transcript_file
 from e2h.models import TaskCapsule
+from e2h.oracles import ArtifactOracle, FileOracle, JsonOracle, OracleEvaluation
 from e2h.runner import RunResult, run_capsule
 from e2h.trace import Trace, TraceEvent, trace_from_run_result
 
 __all__ = [
+    "ArtifactOracle",
     "CapsuleProposal",
     "CompilerSpec",
     "ExperimentResult",
     "ExperimentSpec",
+    "FileOracle",
     "IngestionBundle",
+    "JsonOracle",
+    "OracleEvaluation",
     "RunResult",
     "TaskCapsule",
     "Trace",
@@ -36,4 +41,4 @@ __all__ = [
     "trace_from_run_result",
     "verify_proposal",
 ]
-__version__ = "0.4.0"
+__version__ = "0.5.0"

@@ -99,8 +99,7 @@ def test_compiler_generates_oracle_checks_and_strong_mutations(tmp_path: Path) -
         "oracle-artifact-contract",
     ]
     assert all(
-        mutation.env.get(ORACLE_MUTATION_ENV) is not None
-        for mutation in proposal.core.mutations
+        mutation.env.get(ORACLE_MUTATION_ENV) is not None for mutation in proposal.core.mutations
     )
     assert len(proposal.core.capsule.metadata["e2h_compiler"]["oracles"]) == 3
 

@@ -127,14 +127,17 @@ class ArtifactOracle(StrictModel):
     def constraints_must_be_consistent(self) -> ArtifactOracle:
         if self.sha256 is None and self.min_bytes is None and self.max_bytes is None:
             raise ValueError("artifact oracle requires sha256 or a byte-size bound")
-        if self.min_bytes is not None and self.max_bytes is not None:
-            if self.min_bytes > self.max_bytes:
-                raise ValueError("min_bytes must not exceed max_bytes")
+        if (
+            self.min_bytes is not None
+            and self.max_bytes is not None
+            and self.min_bytes > self.max_bytes
+        ):
+            raise ValueError("min_bytes must not exceed max_bytes")
         return self
 
 
 OracleTemplate = Annotated[FileOracle | JsonOracle | ArtifactOracle, Field(discriminator="kind")]
-ORACLE_ADAPTER = TypeAdapter(OracleTemplate)
+ORACLE_ADAPTER: TypeAdapter[OracleTemplate] = TypeAdapter(OracleTemplate)
 
 
 class OracleEvaluation(StrictModel):
