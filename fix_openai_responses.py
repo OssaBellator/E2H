@@ -20,6 +20,47 @@ replace_once(
     '            for item in cast(list[dict[str, Any]], response["output"])\n'
     '        ],\n',
 )
+indexer = '''def _index_function_calls(
+    document: OpenAIResponsesDocument,
+) -> dict[str, dict[str, Any]]:
+    """Index observable function calls before emitting any output events."""
+    calls: dict[str, dict[str, Any]] = {}
+    for record in document.responses:
+        output = cast(list[dict[str, Any]], record.response["output"])
+        for item in [*record.input_items, *output]:
+            if item.get("type") != "function_call":
+                continue
+            call_id = item.get("call_id")
+            name = item.get("name")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            if not isinstance(name, str) or not name:
+                continue
+            metadata = {
+                "name": name,
+                "namespace": item.get("namespace"),
+                "provider_item_id": item.get("id"),
+            }
+            existing = calls.get(call_id)
+            if existing is not None and existing != metadata:
+                raise EvidenceIngestError(
+                    f"function call {call_id!r} has conflicting provider metadata"
+                )
+            calls[call_id] = metadata
+    return calls
+
+
+'''
+replace_once(
+    "src/e2h/openai_responses.py",
+    "def import_openai_responses_document(\n",
+    indexer + "def import_openai_responses_document(\n",
+)
+replace_once(
+    "src/e2h/openai_responses.py",
+    "    calls: dict[str, dict[str, Any]] = {}\n",
+    "    calls = _index_function_calls(document)\n",
+)
 replace_once(
     "tests/test_openai_responses.py",
     '        (lambda data: data["responses"].append(data["responses"][0]), "response ids must be unique"),\n',
@@ -29,9 +70,24 @@ replace_once(
     '        ),\n',
 )
 replace_once(
-    "tests/test_openai_responses_cli.py",
-    '    assert len(traces.read_text(encoding="utf-8").splitlines()) == 4\n',
-    '    assert len(traces.read_text(encoding="utf-8").splitlines()) == 1\n',
+    "tests/test_openai_responses.py",
+    '''        (
+            lambda data: data["responses"].append(
+                {
+                    "input_items": [],
+                    "response": response("resp_earlier", 1, []),
+                }
+            ),
+            "timestamps must be nondecreasing",
+        ),
+''',
+    '''        (
+            lambda data: data["responses"][1]["response"].update(
+                {"created_at": 1}
+            ),
+            "timestamps must be nondecreasing",
+        ),
+''',
 )
 
 Path(__file__).unlink()
