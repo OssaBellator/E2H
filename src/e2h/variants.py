@@ -309,8 +309,8 @@ class RoutingVariant(StrictModel):
             for peer in peers:
                 if _routing_matches_overlap(peer.match, rule.match):
                     raise ValueError(
-                        f"routing rules {peer.id} and {rule.id} overlap at priority "
-                        f"{rule.priority}"
+                        f"routing rules {peer.id} and {rule.id} have duplicate priority; "
+                        f"their match criteria overlap at priority {rule.priority}"
                     )
             peers.append(rule)
         _validate_metadata(self.metadata, noun="routing variant")
