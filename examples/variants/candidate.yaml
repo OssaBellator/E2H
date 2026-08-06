@@ -1,0 +1,93 @@
+schema_version: "0.1"
+base_capsule_sha256: be3a655c9487ec0a2fa62039cfaf1f6d4603ce33d3ac3423dbd4e428c521fc61
+variant:
+  id: typed-candidate
+  env:
+    MODE: candidate
+  prompt:
+    id: prompt-v1
+    variables: [task]
+    messages:
+      - id: system
+        role: system
+        content: Follow the task contract.
+      - id: user
+        role: user
+        content: Execute ${task}.
+  tools:
+    id: tools-v1
+    tools:
+      - id: lookup
+        description: Look up one deterministic value.
+        input_schema:
+          type: object
+          properties:
+            key:
+              type: string
+          required: [key]
+          additionalProperties: false
+    selection: named
+    selected_tool: lookup
+    parallel_calls: false
+    max_calls: 4
+  context:
+    id: context-v1
+    max_chars: 128
+    overflow: reject
+    ordering: declared
+    items:
+      - id: policy
+        kind: literal
+        content: Use only observable evidence.
+        placement: before_prompt
+        priority: 100
+        max_chars: 29
+      - id: evidence
+        kind: artifact
+        sha256: "1111111111111111111111111111111111111111111111111111111111111111"
+        locator: cas://evidence/example
+        placement: tool_context
+        priority: 50
+        max_chars: 64
+  routing:
+    id: routing-v1
+    targets:
+      - id: local
+        provider: local
+        model: deterministic
+        capabilities: [text, tools]
+    rules:
+      - id: tool-route
+        match:
+          needs_tools: "true"
+        target_id: local
+        priority: 10
+    fallback_target: local
+  workflow:
+    id: workflow-v1
+    max_parallelism: 2
+    stages:
+      - id: route
+        kind: router
+        handler: route
+        uses: [routing]
+      - id: solve
+        kind: model
+        handler: solve
+        depends_on: [route]
+        uses: [prompt, tools, context, routing]
+        timeout_seconds: 60
+        max_attempts: 2
+        on_failure: stop
+      - id: verify
+        kind: validator
+        handler: verify
+        depends_on: [solve]
+        timeout_seconds: 30
+        max_attempts: 1
+        on_failure: stop
+  metadata:
+    generation: 1
+metadata:
+  author: example
+  purpose: exercise every typed variant dimension
