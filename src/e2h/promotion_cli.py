@@ -115,7 +115,7 @@ def materialize_command(
     rollback: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
 ) -> None:
-    """Materialize a passing decision with an exact rollback target."""
+    """Materialize a self-verifying passing decision with an exact rollback target."""
     try:
         receipt = materialize_promotion(
             load_promotion_decision(decision),
@@ -136,6 +136,10 @@ def rollback_command(
     event_id: Annotated[str, typer.Option("--event-id")],
     actor: Annotated[str, typer.Option("--actor")],
     occurred_at: Annotated[str, typer.Option("--occurred-at")],
+    observed_window_seconds: Annotated[
+        int | None,
+        typer.Option("--window-seconds", min=1),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
 ) -> None:
     """Record an auditable rollback event only when a declared trigger fires."""
@@ -148,6 +152,7 @@ def rollback_command(
             observed_samples,
             actor,
             datetime.fromisoformat(occurred_at),
+            observed_window_seconds=observed_window_seconds,
         )
     except ValueError as exc:
         error_console.print(f"[red]Invalid rollback event:[/red] {exc}")
