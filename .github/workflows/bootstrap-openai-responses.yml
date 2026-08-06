@@ -32,15 +32,20 @@ jobs:
         run: |
           python fix_openai_bootstrap.py
           python bootstrap_openai_responses.py
-      - name: Format and validate
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Lint and format
         run: |
-          uv sync --extra dev
           uv run ruff check . --fix
           uv run ruff format .
           uv run ruff check .
           uv run ruff format --check .
-          uv run mypy src
-          uv run pytest
+      - name: Strict typing
+        run: uv run mypy src
+      - name: Test suite
+        run: uv run pytest
+      - name: Validate provider smoke
+        run: |
           mkdir -p .e2h
           uv run e2h ingest openai-responses examples/ingest/openai-responses.json \
             --output .e2h/openai-responses-bundle.json \
