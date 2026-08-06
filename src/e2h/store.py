@@ -40,12 +40,18 @@ def _connection(database: Path) -> duckdb.DuckDBPyConnection:
                 "INSERT INTO store_metadata (key, value) VALUES ('schema_version', ?)",
                 [STORE_SCHEMA_VERSION],
             )
-        elif str(existing[0]) != STORE_SCHEMA_VERSION:
+        else:
             actual = str(existing[0])
-            connection.close()
-            raise StoreError(
-                f"unsupported store schema version {actual!r}; expected {STORE_SCHEMA_VERSION}"
-            )
+            if actual == "1" and STORE_SCHEMA_VERSION == "2":
+                connection.execute(
+                    "UPDATE store_metadata SET value = ? WHERE key = 'schema_version'",
+                    [STORE_SCHEMA_VERSION],
+                )
+            elif actual != STORE_SCHEMA_VERSION:
+                connection.close()
+                raise StoreError(
+                    f"unsupported store schema version {actual!r}; expected {STORE_SCHEMA_VERSION}"
+                )
         return connection
     except duckdb.Error as exc:
         raise StoreError(f"unable to open experiment store: {exc}") from exc
@@ -65,6 +71,7 @@ def _info(connection: duckdb.DuckDBPyConnection) -> StoreInfo:
         runs=_scalar_int(connection, "SELECT count(*) FROM runs"),
         checks=_scalar_int(connection, "SELECT count(*) FROM checks"),
         variant_summaries=_scalar_int(connection, "SELECT count(*) FROM variant_summaries"),
+        failure_records=_scalar_int(connection, "SELECT count(*) FROM failure_records"),
     )
 
 
@@ -94,7 +101,11 @@ def ingest_artifact(
         raw, payload = read_artifact(artifact_path)
         artifact_kind, artifact = parse_artifact(payload, selected_kind)
         source_sha256 = hashlib.sha256(raw).hexdigest()
-        runs, checks, summaries = normalize_rows(source_sha256, artifact_kind, artifact)
+        runs, checks, summaries, failures = normalize_rows(
+            source_sha256,
+            artifact_kind,
+            artifact,
+        )
     except (ArtifactError, ValueError) as exc:
         raise StoreError(str(exc)) from exc
 
@@ -112,6 +123,7 @@ def ingest_artifact(
                 runs=0,
                 checks=0,
                 summaries=0,
+                failures=0,
             )
         connection.execute("BEGIN TRANSACTION")
         try:
@@ -145,6 +157,15 @@ def ingest_artifact(
                     """,
                     checks,
                 )
+            if failures:
+                connection.executemany(
+                    """
+                    INSERT INTO failure_records VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    failures,
+                )
             if summaries:
                 connection.executemany(
                     """
@@ -165,6 +186,7 @@ def ingest_artifact(
             runs=len(runs),
             checks=len(checks),
             summaries=len(summaries),
+            failures=len(failures),
         )
     except duckdb.Error as exc:
         raise StoreError(f"unable to ingest artifact: {exc}") from exc
