@@ -380,18 +380,14 @@ def test_context_rejects_ambiguous_or_unbounded_items() -> None:
             {
                 "id": "c",
                 "max_chars": 5,
-                "items": [
-                    {"id": "one", "kind": "literal", "content": "123456", "max_chars": 6}
-                ],
+                "items": [{"id": "one", "kind": "literal", "content": "123456", "max_chars": 6}],
             }
         )
     with pytest.raises(ValidationError, match="content length"):
         ContextVariant.model_validate(
             {
                 "id": "c",
-                "items": [
-                    {"id": "one", "kind": "literal", "content": "abc", "max_chars": 4}
-                ],
+                "items": [{"id": "one", "kind": "literal", "content": "abc", "max_chars": 4}],
             }
         )
     with pytest.raises(ValidationError, match="empty"):

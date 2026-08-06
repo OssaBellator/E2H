@@ -21,9 +21,7 @@ _PLACEHOLDER_PATTERN = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]{0,127})\}")
 _MAX_DOCUMENT_BYTES = 2_097_152
 _MAX_METADATA_BYTES = 65_536
 _MAX_SCHEMA_BYTES = 65_536
-_RESERVED_VARIANT_ENV = frozenset(
-    {"E2H_VARIANT_ID", "E2H_REPETITION", "E2H_VARIANT_SHA256"}
-)
+_RESERVED_VARIANT_ENV = frozenset({"E2H_VARIANT_ID", "E2H_REPETITION", "E2H_VARIANT_SHA256"})
 
 
 class VariantError(ValueError):
@@ -226,13 +224,17 @@ class ContextVariant(StrictModel):
 Capability = Literal["text", "tools", "vision", "json"]
 
 
+def _default_capabilities() -> list[Capability]:
+    return ["text"]
+
+
 class RouteTarget(StrictModel):
     """One provider/model target available to a routing policy."""
 
     id: str = Field(pattern=_ID_PATTERN)
     provider: str = Field(min_length=1, max_length=128)
     model: str = Field(min_length=1, max_length=256)
-    capabilities: list[Capability] = Field(default_factory=lambda: ["text"], min_length=1)
+    capabilities: list[Capability] = Field(default_factory=_default_capabilities, min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("provider", "model")

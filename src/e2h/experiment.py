@@ -72,7 +72,7 @@ class ExperimentRun(StrictModel):
 
     run_id: str
     variant_id: str
-    variant_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    variant_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     repetition: int = Field(ge=0)
     trace_id: str
     result: RunResult

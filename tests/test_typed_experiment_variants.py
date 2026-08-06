@@ -12,11 +12,7 @@ from e2h.variants import PromptVariant, variant_sha256
 
 
 def test_typed_variant_identity_is_persisted_and_injected(tmp_path: Path) -> None:
-    code = (
-        "import os; "
-        "print(os.environ['E2H_VARIANT_ID']); "
-        "print(os.environ['E2H_VARIANT_SHA256'])"
-    )
+    code = "import os; print(os.environ['E2H_VARIANT_ID']); print(os.environ['E2H_VARIANT_SHA256'])"
     capsule = TaskCapsule.model_validate(
         {
             "id": "typed-variant",
