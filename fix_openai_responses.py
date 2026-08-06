@@ -100,13 +100,43 @@ replace_once(
 )
 replace_once(
     "tests/test_openai_responses.py",
+    '    assert "[REDACTED_SECRET]" in rendered\n',
+    '    assert "<redacted:secret:" in rendered\n',
+)
+replace_once(
+    "tests/test_openai_responses.py",
     '    with pytest.raises(EvidenceIngestError, match="invalid JSON"):\n',
     '    with pytest.raises(EvidenceIngestError, match="invalid evidence JSON"):\n',
+)
+replace_once(
+    "tests/test_openai_responses.py",
+    '''    with pytest.raises(EvidenceIngestError, match="invalid evidence JSON"):
+        ingest_openai_responses_file(path)
+''',
+    '''    with pytest.raises(EvidenceIngestError, match="invalid evidence JSON"):
+        ingest_openai_responses_file(path)
+
+
+def test_conflicting_function_call_metadata_is_rejected() -> None:
+    data = export_document()
+    second_call = data["responses"][1]["input_items"][1]
+    second_call["name"] = "different_tool"
+    document = OpenAIResponsesDocument.model_validate(data)
+    with pytest.raises(EvidenceIngestError, match="conflicting provider metadata"):
+        import_openai_responses_document(document, provenance())
+''',
 )
 replace_once(
     "tests/test_openai_responses_cli.py",
     '    assert "[REDACTED_EMAIL]" in result.stdout\n',
     '    assert "<redacted:email:" in result.stdout\n',
+)
+replace_once(
+    "tests/test_openai_responses_cli.py",
+    '    assert len(traces.read_text(encoding="utf-8").splitlines()) == 1\n',
+    '    assert len(traces.read_text(encoding="utf-8").splitlines()) == len(\n'
+    '        payload["traces"][0]["events"]\n'
+    '    )\n',
 )
 
 Path(__file__).unlink()
