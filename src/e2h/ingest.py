@@ -49,6 +49,7 @@ class EvidenceFormat(StrEnum):
 
     TRANSCRIPT_JSON = "transcript-json"
     OTLP_JSON = "otlp-json"
+    OPENAI_RESPONSES_JSON = "openai-responses-json"
 
 
 class RedactionKind(StrEnum):

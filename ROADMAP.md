@@ -21,7 +21,9 @@
 - [x] Explicit correction capture.
 - [x] Secret and common PII redaction baseline.
 - [x] Content-addressed source provenance.
-- [ ] Provider-specific transcript adapters.
+- [x] OpenAI Responses API transcript adapter.
+- [ ] Anthropic Messages API transcript adapter.
+- [ ] Gemini GenerateContent transcript adapter.
 - [ ] Configurable redaction policies and review reports.
 - [x] Environment and artifact snapshots.
 - [x] Review-gated capsule proposals with immutable evidence provenance.

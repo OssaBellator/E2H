@@ -1,0 +1,107 @@
+{
+  "schema_version": "0.1",
+  "id": "openai-responses-smoke",
+  "capsule_id": "provider-adapter-smoke",
+  "metadata": {
+    "purpose": "provider-native-ingestion-ci"
+  },
+  "responses": [
+    {
+      "request_id": "req_smoke_1",
+      "input_items": [
+        {
+          "id": "msg_user_1",
+          "type": "message",
+          "role": "user",
+          "status": "completed",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "Look up account demo@example.com"
+            }
+          ]
+        }
+      ],
+      "response": {
+        "id": "resp_smoke_1",
+        "object": "response",
+        "created_at": 1786000000,
+        "model": "gpt-5.5",
+        "status": "completed",
+        "instructions": "Use the account lookup tool.",
+        "parallel_tool_calls": true,
+        "output": [
+          {
+            "id": "fc_smoke_1",
+            "type": "function_call",
+            "call_id": "call_smoke_1",
+            "name": "lookup_account",
+            "arguments": "{\"email\":\"demo@example.com\"}",
+            "status": "completed"
+          },
+          {
+            "id": "reason_smoke_1",
+            "type": "reasoning",
+            "summary": [
+              {
+                "type": "summary_text",
+                "text": "Use the declared tool."
+              }
+            ],
+            "encrypted_content": "opaque-round-trip-data",
+            "status": "completed"
+          }
+        ],
+        "usage": {
+          "input_tokens": 12,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          },
+          "output_tokens": 8,
+          "output_tokens_details": {
+            "reasoning_tokens": 2
+          },
+          "total_tokens": 20
+        }
+      }
+    },
+    {
+      "request_id": "req_smoke_2",
+      "input_items": [
+        {
+          "id": "fc_output_smoke_1",
+          "type": "function_call_output",
+          "call_id": "call_smoke_1",
+          "name": "lookup_account",
+          "output": "{\"plan\":\"pro\",\"email\":\"demo@example.com\"}",
+          "status": "completed"
+        }
+      ],
+      "response": {
+        "id": "resp_smoke_2",
+        "object": "response",
+        "created_at": 1786000001,
+        "model": "gpt-5.5",
+        "status": "completed",
+        "previous_response_id": "resp_smoke_1",
+        "output": [
+          {
+            "id": "msg_assistant_1",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "phase": "final_answer",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "The account is on the pro plan.",
+                "annotations": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
