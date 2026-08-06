@@ -136,6 +136,4 @@ def materialize_genome_command(
     except GenomeError as exc:
         error_console.print(f"[red]Unable to materialize genome:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    console.print(
-        f"Materialized {loaded.genome_id} ({loaded.genome_sha256}) to {output}"
-    )
+    console.print(f"Materialized {loaded.genome_id} ({loaded.genome_sha256}) to {output}")
