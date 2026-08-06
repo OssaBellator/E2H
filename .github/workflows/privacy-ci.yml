@@ -26,12 +26,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --extra dev
-      - name: Test privacy policy contracts
-        run: >-
-          uv run pytest
-          tests/test_privacy.py
-          tests/test_privacy_ingest.py
-          tests/test_privacy_cli.py
+      - name: Test repository with coverage
+        run: uv run pytest
       - name: Validate redacted policy evidence
         run: |
           mkdir -p .e2h
