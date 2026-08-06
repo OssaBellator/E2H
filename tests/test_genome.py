@@ -196,9 +196,7 @@ def test_unknown_check_noop_and_missing_removal_are_rejected() -> None:
     noop = HarnessGenome.model_validate(
         {
             **common,
-            "patches": [
-                {"id": "noop", "op": "goal.set", "value": base.goal}
-            ],
+            "patches": [{"id": "noop", "op": "goal.set", "value": base.goal}],
         }
     )
     with pytest.raises(GenomeError, match="no-op"):
