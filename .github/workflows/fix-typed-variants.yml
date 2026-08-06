@@ -47,6 +47,20 @@ jobs:
                       '{"E2H_VARIANT_ID", "E2H_REPETITION", "E2H_VARIANT_SHA256"}'
                       ')',
                   ),
+                  (
+                      'Capability = Literal["text", "tools", "vision", "json"]\n\n\n'
+                      'class RouteTarget(StrictModel):',
+                      'Capability = Literal["text", "tools", "vision", "json"]\n\n\n'
+                      'def _default_capabilities() -> list[Capability]:\n'
+                      '    return ["text"]\n\n\n'
+                      'class RouteTarget(StrictModel):',
+                  ),
+                  (
+                      '    capabilities: list[Capability] = Field('
+                      'default_factory=lambda: ["text"], min_length=1)',
+                      '    capabilities: list[Capability] = Field('
+                      'default_factory=_default_capabilities, min_length=1)',
+                  ),
               ],
               Path("tests/test_typed_experiment_variants.py"): [
                   (
