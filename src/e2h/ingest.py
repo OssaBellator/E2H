@@ -53,6 +53,7 @@ class EvidenceFormat(StrEnum):
     OTLP_JSON = "otlp-json"
     OPENAI_RESPONSES_JSON = "openai-responses-json"
     ANTHROPIC_MESSAGES_JSON = "anthropic-messages-json"
+    GEMINI_GENERATE_CONTENT_JSON = "gemini-generate-content-json"
 
 
 class TranscriptRole(StrEnum):

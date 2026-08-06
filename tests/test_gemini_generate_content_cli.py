@@ -127,9 +127,7 @@ def test_cli_uses_custom_redaction_policy(tmp_path: Path) -> None:
     policy = tmp_path / "policy.yaml"
     write_archive(source)
     policy.write_text(
-        "schema_version: '0.1'\n"
-        "id: gemini-cli-policy\n"
-        "redact_emails: false\n",
+        "schema_version: '0.1'\nid: gemini-cli-policy\nredact_emails: false\n",
         encoding="utf-8",
     )
     result = runner.invoke(

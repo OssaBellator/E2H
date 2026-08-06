@@ -272,15 +272,33 @@ def test_server_tool_and_code_execution_lifecycles_are_linked() -> None:
     data["records"][0]["response"] = response(
         "resp_tools",
         [
-            {"toolCall": {"id": "tool_1", "toolType": "URL_CONTEXT", "args": {"url": "https://example.com"}}},
-            {"toolResponse": {"id": "tool_1", "toolType": "URL_CONTEXT", "response": {"status": "ok"}}},
+            {
+                "toolCall": {
+                    "id": "tool_1",
+                    "toolType": "URL_CONTEXT",
+                    "args": {"url": "https://example.com"},
+                }
+            },
+            {
+                "toolResponse": {
+                    "id": "tool_1",
+                    "toolType": "URL_CONTEXT",
+                    "response": {"status": "ok"},
+                }
+            },
             {"executableCode": {"id": "code_1", "language": "PYTHON", "code": "print('ok')"}},
             {"codeExecutionResult": {"id": "code_1", "outcome": "OUTCOME_OK", "output": "ok"}},
         ],
     )
     bundle = bundle_from(data, redact=False)
-    calls = [event for event in bundle.traces[0].events if event.event_type is TraceEventType.TOOL_CALLED]
-    results = [event for event in bundle.traces[0].events if event.event_type is TraceEventType.TOOL_COMPLETED]
+    calls = [
+        event for event in bundle.traces[0].events if event.event_type is TraceEventType.TOOL_CALLED
+    ]
+    results = [
+        event
+        for event in bundle.traces[0].events
+        if event.event_type is TraceEventType.TOOL_COMPLETED
+    ]
     assert len(calls) == 2
     assert len(results) == 2
     assert all(event.attributes["linked_call"] is True for event in results)
@@ -328,7 +346,9 @@ def test_unlinked_function_response_is_preserved() -> None:
     ]
     bundle = bundle_from(data, redact=False)
     completed = next(
-        event for event in bundle.traces[0].events if event.event_type is TraceEventType.TOOL_COMPLETED
+        event
+        for event in bundle.traces[0].events
+        if event.event_type is TraceEventType.TOOL_COMPLETED
     )
     assert completed.attributes["linked_call"] is False
     assert completed.attributes["tool_name"] == "partial"
@@ -355,9 +375,7 @@ def test_capsule_override_and_provenance_are_preserved(tmp_path: Path) -> None:
             "record timestamps must be nondecreasing",
         ),
         (
-            lambda data: data["records"][1]["contents"][0].update(
-                {"parts": [{"text": "changed"}]}
-            ),
+            lambda data: data["records"][1]["contents"][0].update({"parts": [{"text": "changed"}]}),
             "content ids must retain identical observable content",
         ),
         (

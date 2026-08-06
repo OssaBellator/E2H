@@ -23,7 +23,7 @@
 - [x] Content-addressed source provenance.
 - [x] OpenAI Responses API transcript adapter.
 - [x] Anthropic Messages API transcript adapter.
-- [ ] Gemini GenerateContent transcript adapter.
+- [x] Gemini GenerateContent transcript adapter.
 - [x] Configurable redaction policies and review reports.
 - [x] Environment and artifact snapshots.
 - [x] Review-gated capsule proposals with immutable evidence provenance.
