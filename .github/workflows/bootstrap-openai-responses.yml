@@ -93,7 +93,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm .bootstrap/openai-responses-ready
+          git rm \
+            .bootstrap/openai-responses-ready \
+            .github/workflows/bootstrap-openai-responses.yml
           rm -rf .e2h
           git add .
           git config user.name "github-actions[bot]"
