@@ -13,6 +13,7 @@ from typing import Any, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from e2h.document import load_mapping_document
+from e2h.failures import FailureCode
 from e2h.models import TaskCapsule
 from e2h.runner import CheckStatus, RunResult
 from e2h.variants import (
@@ -29,6 +30,20 @@ _MAX_METADATA_BYTES = 65_536
 _MAX_EXAMPLE_BYTES = 262_144
 _MAX_FEEDBACK_CHARS = 50_000
 _OPTIMIZER_PROVENANCE_KEY = "e2h_optimizer"
+_FAILURE_SUMMARIES: dict[FailureCode, str] = {
+    FailureCode.UNEXPECTED_EXIT: "command returned an unexpected exit code",
+    FailureCode.SIGNAL_TERMINATION: "command was terminated by a signal",
+    FailureCode.TIMEOUT: "command exceeded its declared time budget",
+    FailureCode.COMMAND_NOT_FOUND: "command executable was not found",
+    FailureCode.PERMISSION_DENIED: "command could not be started because permission was denied",
+    FailureCode.PROCESS_LAUNCH_ERROR: "command process could not be started",
+    FailureCode.WORKING_DIRECTORY_MISSING: "declared check working directory does not exist",
+    FailureCode.SANDBOX_CONFIGURATION: "sandbox configuration is incomplete",
+    FailureCode.SANDBOX_RUNTIME: "sandbox runtime could not execute the check",
+    FailureCode.SANDBOX_CLEANUP: "timed-out container could not be cleaned up safely",
+    FailureCode.OUTPUT_CAPTURE: "command output could not be captured reliably",
+    FailureCode.SKIPPED_AFTER_FAILURE: "check was skipped after an earlier check failed",
+}
 
 
 class OptimizerAdapterError(ValueError):
@@ -254,9 +269,10 @@ class OptimizerFeedback(StrictModel):
 
 def dspy_example_payload(example: DSPyExample) -> DSPyExamplePayload:
     """Return data consumable by ``dspy.Example(**values).with_inputs(...)``."""
+    values = {**example.inputs, **example.outputs}
     return DSPyExamplePayload(
-        values={**example.inputs, **example.outputs},
-        input_fields=list(example.inputs),
+        values={key: values[key] for key in sorted(values)},
+        input_fields=sorted(example.inputs),
     )
 
 
@@ -390,7 +406,7 @@ def apply_optimizer_candidate(
 
 
 def feedback_from_run_result(result: RunResult) -> OptimizerFeedback:
-    """Create bounded GEPA-friendly feedback without copying stdout or stderr."""
+    """Create bounded GEPA-friendly feedback without copying free-form runner text."""
     total = len(result.checks)
     passed = sum(check.status is CheckStatus.PASSED for check in result.checks)
     score = passed / total if total else 0.0
@@ -401,6 +417,7 @@ def feedback_from_run_result(result: RunResult) -> OptimizerFeedback:
     checks: list[OptimizerCheckFeedback] = []
     for check in result.checks:
         failure = check.failure
+        safe_summary = _FAILURE_SUMMARIES[failure.code] if failure is not None else None
         check_feedback = OptimizerCheckFeedback(
             check_id=check.id,
             status=check.status.value,
@@ -409,7 +426,7 @@ def feedback_from_run_result(result: RunResult) -> OptimizerFeedback:
             failure_code=failure.code.value if failure is not None else None,
             failure_impact=failure.impact.value if failure is not None else None,
             retryability=failure.retryability.value if failure is not None else None,
-            summary=failure.summary if failure is not None else None,
+            summary=safe_summary,
             caused_by_check_id=failure.caused_by_check_id if failure is not None else None,
         )
         checks.append(check_feedback)
@@ -417,7 +434,7 @@ def feedback_from_run_result(result: RunResult) -> OptimizerFeedback:
         if failure is not None:
             line += (
                 f"; {failure.impact.value}/{failure.category.value}/{failure.code.value}; "
-                f"{failure.summary}"
+                f"{safe_summary}"
             )
             if failure.caused_by_check_id is not None:
                 line += f"; caused by {failure.caused_by_check_id}"
