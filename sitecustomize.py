@@ -17,7 +17,7 @@ replacements = (
     ),
     (
         "    candidates: list[tuple[TraceEvent, TraceEvent, TraceEvent | None]] = []\n",
-        "    correction_candidates: list[tuple[TraceEvent, TraceEvent, TraceEvent | None]] = []\n",
+        "    correction_candidates: list[tuple[TraceEvent, TraceEvent, TraceEvent]] = []\n",
     ),
     (
         "        candidates.append((correction_message, corrected_message, feedback))\n",
