@@ -1,0 +1,28 @@
+schema_version: "0.1"
+id: compiled-correction-smoke
+goal:
+  strategy: latest_correction
+initial_state:
+  working_directory: .
+allowed_actions:
+  tools: [command]
+  network: deny
+limits:
+  max_commands: 5
+  default_timeout_seconds: 30
+  max_output_chars: 20000
+checks:
+  - id: contract
+    description: Pass normally and fail under the declared mutation.
+    argv:
+      - python
+      - -c
+      - >-
+        import os; raise SystemExit(0 if os.getenv('E2H_SMOKE_MODE', 'good') == 'good' else 7)
+mutations:
+  - id: force-regression
+    description: Simulate a harness regression through a controlled environment perturbation.
+    env:
+      E2H_SMOKE_MODE: bad
+metadata:
+  purpose: continuous-integration-compiler-smoke
