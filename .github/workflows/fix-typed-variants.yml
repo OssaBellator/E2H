@@ -5,6 +5,10 @@ on:
     branches: [agent/typed-variants]
     paths:
       - .github/workflows/fix-typed-variants.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-typed-variants.yml
 
 permissions:
   contents: write
