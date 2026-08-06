@@ -329,13 +329,9 @@ def summarize_failures(
             present.append((index, check_id, failure))
     if not present:
         return FailureSummary()
-    category_counts: Counter[str] = Counter(
-        failure.category.value for _, _, failure in present
-    )
+    category_counts: Counter[str] = Counter(failure.category.value for _, _, failure in present)
     code_counts: Counter[str] = Counter(failure.code.value for _, _, failure in present)
-    impact_counts: Counter[FailureImpact] = Counter(
-        failure.impact for _, _, failure in present
-    )
+    impact_counts: Counter[FailureImpact] = Counter(failure.impact for _, _, failure in present)
     rank = {
         FailureImpact.INFRASTRUCTURE_ERROR: 0,
         FailureImpact.EVALUATION_FAILURE: 1,
