@@ -7,9 +7,9 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import load_mapping_document
 from e2h.models import CommandCheck, TaskCapsule
 
 _MAX_DOCUMENT_BYTES = 1_048_576
@@ -41,6 +41,7 @@ def _canonical_json_bytes(value: Any) -> bytes:
 
 
 def _capsule_document(capsule: TaskCapsule) -> dict[str, Any]:
+    _canonical_json_bytes(capsule.metadata)
     document = capsule.model_dump(mode="json")
     for command in document["success"]["commands"]:
         command["expected_exit_codes"] = sorted(command["expected_exit_codes"])
@@ -229,6 +230,7 @@ HarnessPatch = Annotated[
     | MaxOutputCharsSetPatch,
     Field(discriminator="op"),
 ]
+ApplicationPatchId = Annotated[str, Field(pattern=_PATCH_ID_PATTERN)]
 
 
 class HarnessGenome(StrictModel):
@@ -261,7 +263,7 @@ class GenomeApplication(StrictModel):
     genome_sha256: str = Field(pattern=_SHA256_PATTERN)
     base_capsule_sha256: str = Field(pattern=_SHA256_PATTERN)
     result_capsule_sha256: str = Field(pattern=_SHA256_PATTERN)
-    applied_patch_ids: list[str] = Field(min_length=1, max_length=100)
+    applied_patch_ids: list[ApplicationPatchId] = Field(min_length=1, max_length=100)
     capsule: TaskCapsule
 
     @model_validator(mode="after")
@@ -359,7 +361,10 @@ def _apply_patch(capsule: TaskCapsule, patch: HarnessPatch) -> None:
 
 def apply_genome(genome: HarnessGenome, capsule: TaskCapsule) -> GenomeApplication:
     """Apply a genome without executing commands or mutating the input capsule."""
-    base_digest = capsule_sha256(capsule)
+    try:
+        base_digest = capsule_sha256(capsule)
+    except ValueError as exc:
+        raise GenomeError(f"base capsule cannot be canonically identified: {exc}") from exc
     if genome.base_capsule_sha256 != base_digest:
         raise GenomeError("genome base capsule digest does not match the supplied capsule")
     updated = capsule.model_copy(deep=True)
@@ -386,33 +391,11 @@ def materialize_application(application: GenomeApplication) -> TaskCapsule:
     return validated.capsule.model_copy(deep=True)
 
 
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
-
-
 def _read_document(path: Path, *, noun: str) -> dict[str, Any]:
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise GenomeError(f"unable to read {noun}: {exc}") from exc
-    if len(raw) > _MAX_DOCUMENT_BYTES:
-        raise GenomeError(f"{noun} exceeds {_MAX_DOCUMENT_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise GenomeError(f"{noun} must be UTF-8") from exc
-    try:
-        if path.suffix.lower() == ".json":
-            data = json.loads(text, parse_constant=_reject_json_constant)
-        elif path.suffix.lower() in {".yaml", ".yml"}:
-            data = yaml.safe_load(text)
-        else:
-            raise GenomeError(f"{noun} must use .json, .yaml, or .yml")
-    except (json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
-        raise GenomeError(f"invalid {noun} syntax: {exc}") from exc
-    if not isinstance(data, dict):
-        raise GenomeError(f"{noun} root must be an object")
-    return data
+        return load_mapping_document(path, noun=noun, max_bytes=_MAX_DOCUMENT_BYTES)
+    except ValueError as exc:
+        raise GenomeError(str(exc)) from exc
 
 
 def load_genome(path: Path) -> HarnessGenome:
