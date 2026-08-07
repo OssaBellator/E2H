@@ -195,7 +195,8 @@ def test_cli_verify_toolchain_fails_closed_on_legacy_or_tampered_inputs(
     )
     missing = runner.invoke(release_app, ["verify-toolchain", str(manifest_path), str(root)])
     assert missing.exit_code == 1
-    assert "no metadata.release_toolchain" in missing.stderr
+    normalized_stderr = " ".join(missing.stderr.split())
+    assert "no metadata.release_toolchain" in normalized_stderr
 
     manifest_path.write_text(
         _manifest(_metadata(root, monkeypatch)).model_dump_json(indent=2) + "\n",
