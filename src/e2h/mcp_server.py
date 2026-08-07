@@ -199,9 +199,7 @@ class E2HMCPService:
         if config.max_artifact_bytes < 1:
             raise MCPServiceError("max_artifact_bytes must be positive")
         if not 1 <= config.max_memory_rows <= MAX_QUERY_ROWS:
-            raise MCPServiceError(
-                f"max_memory_rows must be between 1 and {MAX_QUERY_ROWS}"
-            )
+            raise MCPServiceError(f"max_memory_rows must be between 1 and {MAX_QUERY_ROWS}")
         try:
             backend = ExecutionBackend(config.replay_backend)
         except ValueError as exc:
