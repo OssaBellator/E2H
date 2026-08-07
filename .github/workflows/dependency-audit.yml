@@ -28,8 +28,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install locked audit tool
-        run: uv sync --locked --no-default-groups --group audit
+      - name: Install locked audit tool and runtime dependencies
+        run: uv sync --locked --no-default-groups --group audit --no-install-project
 
       - name: Export exact runtime dependency set
         run: |
