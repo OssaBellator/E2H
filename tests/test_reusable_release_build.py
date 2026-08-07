@@ -83,7 +83,7 @@ def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> Non
 def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> None:
     workflow, raw = _workflow()
     build = workflow["jobs"]["build"]
-    assert build["env"]["PYTHONPATH"] == "src"
+    assert "PYTHONPATH" not in build["env"]
 
     steps = build["steps"]
     runs = [str(step.get("run", "")) for step in steps if "run" in step]
@@ -96,7 +96,7 @@ def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> Non
         line.strip()
         for run in runs
         for line in run.splitlines()
-        if line.strip().startswith(".venv/bin/python -m e2h ")
+        if line.strip().startswith("PYTHONPATH=src .venv/bin/python -m e2h ")
     ]
     assert len(cli_lines) == 5
 
