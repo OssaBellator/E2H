@@ -69,11 +69,30 @@ Sanitized real-world benchmark patterns require public provenance, a sanitizatio
 
 Synthetic benchmark fixtures should remain clearly labeled as synthetic rather than being presented as real-world evidence.
 
+## Dependency and GitHub Action updates
+
+Dependabot monitors two independent update streams in `.github/dependabot.yml`:
+
+- the `uv` ecosystem for `pyproject.toml` and `uv.lock`;
+- the `github-actions` ecosystem for external workflow actions.
+
+Python dependency pull requests must preserve the locked workflow. If a dependency change affects `pyproject.toml`, the corresponding reviewed `uv.lock` change must be present and all release-integrity/SBOM checks must pass.
+
+External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
+
+1. reviews the upstream release or security-fix commit;
+2. confirms the proposed SHA is the intended immutable revision;
+3. updates the workflow pin and its version/security context comment;
+4. updates the reviewed-pin map in the policy test;
+5. runs all relevant permanent suites.
+
+`actions/setup-node` is temporarily excluded from automated action updates because E2H currently pins a reviewed post-v7.0.0 security-fix commit that is not a tagged release. Re-enable automated updates for it only after a reviewed tagged release contains that fix.
+
 ## Supply-chain workflow changes
 
-External GitHub Actions used by publication or release-integrity workflows must remain pinned to full immutable commit SHAs. Update the reviewed version comment at the same time and let the workflow-policy tests enforce the resulting trust boundary.
+The tag-only publication workflow must not be exercised from a pull request by creating a real release tag. Normal CI validates release policy, reproducible builds, manifests, canonical SBOMs, and workflow action pins without publishing externally.
 
-The tag-only publication workflow must not be exercised from a pull request by creating a real release tag. Normal CI validates release policy, reproducible builds, manifests, and SBOM canonicalization without publishing externally.
+Supply-chain workflow changes must preserve job-scoped permissions, immutable action pins, checksum-bound artifact handoffs, and the separation between repository-controlled build code and OIDC-bearing publication/attestation jobs.
 
 ## Documentation
 
