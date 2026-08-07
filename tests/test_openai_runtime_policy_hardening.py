@@ -30,7 +30,12 @@ def tool_variant(*, selection: str = "named", max_calls: int = 2) -> ToolVariant
     return ToolVariant.model_validate(payload)
 
 
-def function_call(*, call_id: object = "call_1", name: object = "lookup", arguments: object | None = None) -> dict[str, object]:
+def function_call(
+    *,
+    call_id: object = "call_1",
+    name: object = "lookup",
+    arguments: object | None = None,
+) -> dict[str, object]:
     return {
         "id": "fc_1",
         "type": "function_call",
@@ -45,12 +50,12 @@ def test_named_selection_requires_exactly_one_call() -> None:
     tools = tool_variant(selection="named", max_calls=2)
 
     assert _tool_policy_violations(tools, {"output": []}) == [
-        "provider returned 0 tool calls despite selection='named' requiring exactly one"
+        "provider returned 0 tool calls; selection='named' requires exactly one"
     ]
     assert _tool_policy_violations(
         tools,
         {"output": [function_call(), function_call(call_id="call_2")]},
-    ) == ["provider returned 2 tool calls despite selection='named' requiring exactly one"]
+    ) == ["provider returned 2 tool calls; selection='named' requires exactly one"]
 
 
 def test_tool_calls_are_rejected_without_a_declared_catalogue() -> None:
