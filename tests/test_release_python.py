@@ -6,8 +6,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_INTEGRITY = ROOT / ".github" / "workflows" / "release-integrity.yml"
-PUBLISH = ROOT / ".github" / "workflows" / "publish-pypi.yml"
+REUSABLE = ROOT / ".github" / "workflows" / "reusable-release-build.yml"
 CORE_CI = ROOT / ".github" / "workflows" / "ci.yml"
 SETUP_PYTHON_PREFIX = "actions/setup-python@"
 RELEASE_PYTHON = "3.13.14"
@@ -37,11 +36,9 @@ def _setup_python_version(job: dict[str, Any]) -> str:
     return version
 
 
-def test_release_builds_use_same_exact_python_patch() -> None:
-    integrity_job = _workflow(RELEASE_INTEGRITY)["jobs"]["reproducible-build"]
-    publish_job = _workflow(PUBLISH)["jobs"]["build"]
-    assert _setup_python_version(integrity_job) == RELEASE_PYTHON
-    assert _setup_python_version(publish_job) == RELEASE_PYTHON
+def test_reusable_release_build_uses_exact_python_patch() -> None:
+    build_job = _workflow(REUSABLE)["jobs"]["build"]
+    assert _setup_python_version(build_job) == RELEASE_PYTHON
 
 
 def test_release_python_pin_is_exact_not_a_minor_selector() -> None:
