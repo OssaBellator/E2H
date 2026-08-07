@@ -80,6 +80,33 @@ def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> Non
     assert all("if" not in step for step in selected)
 
 
+def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> None:
+    workflow, raw = _workflow()
+    build = workflow["jobs"]["build"]
+    assert "PYTHONPATH" not in build["env"]
+
+    steps = build["steps"]
+    runs = [str(step.get("run", "")) for step in steps if "run" in step]
+    syncs = [run.strip() for run in runs if run.strip().startswith("uv sync ")]
+    assert syncs == ["uv sync --locked --no-default-groups --no-install-project"]
+    assert "--extra dev" not in raw
+    assert "uv run " not in raw
+
+    cli_lines = [
+        line.strip()
+        for run in runs
+        for line in run.splitlines()
+        if line.strip().startswith("PYTHONPATH=src .venv/bin/python -m e2h ")
+    ]
+    assert len(cli_lines) == 5
+
+    sbom = next(
+        step for step in steps if step.get("name") == "Export and canonicalize runtime SBOM twice"
+    )
+    sbom_run = str(sbom["run"])
+    assert sbom_run.count("uv export --locked --no-default-groups") == 2
+
+
 def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> None:
     workflow, _ = _workflow()
     steps = workflow["jobs"]["build"]["steps"]

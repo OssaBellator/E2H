@@ -46,7 +46,7 @@ def test_dependabot_updates_actions_but_holds_untagged_security_fix_pins() -> No
     }
     assert actions["ignore"] == [
         {"dependency-name": "actions/setup-node"},
-        {"dependency-name": "github/codeql-action"},
+        {"dependency-name": "github/codeql-action/*"},
     ]
 
 
