@@ -144,9 +144,9 @@ def test_verify_toolchain_rejects_missing_malformed_or_wrong_commit(
     root = _write_toolchain_root(tmp_path)
     metadata = _metadata(root, monkeypatch)
 
-    with pytest.raises(ReleaseToolchainError, match="no metadata.release_toolchain"):
+    with pytest.raises(ReleaseToolchainError, match=r"no metadata\.release_toolchain"):
         verify_release_toolchain_evidence({}, root)
-    with pytest.raises(ReleaseToolchainError, match="invalid metadata.release_toolchain"):
+    with pytest.raises(ReleaseToolchainError, match=r"invalid metadata\.release_toolchain"):
         verify_release_toolchain_evidence({"release_toolchain": {"schema_version": "0.1"}}, root)
     with pytest.raises(ReleaseToolchainError, match="lowercase 40-character SHA"):
         verify_release_toolchain_evidence(metadata, root, expected_source_commit="A" * 40)
