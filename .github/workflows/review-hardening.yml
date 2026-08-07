@@ -24,15 +24,21 @@ jobs:
         run: |
           uv run python - <<'PY'
           import subprocess
+          import sys
           from pathlib import Path
-          import yaml
 
-          workflow = yaml.safe_load(
-              Path('.github/workflows/refresh-benchmark-environments.yml').read_text(encoding='utf-8')
+          text = Path('.github/workflows/refresh-benchmark-environments.yml').read_text(
+              encoding='utf-8'
           )
-          steps = workflow['jobs']['harden']['steps']
-          patch = next(step['run'] for step in steps if step.get('name') == 'Apply review hardening')
-          subprocess.run(patch, shell=True, check=True)
+          section = text.split('      - name: Apply review hardening\n', 1)[1]
+          block = section.split('      - run: uv run ruff check . --fix\n', 1)[0]
+          prefix = "          uv run python - <<'PY'\n"
+          source = block.split(prefix, 1)[1].rsplit('\n          PY\n', 1)[0]
+          normalized = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in source.splitlines()
+          )
+          subprocess.run([sys.executable, '-'], input=normalized, text=True, check=True)
           PY
       - run: uv run ruff check . --fix
       - run: uv run ruff format .
