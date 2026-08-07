@@ -33,11 +33,13 @@ jobs:
           (cd source-a && uv build --out-dir ../dist-a)
           (cd source-b && uv build --out-dir ../dist-b)
           rm -f dist-a/.gitignore dist-b/.gitignore
-      - name: Export runtime SBOM twice
+      - name: Export and canonicalize runtime SBOM twice
         run: |
-          (cd source-a && uv export --locked --format cyclonedx1.5 --output-file ../sbom-a.cdx.json)
-          (cd source-b && uv export --locked --format cyclonedx1.5 --output-file ../sbom-b.cdx.json)
-      - name: Require byte-identical builds and runtime SBOMs
+          (cd source-a && uv export --locked --format cyclonedx1.5 --output-file ../sbom-a.raw.json)
+          (cd source-b && uv export --locked --format cyclonedx1.5 --output-file ../sbom-b.raw.json)
+          uv run e2h release canonicalize-sbom sbom-a.raw.json --output sbom-a.cdx.json
+          uv run e2h release canonicalize-sbom sbom-b.raw.json --output sbom-b.cdx.json
+      - name: Require byte-identical builds and canonical runtime SBOMs
         run: |
           uv run python - <<'PY'
           import hashlib
@@ -62,6 +64,8 @@ jobs:
           payload = json.loads(sbom_a)
           assert payload["bomFormat"] == "CycloneDX"
           assert payload["specVersion"] == "1.5"
+          assert "serialNumber" not in payload
+          assert "timestamp" not in payload.get("metadata", {})
           components = payload.get("components", [])
           names = {
               component.get("name")
