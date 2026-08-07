@@ -39,9 +39,7 @@ def canonicalize_cyclonedx_sbom(data: dict[str, Any]) -> str:
     if data.get("bomFormat") != "CycloneDX":
         raise SbomCanonicalizationError("SBOM bomFormat must be CycloneDX")
     if data.get("specVersion") != _SUPPORTED_SPEC_VERSION:
-        raise SbomCanonicalizationError(
-            f"SBOM specVersion must be {_SUPPORTED_SPEC_VERSION}"
-        )
+        raise SbomCanonicalizationError(f"SBOM specVersion must be {_SUPPORTED_SPEC_VERSION}")
     if data.get("version") != 1:
         raise SbomCanonicalizationError("SBOM version must be 1")
 
