@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 
 REVIEWED_ACTION_PINS = {
-    "actions/attest": "508db95dd578ae2727ebd6217d5ba78e4fbda05d",
+    "actions/attest": "1e69f48acb82d1966a394da916b4c1698aa569d6",
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     "actions/setup-node": "e51e5fe84fc33b4c73ebe40526b2694712b5b858",
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "astral-sh/setup-uv": "c771a70e6277c0a99b617c7a806ffedaca235ff9",
-    "github/codeql-action": "6a90bf1f5426d0c367cad0b2000f3b721bab3122",
+    "github/codeql-action": "7d9249f5a57288b8a472ddd9cc3ece1921f7dc38",
     "pypa/gh-action-pypi-publish": "dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
 }
 
