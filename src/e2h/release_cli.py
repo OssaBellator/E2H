@@ -18,6 +18,11 @@ from e2h.release import (
     seal_release_artifacts,
     verify_release_artifacts,
 )
+from e2h.release_toolchain import (
+    ReleaseToolchainError,
+    collect_release_toolchain_evidence,
+    release_toolchain_metadata,
+)
 from e2h.sbom import SbomCanonicalizationError, canonicalize_cyclonedx_sbom_file
 from e2h.trace import write_json_atomic
 
@@ -37,19 +42,67 @@ def _load(path: Path) -> ReleaseManifest:
         raise typer.Exit(code=2) from exc
 
 
+def _toolchain_metadata(
+    *,
+    root: Path | None,
+    source_commit: str | None,
+    runner_generation: str | None,
+    source_date_epoch: int | None,
+) -> dict[str, object]:
+    supplied = (root, source_commit, runner_generation, source_date_epoch)
+    if all(value is None for value in supplied):
+        return {}
+    if any(value is None for value in supplied):
+        error_console.print(
+            "[red]Incomplete toolchain evidence:[/red] "
+            "--toolchain-root, --source-commit, --runner-generation, and "
+            "--source-date-epoch must be supplied together"
+        )
+        raise typer.Exit(code=2)
+    assert root is not None
+    assert source_commit is not None
+    assert runner_generation is not None
+    assert source_date_epoch is not None
+    try:
+        evidence = collect_release_toolchain_evidence(
+            root,
+            source_commit=source_commit,
+            runner_generation=runner_generation,
+            source_date_epoch=source_date_epoch,
+        )
+    except ReleaseToolchainError as exc:
+        error_console.print(f"[red]Invalid release toolchain:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    return release_toolchain_metadata(evidence)
+
+
 @release_app.command("seal")
 def seal_release(
     directory: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
     output: Annotated[Path, typer.Option("--output", "-o", dir_okay=False)],
     project: Annotated[str | None, typer.Option("--project")] = None,
     version: Annotated[str | None, typer.Option("--version")] = None,
+    toolchain_root: Annotated[
+        Path | None,
+        typer.Option("--toolchain-root", exists=True, file_okay=False),
+    ] = None,
+    source_commit: Annotated[str | None, typer.Option("--source-commit")] = None,
+    runner_generation: Annotated[str | None, typer.Option("--runner-generation")] = None,
+    source_date_epoch: Annotated[int | None, typer.Option("--source-date-epoch")] = None,
 ) -> None:
     """Seal an exact wheel/sdist pair into a deterministic JSON manifest."""
+    metadata = _toolchain_metadata(
+        root=toolchain_root,
+        source_commit=source_commit,
+        runner_generation=runner_generation,
+        source_date_epoch=source_date_epoch,
+    )
     try:
         manifest = seal_release_artifacts(
             directory,
             expected_project=project,
             expected_version=version,
+            metadata=metadata,
         )
     except ReleaseIntegrityError as exc:
         error_console.print(f"[red]Unable to seal release artifacts:[/red] {exc}")
@@ -121,6 +174,7 @@ def inspect_release(
         "manifest_sha256": release_manifest_sha256(manifest),
         "artifact_count": len(manifest.artifacts),
         "total_bytes": sum(artifact.size_bytes for artifact in manifest.artifacts),
+        "metadata": manifest.metadata,
         "artifacts": [
             {
                 "filename": artifact.filename,
