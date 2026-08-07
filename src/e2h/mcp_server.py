@@ -215,7 +215,9 @@ class E2HMCPService:
                     store = raw_store.resolve()
                     store.relative_to(root)
                 except ValueError as exc:
-                    raise MCPServiceError("memory store must be inside the configured MCP root") from exc
+                    raise MCPServiceError(
+                        "memory store must be inside the configured MCP root"
+                    ) from exc
             else:
                 store, _ = _safe_relative(root, str(raw_store), noun="memory store")
         self.config = replace(config, root=root, store=store, replay_backend=backend)
