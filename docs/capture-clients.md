@@ -72,7 +72,7 @@ It requests only:
 - `scripting` — to read the current selection/title/origin from that active tab;
 - `downloads` — to open a local Save As flow for the resulting JSON document.
 
-It has no `host_permissions` entry, no content script that runs automatically, no storage permission, and no remotely hosted code. Chrome documents `activeTab` as temporary access triggered by a user action, which is a better fit for an explicit clipping/capture workflow than persistent access to every site. The MV3 scripting API can use that temporary grant. citeturn597018search1turn597018search10
+It has no `host_permissions` entry, no content script that runs automatically, no storage permission, and no remotely hosted code. `activeTab` is intentionally used for temporary, user-triggered access rather than persistent access to every site, and the MV3 scripting API can use that temporary grant.
 
 ### Load for local development
 
@@ -97,7 +97,7 @@ It contributes one command:
 E2H: Capture Selection as Evidence
 ```
 
-The command is also available from the editor context menu when a selection exists. VS Code can infer command activation for contributed commands on supported versions, so this extension does not activate at startup and does not declare a broad `*` activation event. citeturn296390search0turn296390search1
+The command is also available from the editor context menu when a selection exists. Supported VS Code versions infer command activation from the command contribution, so this extension does not activate at startup and does not declare a broad `*` activation event.
 
 When invoked, the extension:
 
