@@ -357,9 +357,7 @@ def test_response_limit_returns_bounded_error(tmp_path: Path) -> None:
                     "message": {
                         "messageId": "message-limit",
                         "role": "ROLE_USER",
-                        "parts": [
-                            {"data": {"schema_version": "0.1", "operation": "status"}}
-                        ],
+                        "parts": [{"data": {"schema_version": "0.1", "operation": "status"}}],
                     }
                 },
             },
