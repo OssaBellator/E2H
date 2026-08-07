@@ -100,6 +100,7 @@ jobs:
             release/e2h-sbom.cdx.json
             release/release-manifest.json
             release/release-verification.json
+            release/release-toolchain-verification.json
             release/release-inspection.json
             release/release-checksums.txt
           )
@@ -199,6 +200,7 @@ jobs:
             release/e2h-sbom.cdx.json \
             release/release-manifest.json \
             release/release-verification.json \
+            release/release-toolchain-verification.json \
             release/release-inspection.json \
             release/release-checksums.txt; do
             gh release verify-asset "$GITHUB_REF_NAME" "$asset" > /dev/null

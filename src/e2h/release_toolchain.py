@@ -6,6 +6,7 @@ import hashlib
 import platform
 import re
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +21,7 @@ _EXACT_UV_RE = re.compile(r"^==(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:[A-Za-z0-9._
 _EXACT_HATCHLING_RE = re.compile(
     r"^hatchling==(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:[A-Za-z0-9._+-]*)?)$"
 )
+_SOURCE_COMMIT_RE = re.compile(_COMMIT_PATTERN)
 
 
 class ReleaseToolchainError(ValueError):
@@ -39,6 +41,30 @@ class ReleaseToolchainEvidence(BaseModel):
     build_backend: Literal["hatchling.build"] = "hatchling.build"
     build_backend_version: str = Field(pattern=_VERSION_PATTERN)
     source_date_epoch: int = Field(ge=0)
+    uv_toml_sha256: str = Field(pattern=_SHA256_PATTERN)
+    pyproject_sha256: str = Field(pattern=_SHA256_PATTERN)
+    uv_lock_sha256: str = Field(pattern=_SHA256_PATTERN)
+    build_constraints_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+
+class ReleaseToolchainVerification(BaseModel):
+    """Proof that manifest toolchain evidence matches one source tree."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["0.1"] = "0.1"
+    evidence: ReleaseToolchainEvidence
+    source_inputs_verified: Literal[True] = True
+    source_commit_verified: bool = False
+    verified: Literal[True] = True
+
+
+class _ReleaseToolchainSourceInputs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uv_required_version: str = Field(pattern=_VERSION_PATTERN)
+    build_backend: Literal["hatchling.build"] = "hatchling.build"
+    build_backend_version: str = Field(pattern=_VERSION_PATTERN)
     uv_toml_sha256: str = Field(pattern=_SHA256_PATTERN)
     pyproject_sha256: str = Field(pattern=_SHA256_PATTERN)
     uv_lock_sha256: str = Field(pattern=_SHA256_PATTERN)
@@ -109,14 +135,7 @@ def _constraints_hatchling_version(raw: bytes) -> str:
     return matches[0]
 
 
-def collect_release_toolchain_evidence(
-    root: Path,
-    *,
-    source_commit: str,
-    runner_generation: str,
-    source_date_epoch: int,
-) -> ReleaseToolchainEvidence:
-    """Collect deterministic toolchain evidence from one reviewed source tree."""
+def _collect_release_toolchain_source_inputs(root: Path) -> _ReleaseToolchainSourceInputs:
     try:
         if root.is_symlink() or not root.is_dir():
             raise ReleaseToolchainError("toolchain root must be a real directory")
@@ -138,22 +157,98 @@ def collect_release_toolchain_evidence(
         raise ReleaseToolchainError(
             "build-constraints.txt Hatchling version must match pyproject.toml"
         )
+    return _ReleaseToolchainSourceInputs(
+        uv_required_version=uv_version,
+        build_backend_version=hatchling_version,
+        uv_toml_sha256=hashlib.sha256(inputs["uv.toml"]).hexdigest(),
+        pyproject_sha256=hashlib.sha256(inputs["pyproject.toml"]).hexdigest(),
+        uv_lock_sha256=hashlib.sha256(inputs["uv.lock"]).hexdigest(),
+        build_constraints_sha256=hashlib.sha256(inputs["build-constraints.txt"]).hexdigest(),
+    )
 
+
+def collect_release_toolchain_evidence(
+    root: Path,
+    *,
+    source_commit: str,
+    runner_generation: str,
+    source_date_epoch: int,
+) -> ReleaseToolchainEvidence:
+    """Collect deterministic toolchain evidence from one reviewed source tree."""
+    source = _collect_release_toolchain_source_inputs(root)
     try:
         return ReleaseToolchainEvidence(
             source_commit=source_commit,
             runner_generation=runner_generation,
             python_version=platform.python_version(),
-            uv_required_version=uv_version,
-            build_backend_version=hatchling_version,
+            uv_required_version=source.uv_required_version,
+            build_backend=source.build_backend,
+            build_backend_version=source.build_backend_version,
             source_date_epoch=source_date_epoch,
-            uv_toml_sha256=hashlib.sha256(inputs["uv.toml"]).hexdigest(),
-            pyproject_sha256=hashlib.sha256(inputs["pyproject.toml"]).hexdigest(),
-            uv_lock_sha256=hashlib.sha256(inputs["uv.lock"]).hexdigest(),
-            build_constraints_sha256=hashlib.sha256(inputs["build-constraints.txt"]).hexdigest(),
+            uv_toml_sha256=source.uv_toml_sha256,
+            pyproject_sha256=source.pyproject_sha256,
+            uv_lock_sha256=source.uv_lock_sha256,
+            build_constraints_sha256=source.build_constraints_sha256,
         )
     except ValueError as exc:
         raise ReleaseToolchainError(f"invalid release toolchain evidence: {exc}") from exc
+
+
+def release_toolchain_evidence_from_metadata(
+    metadata: Mapping[str, object],
+) -> ReleaseToolchainEvidence:
+    """Load strict release-toolchain evidence from manifest metadata."""
+    raw = metadata.get("release_toolchain")
+    if raw is None:
+        raise ReleaseToolchainError("release manifest has no metadata.release_toolchain evidence")
+    try:
+        return ReleaseToolchainEvidence.model_validate(raw)
+    except ValueError as exc:
+        raise ReleaseToolchainError(f"invalid metadata.release_toolchain evidence: {exc}") from exc
+
+
+def verify_release_toolchain_evidence(
+    metadata: Mapping[str, object],
+    root: Path,
+    *,
+    expected_source_commit: str | None = None,
+) -> ReleaseToolchainVerification:
+    """Verify source-controlled toolchain evidence against one source tree."""
+    evidence = release_toolchain_evidence_from_metadata(metadata)
+    source = _collect_release_toolchain_source_inputs(root)
+    comparable_fields = (
+        "uv_required_version",
+        "build_backend",
+        "build_backend_version",
+        "uv_toml_sha256",
+        "pyproject_sha256",
+        "uv_lock_sha256",
+        "build_constraints_sha256",
+    )
+    mismatches = [
+        field for field in comparable_fields if getattr(evidence, field) != getattr(source, field)
+    ]
+    if mismatches:
+        raise ReleaseToolchainError(
+            "release toolchain evidence does not match source tree: " + ", ".join(mismatches)
+        )
+
+    source_commit_verified = False
+    if expected_source_commit is not None:
+        if _SOURCE_COMMIT_RE.fullmatch(expected_source_commit) is None:
+            raise ReleaseToolchainError(
+                "expected source commit must be a lowercase 40-character SHA"
+            )
+        if evidence.source_commit != expected_source_commit:
+            raise ReleaseToolchainError(
+                "release toolchain source commit does not match expected source commit"
+            )
+        source_commit_verified = True
+
+    return ReleaseToolchainVerification(
+        evidence=evidence,
+        source_commit_verified=source_commit_verified,
+    )
 
 
 def release_toolchain_metadata(evidence: ReleaseToolchainEvidence) -> dict[str, object]:
