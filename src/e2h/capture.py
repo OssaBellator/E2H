@@ -46,6 +46,10 @@ def _ensure_json(value: Any, noun: str) -> None:
         raise ValueError(f"{noun} must be JSON-serializable") from exc
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
 def _aware(value: datetime, noun: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{noun} must be timezone-aware")
@@ -150,9 +154,7 @@ def load_capture_document(path: Path) -> CaptureDocument:
     except UnicodeDecodeError as exc:
         raise CaptureError("capture must be UTF-8") from exc
     try:
-        payload = json.loads(text, parse_constant=lambda value: (_ for _ in ()).throw(
-            ValueError(f"non-standard JSON constant: {value}")
-        ))
+        payload = json.loads(text, parse_constant=_reject_json_constant)
     except (json.JSONDecodeError, ValueError) as exc:
         raise CaptureError(f"invalid capture JSON: {exc}") from exc
     if not isinstance(payload, dict):
