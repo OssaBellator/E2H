@@ -224,7 +224,10 @@ def execute_verification_command(
         elif isinstance(command, VerifySnapshotCommand):
             result = service.verify_snapshot(command.archive).model_dump(mode="json")
         elif isinstance(command, ReplayCommand):
-            result = service.replay(command.capsule, workspace=command.workspace).model_dump(mode="json")
+            result = service.replay(
+                command.capsule,
+                workspace=command.workspace,
+            ).model_dump(mode="json")
         else:
             raise AssertionError("unreachable verification command")
         return _response(command.operation, result=result)
@@ -340,7 +343,9 @@ def build_agent_card(
             AgentSkill(
                 id="e2h_memory_query",
                 name="Query verified E2H memory",
-                description="Query a bounded predefined experiment-store view with a result digest.",
+                description=(
+                    "Query a bounded predefined experiment-store view with a result digest."
+                ),
                 tags=["verification", "memory", "evidence"],
                 examples=[
                     '{"schema_version":"0.1","operation":"memory_query","view":"sources","limit":10}'
