@@ -385,11 +385,7 @@ def evaluate_long_horizon_predictions(
         raise LongHorizonError("prediction public corpus digest does not match the supplied corpus")
 
     task_by_id = {task.id: task for task in corpus.tasks}
-    valid_pairs = {
-        (task.id, probe.id)
-        for task in corpus.tasks
-        for probe in task.probes
-    }
+    valid_pairs = {(task.id, probe.id) for task in corpus.tasks for probe in task.probes}
     submitted: dict[tuple[str, str], dict[str, str]] = {}
     for prediction in predictions.predictions:
         pair = (prediction.task_id, prediction.probe_id)

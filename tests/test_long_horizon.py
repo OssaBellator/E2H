@@ -200,9 +200,7 @@ def test_revoke_requires_active_update_and_exact_supersedes() -> None:
             id="t1",
             role="user",
             content="Remove a rule that was never set.",
-            updates=[
-                ConstraintUpdate(id="u1", key="style", action="revoke", supersedes="missing")
-            ],
+            updates=[ConstraintUpdate(id="u1", key="style", action="revoke", supersedes="missing")],
         )
     ]
     with pytest.raises(ValidationError, match="cannot revoke inactive constraint"):
