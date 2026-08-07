@@ -59,6 +59,16 @@ from e2h.openai_responses import (
     import_openai_responses_document,
     ingest_openai_responses_file,
 )
+from e2h.openai_runtime import (
+    OpenAIHTTPResult,
+    OpenAIResponsesInvocation,
+    OpenAIResponsesRequest,
+    OpenAIResponsesRuntimeResult,
+    OpenAIRuntimeError,
+    build_openai_responses_request,
+    load_openai_responses_invocation,
+    run_openai_responses,
+)
 from e2h.optimizer_adapters import (
     DSPyDatasetDocument,
     DSPyExample,
@@ -237,8 +247,13 @@ __all__ = [
     "IngestionBundle",
     "JsonOracle",
     "LiteralContextItem",
+    "OpenAIHTTPResult",
     "OpenAIResponseRecord",
     "OpenAIResponsesDocument",
+    "OpenAIResponsesInvocation",
+    "OpenAIResponsesRequest",
+    "OpenAIResponsesRuntimeResult",
+    "OpenAIRuntimeError",
     "OptimizerAdapterDocument",
     "OptimizerAdapterError",
     "OptimizerAdapterVerification",
@@ -302,6 +317,7 @@ __all__ = [
     "apply_genome",
     "apply_optimizer_candidate",
     "apply_redaction_policy",
+    "build_openai_responses_request",
     "capsule_sha256",
     "compare_variant_predictions",
     "compile_proposal",
@@ -336,6 +352,7 @@ __all__ = [
     "load_dspy_dataset",
     "load_genome",
     "load_genome_application",
+    "load_openai_responses_invocation",
     "load_optimizer_adapter",
     "load_optimizer_candidate",
     "load_paired_evaluation",
@@ -368,6 +385,7 @@ __all__ = [
     "rollback_triggered",
     "run_capsule",
     "run_experiment",
+    "run_openai_responses",
     "sandbox_failure",
     "skipped_failure",
     "snapshot_reference",
@@ -386,4 +404,4 @@ __all__ = [
     "verify_variant_document",
     "working_directory_failure",
 ]
-__version__ = "0.17.0"
+__version__ = "0.18.0"

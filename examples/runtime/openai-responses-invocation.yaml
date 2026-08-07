@@ -1,0 +1,10 @@
+schema_version: "0.1"
+id: runtime-001
+variables:
+  task: verify the requested contract
+route_metadata:
+  tier: fast
+max_output_tokens: 1024
+timeout_seconds: 120
+metadata:
+  purpose: controlled live evaluation
