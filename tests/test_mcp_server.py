@@ -75,9 +75,7 @@ def test_memory_query_requires_configured_existing_store(tmp_path: Path) -> None
     with pytest.raises(MCPServiceError, match="not configured"):
         service.memory_query(QueryView.RUNS)
 
-    configured = E2HMCPService(
-        MCPServerConfig(root=tmp_path, store=Path(".e2h/memory.duckdb"))
-    )
+    configured = E2HMCPService(MCPServerConfig(root=tmp_path, store=Path(".e2h/memory.duckdb")))
     with pytest.raises(MCPServiceError, match="does not exist"):
         configured.memory_query(QueryView.RUNS)
 
