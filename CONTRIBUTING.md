@@ -19,7 +19,7 @@ uv run mypy src
 uv run pytest
 ```
 
-The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, and CodeQL. A pull request is not ready to merge while any relevant permanent suite is failing.
+The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, CodeQL, and dependency review. A pull request is not ready to merge while any relevant permanent suite is failing.
 
 ## Contribution shape
 
@@ -49,7 +49,7 @@ Regenerate them using the corresponding E2H or `uv` command, then review the res
 
 ## Tests for security-sensitive changes
 
-Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, release workflows, or code-scanning configuration require explicit adversarial tests.
+Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, release workflows, code scanning, or dependency-review configuration require explicit adversarial tests.
 
 Useful rejection cases include:
 
@@ -78,6 +78,8 @@ Dependabot monitors two independent update streams in `.github/dependabot.yml`:
 
 Python dependency pull requests must preserve the locked workflow. If a dependency change affects `pyproject.toml`, the corresponding reviewed `uv.lock` change must be present and all release-integrity/SBOM checks must pass.
 
+Pull requests also run GitHub Dependency Review. New dependencies with known vulnerabilities at moderate, high, or critical severity are rejected across runtime, development, and unknown scopes. The gate reports patched versions when available. It does not currently impose a repository-wide license allowlist; licensing policy should be introduced only through an explicit reviewed project decision.
+
 External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
 
 1. reviews the upstream release or security-fix commit;
@@ -86,7 +88,7 @@ External GitHub Actions remain pinned to full immutable commit SHAs in every per
 4. updates the reviewed-pin map in the policy test;
 5. runs all relevant permanent suites.
 
-`actions/setup-node` and `github/codeql-action` are temporarily excluded from automated action updates because E2H pins reviewed post-release security-fix commits that are not tagged releases. Re-enable automated updates for either action only after a reviewed tagged release contains the corresponding fix.
+`actions/dependency-review-action`, `actions/setup-node`, and `github/codeql-action` are temporarily excluded from automated action updates because E2H pins reviewed post-release security-fix commits that are not tagged releases. Re-enable automated updates for an action only after a reviewed tagged release contains the corresponding fix.
 
 ## Code scanning
 
