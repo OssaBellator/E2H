@@ -1,0 +1,155 @@
+{
+  "schema_version": "0.1",
+  "id": "e2h-public-failure-patterns-v0.1",
+  "title": "E2H sanitized public failure patterns v0.1",
+  "patterns": [
+    {
+      "schema_version": "0.1",
+      "id": "cwd-path-domain-mismatch",
+      "title": "Valid workspace becomes unreachable after path-domain translation",
+      "origin": "sanitized_real_world",
+      "failure_code": "working_directory_missing",
+      "category": "environment",
+      "scenario": "An agent session is bound to a workspace in one filesystem namespace, but a later runtime maps that location into a different host-path namespace. The project still exists in its original environment, while command execution fails before launch because the translated working directory is invalid.",
+      "observable_signals": [
+        "The workspace exists when inspected from its original execution environment.",
+        "The agent reports that the current working directory is missing before a command starts.",
+        "The path shown by the failing runtime belongs to a different filesystem namespace than the project."
+      ],
+      "expected_behavior": "Classify the failure as an environment working-directory error and require an explicit workspace rebind or path correction before replaying commands.",
+      "tags": ["workspace", "path-mapping", "cross-platform"],
+      "source": {
+        "reference": "https://github.com/openai/codex/issues/28174",
+        "accessed_at": "2026-08-07",
+        "source_kind": "public_issue"
+      },
+      "sanitization": {
+        "raw_source_text_included": false,
+        "raw_logs_included": false,
+        "direct_identifiers_included": false,
+        "secrets_included": false,
+        "manual_reviewed": true,
+        "actions": [
+          "paraphrased",
+          "removed_identifiers",
+          "normalized_paths",
+          "omitted_raw_logs",
+          "removed_environment_values",
+          "reduced_to_observable_signals"
+        ]
+      }
+    },
+    {
+      "schema_version": "0.1",
+      "id": "service-path-command-unavailable",
+      "title": "Background agent loses executables available in an interactive shell",
+      "origin": "sanitized_real_world",
+      "failure_code": "command_not_found",
+      "category": "dependency",
+      "scenario": "A long-running agent service starts with a narrower PATH than an interactive user shell. Commands that are installed and usable manually are therefore unavailable when the agent launches tools from the service environment.",
+      "observable_signals": [
+        "A command resolves successfully in the user's interactive shell.",
+        "The same executable cannot be found when launched by the background agent service.",
+        "The failing process environment has a different executable search path than the interactive environment."
+      ],
+      "expected_behavior": "Classify the launch as command-not-found, preserve the observed environment distinction, and repair dependency discovery or service PATH configuration instead of retrying the same command blindly.",
+      "tags": ["path", "service-environment", "dependency-discovery"],
+      "source": {
+        "reference": "https://github.com/openclaw/openclaw/issues/9302",
+        "accessed_at": "2026-08-07",
+        "source_kind": "public_issue"
+      },
+      "sanitization": {
+        "raw_source_text_included": false,
+        "raw_logs_included": false,
+        "direct_identifiers_included": false,
+        "secrets_included": false,
+        "manual_reviewed": true,
+        "actions": [
+          "paraphrased",
+          "removed_identifiers",
+          "normalized_paths",
+          "omitted_raw_logs",
+          "removed_environment_values",
+          "reduced_to_observable_signals"
+        ]
+      }
+    },
+    {
+      "schema_version": "0.1",
+      "id": "hard-timeout-interrupts-legitimate-work",
+      "title": "Fixed wall-clock limit terminates valid long-running agent work",
+      "origin": "sanitized_real_world",
+      "failure_code": "timeout",
+      "category": "resource",
+      "scenario": "An agent gateway applies a fixed execution timeout intended to stop stuck sessions. Legitimate multi-step work can exceed that wall-clock budget, causing an otherwise progressing task to be interrupted and its remaining work to be lost.",
+      "observable_signals": [
+        "The task is still making observable progress when the configured wall-clock deadline is reached.",
+        "Execution is interrupted by the timeout mechanism rather than by a task-level assertion.",
+        "The same workload can complete when given a larger declared time budget."
+      ],
+      "expected_behavior": "Classify the result as a timeout against the declared resource budget and preserve enough timing evidence to distinguish a budget failure from an unexpected process exit.",
+      "tags": ["timeout", "long-horizon", "resource-budget"],
+      "source": {
+        "reference": "https://github.com/NousResearch/hermes-agent/issues/4815",
+        "accessed_at": "2026-08-07",
+        "source_kind": "public_issue"
+      },
+      "sanitization": {
+        "raw_source_text_included": false,
+        "raw_logs_included": false,
+        "direct_identifiers_included": false,
+        "secrets_included": false,
+        "manual_reviewed": true,
+        "actions": [
+          "paraphrased",
+          "removed_identifiers",
+          "normalized_paths",
+          "omitted_raw_logs",
+          "removed_environment_values",
+          "reduced_to_observable_signals"
+        ]
+      }
+    },
+    {
+      "schema_version": "0.1",
+      "id": "self-hosted-runner-permission-boundary",
+      "title": "Setup step assumes write access that a self-hosted runner does not have",
+      "origin": "sanitized_real_world",
+      "failure_code": "permission_denied",
+      "category": "environment",
+      "scenario": "A setup action running on a self-hosted machine attempts to create or modify files in a location owned by another account. The workflow has enough access to start but cannot complete the setup operation under the runner identity.",
+      "observable_signals": [
+        "The process reaches a filesystem mutation step and receives an operating-system permission denial.",
+        "The target location is outside the writable ownership boundary of the runner identity.",
+        "Changing ownership, target location, or runner permissions changes the outcome without changing the task logic."
+      ],
+      "expected_behavior": "Classify the failure as environment permission-denied and require an ownership, path, or runner-identity fix rather than treating it as a task assertion failure.",
+      "tags": ["permissions", "self-hosted-runner", "filesystem"],
+      "source": {
+        "reference": "https://github.com/actions/setup-python/issues/792",
+        "accessed_at": "2026-08-07",
+        "source_kind": "public_issue"
+      },
+      "sanitization": {
+        "raw_source_text_included": false,
+        "raw_logs_included": false,
+        "direct_identifiers_included": false,
+        "secrets_included": false,
+        "manual_reviewed": true,
+        "actions": [
+          "paraphrased",
+          "removed_identifiers",
+          "normalized_paths",
+          "omitted_raw_logs",
+          "removed_environment_values",
+          "reduced_to_observable_signals"
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "publication_policy": "public-source references only; no raw issue text or logs",
+    "privacy_review": "required before merge"
+  }
+}
