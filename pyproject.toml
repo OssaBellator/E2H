@@ -66,6 +66,10 @@ e2h-partition = "e2h.partition_cli:partition_app"
 e2h-promotion = "e2h.promotion_cli:promotion_app"
 e2h-variant = "e2h.variant_cli:variant_app"
 
+[tool.uv]
+required-version = "==0.12.2"
+build-constraint-dependencies = ["hatchling==1.31.0"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/e2h"]
 
