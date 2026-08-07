@@ -1,0 +1,45 @@
+schema_version: "0.1"
+id: optimizer-example-proposal
+baseline_variant_id: typed-candidate
+baseline_variant_sha256: ddd2aab6b1169e0fd41c2a5307c3210eda9cb160f0ee8ba6c37ef052b3a1dfbc
+candidate_variant_id: typed-candidate-gepa
+candidate_variant_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
+evidence:
+  - schema_version: "0.1"
+    evidence_id: optimizer-validation
+    role: validation
+    dataset_id: optimizer-example
+    partition_id: optimizer-example-split
+    public_dataset_sha256: 9fd91bc4ab83d87e6a7054aafb8c2d970d8850dffb0131b68a28bb789b123aea
+    public_partition_sha256: fe1e0830535414c88e7dd3f87949b6ede8c82efba2ec6417bc7751411525d4bb
+    baseline_variant_id: typed-candidate
+    baseline_variant_sha256: ddd2aab6b1169e0fd41c2a5307c3210eda9cb160f0ee8ba6c37ef052b3a1dfbc
+    candidate_variant_id: typed-candidate-gepa
+    candidate_variant_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
+    total: 1
+    both_correct: 0
+    baseline_only_correct: 0
+    candidate_only_correct: 1
+    neither_correct: 0
+    baseline_score: 0.0
+    candidate_score: 1.0
+  - schema_version: "0.1"
+    evidence_id: optimizer-sealed
+    role: sealed_test
+    dataset_id: optimizer-example
+    partition_id: optimizer-example-split
+    public_dataset_sha256: 9fd91bc4ab83d87e6a7054aafb8c2d970d8850dffb0131b68a28bb789b123aea
+    public_partition_sha256: fe1e0830535414c88e7dd3f87949b6ede8c82efba2ec6417bc7751411525d4bb
+    baseline_variant_id: typed-candidate
+    baseline_variant_sha256: ddd2aab6b1169e0fd41c2a5307c3210eda9cb160f0ee8ba6c37ef052b3a1dfbc
+    candidate_variant_id: typed-candidate-gepa
+    candidate_variant_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
+    total: 1
+    both_correct: 0
+    baseline_only_correct: 0
+    candidate_only_correct: 1
+    neither_correct: 0
+    baseline_score: 0.0
+    candidate_score: 1.0
+metadata:
+  purpose: demonstrate validation and sealed-test promotion evidence

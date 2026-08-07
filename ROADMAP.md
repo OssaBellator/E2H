@@ -38,7 +38,7 @@
 - [x] Prompt, tool, context, routing, and workflow variant types.
 - [x] DSPy/GEPA optimizer adapters.
 - [x] Train/validation/sealed-test partitions.
-- Statistical promotion gates and rollback metadata.
+- [x] Statistical promotion gates and rollback metadata.
 
 ## Milestone 4 — Frontier integrations
 

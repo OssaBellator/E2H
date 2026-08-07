@@ -1,0 +1,18 @@
+schema_version: "0.1"
+id: optimizer-example-promotion
+rules:
+  - role: validation
+    min_total: 1
+    min_candidate_score: 1.0
+    min_absolute_improvement: 1.0
+    min_discordant_pairs: 1
+    max_one_sided_p_value: 0.5
+  - role: sealed_test
+    min_total: 1
+    min_candidate_score: 1.0
+    min_absolute_improvement: 1.0
+    min_discordant_pairs: 1
+    max_one_sided_p_value: 0.5
+metadata:
+  purpose: demonstrate digest-bound promotion gates with a one-example fixture
+  production_warning: use meaningful sample sizes and stricter significance thresholds

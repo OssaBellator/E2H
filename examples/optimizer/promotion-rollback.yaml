@@ -1,0 +1,23 @@
+schema_version: "0.1"
+id: optimizer-example-rollback
+promotion_decision_sha256: 5f9bcc7354d0fc02aaf793e0b6eb4b5e82da0934d5333042cbe60b36b031d8e4
+active_variant_id: typed-candidate-gepa
+active_variant_sha256: "2222222222222222222222222222222222222222222222222222222222222222"
+target_variant_id: typed-candidate
+target_variant_sha256: ddd2aab6b1169e0fd41c2a5307c3210eda9cb160f0ee8ba6c37ef052b3a1dfbc
+target_locator: examples/variants/candidate.yaml
+triggers:
+  - id: pass-rate-regression
+    metric: pass_rate
+    operator: lt
+    threshold: 0.95
+    min_samples: 20
+    window_seconds: 3600
+  - id: error-rate-spike
+    metric: error_rate
+    operator: gt
+    threshold: 0.05
+    min_samples: 20
+    window_seconds: 3600
+metadata:
+  purpose: preserve an exact known-good rollback target

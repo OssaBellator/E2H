@@ -1,0 +1,10 @@
+schema_version: "0.1"
+variant_id: typed-candidate
+variant_sha256: ddd2aab6b1169e0fd41c2a5307c3210eda9cb160f0ee8ba6c37ef052b3a1dfbc
+public_dataset_sha256: 9fd91bc4ab83d87e6a7054aafb8c2d970d8850dffb0131b68a28bb789b123aea
+public_partition_sha256: fe1e0830535414c88e7dd3f87949b6ede8c82efba2ec6417bc7751411525d4bb
+role: sealed_test
+predictions:
+  - example_id: sealed-task
+    outputs:
+      expected_status: failed
