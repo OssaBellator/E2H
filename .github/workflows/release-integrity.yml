@@ -82,9 +82,29 @@ jobs:
           uv run e2h release seal dist-a \
             --output release-manifest.json \
             --project e2h \
-            --version "$VERSION"
+            --version "$VERSION" \
+            --toolchain-root . \
+            --source-commit "$GITHUB_SHA" \
+            --runner-generation ubuntu-24.04 \
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
           uv run e2h release verify release-manifest.json dist-b --json \
             > release-verification.json
+          uv run e2h release inspect release-manifest.json --json > release-inspection.json
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          evidence = json.loads(Path("release-inspection.json").read_text(encoding="utf-8"))[
+              "metadata"
+          ]["release_toolchain"]
+          assert evidence["source_commit"] == __import__("os").environ["GITHUB_SHA"]
+          assert evidence["runner_generation"] == "ubuntu-24.04"
+          assert evidence["python_version"] == "3.13.14"
+          assert evidence["uv_required_version"] == "0.12.2"
+          assert evidence["build_backend"] == "hatchling.build"
+          assert evidence["build_backend_version"] == "1.31.0"
+          assert evidence["source_date_epoch"] == 1704067200
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-integrity
@@ -92,4 +112,5 @@ jobs:
             dist-a/*
             release-manifest.json
             release-verification.json
+            release-inspection.json
             sbom-a.cdx.json
