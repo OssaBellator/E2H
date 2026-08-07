@@ -1,6 +1,8 @@
 """Promotion artifact models and canonical identities."""
 
 from e2h.promotion_evidence import (
+    _ID_RE,
+    _MAX_DOCUMENT_BYTES,
     PairedEvaluationReport,
     PromotionCheck,
     PromotionError,
@@ -11,8 +13,6 @@ from e2h.promotion_evidence import (
     StrictModel,
     VariantPrediction,
     VariantPredictionDocument,
-    _ID_RE,
-    _MAX_DOCUMENT_BYTES,
     _canonical_json_bytes,
 )
 from e2h.promotion_lifecycle import (
@@ -35,6 +35,8 @@ from e2h.promotion_lifecycle import (
 )
 
 __all__ = [
+    "_ID_RE",
+    "_MAX_DOCUMENT_BYTES",
     "PairedEvaluationReport",
     "PromotionCheck",
     "PromotionDecision",
@@ -52,8 +54,6 @@ __all__ = [
     "StrictModel",
     "VariantPrediction",
     "VariantPredictionDocument",
-    "_ID_RE",
-    "_MAX_DOCUMENT_BYTES",
     "_canonical_json_bytes",
     "_exact_one_sided_mcnemar_tail",
     "exact_one_sided_mcnemar_p_value",
