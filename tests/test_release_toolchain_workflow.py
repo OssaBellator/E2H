@@ -73,9 +73,7 @@ def test_source_snapshot_and_toolchain_evidence_stay_checksum_bound() -> None:
     assert "sha256sum dist/*.tar.gz dist/*.whl" in runs
 
     package = next(
-        step
-        for step in steps
-        if step.get("name") == "Package deterministic source snapshot twice"
+        step for step in steps if step.get("name") == "Package deterministic source snapshot twice"
     )
     package_run = str(package["run"])
     assert "cmp source-a.e2hsnap source-b.e2hsnap" in package_run
