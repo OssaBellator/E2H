@@ -60,7 +60,9 @@ def _pattern(
         category=FailureCategory.DEPENDENCY,
         scenario=scenario,
         observable_signals=["Executable lookup fails before task logic begins."],
-        expected_behavior="Classify the result as command-not-found and repair dependency discovery.",
+        expected_behavior=(
+            "Classify the result as command-not-found and repair dependency discovery."
+        ),
         tags=["dependency"],
         source=source,
         sanitization=_attestation(),
@@ -206,7 +208,7 @@ def test_loader_supports_yaml_and_rejects_invalid_inputs(tmp_path: Path) -> None
 
     unsupported = tmp_path / "corpus.txt"
     unsupported.write_text("{}", encoding="utf-8")
-    with pytest.raises(BenchmarkError, match="must use .json"):
+    with pytest.raises(BenchmarkError, match=r"must use \.json"):
         load_failure_pattern_corpus(unsupported)
 
     bad_root = tmp_path / "corpus.json"
