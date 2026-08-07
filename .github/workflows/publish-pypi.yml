@@ -15,7 +15,7 @@ permissions:
 jobs:
   build:
     name: Build verified release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:
@@ -142,7 +142,7 @@ jobs:
   attest:
     name: Attest verified distributions and SBOM
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       artifact-metadata: write
@@ -178,7 +178,7 @@ jobs:
   release-draft:
     name: Stage immutable GitHub release
     needs: [build, attest]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: write
@@ -238,7 +238,7 @@ jobs:
   publish:
     name: Publish verified distributions
     needs: [build, attest, release-draft]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: pypi
     permissions:
       actions: read
@@ -270,7 +270,7 @@ jobs:
   release-publish:
     name: Publish and verify immutable GitHub release
     needs: [build, attest, release-draft, publish]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: write
