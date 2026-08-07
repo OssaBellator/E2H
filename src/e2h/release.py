@@ -175,9 +175,7 @@ def _wheel_identity(path: Path) -> _PackageIdentity:
                 raise ReleaseIntegrityError("wheel must contain exactly one .dist-info/METADATA")
             info = archive.getinfo(metadata_names[0])
             if info.file_size > _MAX_METADATA_BYTES:
-                raise ReleaseIntegrityError(
-                    f"wheel metadata exceeds {_MAX_METADATA_BYTES} bytes"
-                )
+                raise ReleaseIntegrityError(f"wheel metadata exceeds {_MAX_METADATA_BYTES} bytes")
             raw = archive.read(info)
     except (OSError, zipfile.BadZipFile, KeyError) as exc:
         raise ReleaseIntegrityError(f"invalid wheel archive {path.name}: {exc}") from exc
@@ -198,9 +196,7 @@ def _sdist_identity(path: Path) -> _PackageIdentity:
             if not member.isfile():
                 raise ReleaseIntegrityError("sdist PKG-INFO must be a regular file")
             if member.size > _MAX_METADATA_BYTES:
-                raise ReleaseIntegrityError(
-                    f"sdist metadata exceeds {_MAX_METADATA_BYTES} bytes"
-                )
+                raise ReleaseIntegrityError(f"sdist metadata exceeds {_MAX_METADATA_BYTES} bytes")
             extracted = archive.extractfile(member)
             if extracted is None:
                 raise ReleaseIntegrityError("unable to read sdist PKG-INFO")
