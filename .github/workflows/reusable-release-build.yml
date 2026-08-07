@@ -150,12 +150,14 @@ jobs:
           assert evidence["build_backend"] == "hatchling.build"
           assert evidence["build_backend_version"] == "1.31.0"
           assert evidence["source_date_epoch"] == 1704067200
+          assert len(evidence["source_tree_sha256"]) == 64
 
           verification = json.loads(
               Path("release-toolchain-verification.json").read_text(encoding="utf-8")
           )
           assert verification["verified"] is True
           assert verification["source_inputs_verified"] is True
+          assert verification["source_tree_verified"] is True
           assert verification["source_commit_verified"] is True
           assert verification["evidence"] == evidence
           PY
