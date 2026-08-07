@@ -45,7 +45,10 @@ def _write_wheel(directory: Path, *, name: str = "e2h", version: str = "0.25.0")
         archive.writestr(metadata_info, _metadata(name, version))
         wheel_info = zipfile.ZipInfo(f"{dist_info}/WHEEL")
         wheel_info.date_time = (2024, 1, 1, 0, 0, 0)
-        archive.writestr(wheel_info, b"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\n")
+        archive.writestr(
+            wheel_info,
+            b"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\n",
+        )
     return path
 
 
@@ -173,7 +176,7 @@ def test_invalid_wheel_and_sdist_metadata_are_rejected(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheel, mode="w") as archive:
         archive.writestr("e2h-0.25.0.dist-info/WHEEL", "Wheel-Version: 1.0\n")
     _write_sdist(wheel_dir)
-    with pytest.raises(ReleaseIntegrityError, match="exactly one .dist-info/METADATA"):
+    with pytest.raises(ReleaseIntegrityError, match=r"exactly one \.dist-info/METADATA"):
         seal_release_artifacts(wheel_dir)
 
     sdist_dir = tmp_path / "sdist"
