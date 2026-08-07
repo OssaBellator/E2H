@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   reproducible-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       SOURCE_DATE_EPOCH: "1704067200"
       UV_PREVIEW_FEATURES: "sbom-export"
