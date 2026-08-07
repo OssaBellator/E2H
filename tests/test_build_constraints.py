@@ -10,8 +10,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CONSTRAINTS = ROOT / "build-constraints.txt"
 PYPROJECT = ROOT / "pyproject.toml"
-RELEASE_INTEGRITY = ROOT / ".github" / "workflows" / "release-integrity.yml"
-PUBLISH = ROOT / ".github" / "workflows" / "publish-pypi.yml"
+REUSABLE = ROOT / ".github" / "workflows" / "reusable-release-build.yml"
 EXPECTED = {
     "hatchling": "1.31.0",
     "packaging": "26.3",
@@ -56,10 +55,9 @@ def _constraint_blocks() -> dict[str, tuple[str, list[str]]]:
     return blocks
 
 
-def _build_command(path: Path) -> str:
-    workflow = _workflow(path)
-    job_name = "reproducible-build" if path == RELEASE_INTEGRITY else "build"
-    steps = workflow["jobs"][job_name]["steps"]
+def _build_command() -> str:
+    workflow = _workflow(REUSABLE)
+    steps = workflow["jobs"]["build"]["steps"]
     matching = [step for step in steps if step.get("name") == "Build release artifacts twice"]
     assert len(matching) == 1
     command = matching[0]["run"]
@@ -83,11 +81,10 @@ def test_hatchling_constraint_matches_pep517_backend_pin() -> None:
     assert pyproject["build-system"]["requires"] == [f"hatchling=={EXPECTED['hatchling']}"]
 
 
-def test_release_builds_require_hashed_constraints_without_disabling_isolation() -> None:
-    for path in (RELEASE_INTEGRITY, PUBLISH):
-        command = _build_command(path)
-        assert command.count("uv build ") == 2
-        assert command.count("--build-constraint build-constraints.txt") == 2
-        assert command.count("--require-hashes") == 2
-        assert "--no-build-isolation" not in command
-        assert "--no-verify-hashes" not in command
+def test_reusable_release_build_requires_hashed_constraints_without_disabling_isolation() -> None:
+    command = _build_command()
+    assert command.count("uv build ") == 2
+    assert command.count("--build-constraint build-constraints.txt") == 2
+    assert command.count("--require-hashes") == 2
+    assert "--no-build-isolation" not in command
+    assert "--no-verify-hashes" not in command
