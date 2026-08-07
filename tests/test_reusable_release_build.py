@@ -159,7 +159,8 @@ def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> N
     )
     run = str(stage["run"])
     assert "release/e2h-sbom.cdx.json" in run
-    assert "release/e2h-source.e2hsnap" in run
+    assert "cp e2h-source.e2hsnap release/" in run
+    assert "e2h-source.e2hsnap" in run
     assert "release-manifest.json" in run
     assert "release-verification.json" in run
     assert "release-toolchain-verification.json" in run
