@@ -23,11 +23,7 @@ def capsule() -> TaskCapsule:
         {
             "id": "runtime-base",
             "goal": "Run one provider turn.",
-            "success": {
-                "commands": [
-                    {"id": "contract", "argv": ["python", "-c", "print('ok')"]}
-                ]
-            },
+            "success": {"commands": [{"id": "contract", "argv": ["python", "-c", "print('ok')"]}]},
         }
     )
 
@@ -201,9 +197,7 @@ def test_build_request_uses_fallback_route_and_exact_variables() -> None:
         build_openai_responses_request(
             document(),
             capsule(),
-            invocation().model_copy(
-                update={"variables": {"task": "x", "surprise": "y"}}
-            ),
+            invocation().model_copy(update={"variables": {"task": "x", "surprise": "y"}}),
         )
 
 
