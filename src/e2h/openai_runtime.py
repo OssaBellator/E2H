@@ -379,11 +379,7 @@ def _tool_policy_violations(
         violations.append("provider returned no tool call despite selection='required'")
     if tools.selection == "named":
         wrong = sorted(
-            {
-                name
-                for name in names
-                if isinstance(name, str) and name != tools.selected_tool
-            }
+            {name for name in names if isinstance(name, str) and name != tools.selected_tool}
         )
         if wrong:
             violations.append(
