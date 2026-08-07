@@ -1,0 +1,68 @@
+name: Review hardening
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.event.pull_request.head.ref == 'agent/reproducible-benchmark-environments'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/reproducible-benchmark-environments
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra dev
+      - name: Execute embedded review patch
+        run: |
+          uv run python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          import yaml
+
+          workflow = yaml.safe_load(
+              Path('.github/workflows/refresh-benchmark-environments.yml').read_text(encoding='utf-8')
+          )
+          steps = workflow['jobs']['harden']['steps']
+          patch = next(step['run'] for step in steps if step.get('name') == 'Apply review hardening')
+          subprocess.run(patch, shell=True, check=True)
+          PY
+      - run: uv run ruff check . --fix
+      - run: uv run ruff format .
+      - run: uv lock
+      - name: Generate environment content lock
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          from e2h.benchmark_env import load_benchmark_environment_suite, seal_benchmark_environment_suite
+
+          suite = load_benchmark_environment_suite(Path('benchmarks/environments/suite.json'))
+          lock = seal_benchmark_environment_suite(suite, root=Path('.'))
+          Path('benchmarks/environments/suite.lock.json').write_text(
+              lock.model_dump_json(indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest
+      - name: Remove one-use review machinery
+        run: |
+          rm -f .github/workflows/review-hardening.yml
+          rm -f .github/workflows/refresh-benchmark-environments.yml
+          rm -f .github/workflows/refresh-long-horizon-lock.yml
+      - name: Commit reviewed head
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden benchmark integrations after review"
+          git push origin HEAD:agent/reproducible-benchmark-environments
