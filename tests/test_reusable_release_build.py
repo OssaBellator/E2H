@@ -61,7 +61,9 @@ def test_reusable_release_build_is_workflow_call_only_and_read_only() -> None:
 def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> None:
     workflow, _ = _workflow()
     steps = workflow["jobs"]["build"]["steps"]
-    validation = next(step for step in steps if step.get("name") == "Validate release tag and main ancestry")
+    validation = next(
+        step for step in steps if step.get("name") == "Validate release tag and main ancestry"
+    )
     assert validation["if"] == "${{ inputs.validate-release-tag }}"
 
     required_steps = {
@@ -88,7 +90,9 @@ def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> N
         "if-no-files-found": "error",
         "retention-days": 7,
     }
-    stage = next(step for step in steps if step.get("name") == "Stage checksum-bound release bundle")
+    stage = next(
+        step for step in steps if step.get("name") == "Stage checksum-bound release bundle"
+    )
     run = stage["run"]
     assert "release/e2h-sbom.cdx.json" in run
     assert "release-manifest.json release-verification.json release-inspection.json" in run
