@@ -5,8 +5,6 @@ from __future__ import annotations
 from fractions import Fraction
 
 from e2h.promotion_models import (
-    _exact_one_sided_mcnemar_tail,
-    PairedEvaluationReport,
     PromotionCheck,
     PromotionDecision,
     PromotionDecisionKind,
@@ -15,6 +13,7 @@ from e2h.promotion_models import (
     PromotionProposal,
     PromotionReceipt,
     RollbackPlan,
+    _exact_one_sided_mcnemar_tail,
     paired_evaluation_sha256,
     promotion_decision_sha256,
     promotion_policy_sha256,
@@ -75,6 +74,8 @@ def _promotion_checks(
         reasons: list[str] = []
         if report.total < rule.min_total:
             reasons.append(f"total {report.total} is below required {rule.min_total}")
+        if improvement_fraction <= 0:
+            reasons.append("candidate must outperform baseline")
         if candidate_score_fraction < Fraction(str(rule.min_candidate_score)):
             reasons.append(
                 f"candidate score {report.candidate_score:.6f} is below required "
