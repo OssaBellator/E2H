@@ -353,8 +353,6 @@ def _tool_policy_violations(
     tools: ToolVariant | None,
     response: Mapping[str, Any],
 ) -> list[str]:
-    if tools is None:
-        return []
     raw_output = response.get("output")
     if not isinstance(raw_output, list):
         return ["provider response output is not an array"]
@@ -363,10 +361,40 @@ def _tool_policy_violations(
         for item in raw_output
         if isinstance(item, dict) and item.get("type") == "function_call"
     ]
-    names = [item.get("name") for item in calls]
+    if tools is None:
+        if calls:
+            return ["provider returned tool calls with no declared tools"]
+        return []
+
     declared = {tool.id for tool in tools.tools}
+    names: list[str] = []
     violations: list[str] = []
-    unknown = sorted({name for name in names if isinstance(name, str) and name not in declared})
+    for index, call in enumerate(calls):
+        call_id = call.get("call_id")
+        if not isinstance(call_id, str) or not call_id:
+            violations.append(f"provider function call {index} has invalid call_id")
+
+        name = call.get("name")
+        if not isinstance(name, str) or not name:
+            violations.append(f"provider function call {index} has invalid name")
+        else:
+            names.append(name)
+
+        arguments = call.get("arguments")
+        if not isinstance(arguments, str):
+            violations.append(f"provider function call {index} arguments are not a string")
+        else:
+            try:
+                decoded_arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                violations.append(f"provider function call {index} arguments are not valid JSON")
+            else:
+                if not isinstance(decoded_arguments, dict):
+                    violations.append(
+                        f"provider function call {index} arguments must decode to an object"
+                    )
+
+    unknown = sorted({name for name in names if name not in declared})
     if unknown:
         violations.append(f"provider called undeclared tools: {', '.join(unknown)}")
     if len(calls) > tools.max_calls:
@@ -378,9 +406,11 @@ def _tool_policy_violations(
     if tools.selection == "required" and not calls:
         violations.append("provider returned no tool call despite selection='required'")
     if tools.selection == "named":
-        wrong = sorted(
-            {name for name in names if isinstance(name, str) and name != tools.selected_tool}
-        )
+        if len(calls) != 1:
+            violations.append(
+                f"provider returned {len(calls)} tool calls; selection='named' requires exactly one"
+            )
+        wrong = sorted({name for name in names if name != tools.selected_tool})
         if wrong:
             violations.append(
                 f"provider called tools outside selected_tool {tools.selected_tool!r}: "
