@@ -98,13 +98,29 @@ def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> Non
         for line in run.splitlines()
         if line.strip().startswith("PYTHONPATH=src .venv/bin/python -m e2h ")
     ]
-    assert len(cli_lines) == 5
+    assert len(cli_lines) == 6
 
     sbom = next(
         step for step in steps if step.get("name") == "Export and canonicalize runtime SBOM twice"
     )
     sbom_run = str(sbom["run"])
     assert sbom_run.count("uv export --locked --no-default-groups") == 2
+
+
+def test_reusable_release_build_verifies_toolchain_against_independent_source() -> None:
+    workflow, _ = _workflow()
+    steps = workflow["jobs"]["build"]["steps"]
+    seal = next(step for step in steps if step.get("name") == "Seal and verify release artifacts")
+    run = str(seal["run"])
+    assert "e2h release seal dist-a" in run
+    assert "--toolchain-root source-a" in run
+    assert "e2h release verify-toolchain" in run
+    assert "release-manifest.json source-b" in run
+    assert '--expected-source-commit "$GITHUB_SHA"' in run
+    assert "> release-toolchain-verification.json" in run
+    assert 'verification["source_inputs_verified"] is True' in run
+    assert 'verification["source_commit_verified"] is True' in run
+    assert 'verification["evidence"] == evidence' in run
 
 
 def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> None:
@@ -122,5 +138,8 @@ def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> N
     )
     run = stage["run"]
     assert "release/e2h-sbom.cdx.json" in run
-    assert "release-manifest.json release-verification.json release-inspection.json" in run
+    assert "release-manifest.json" in run
+    assert "release-verification.json" in run
+    assert "release-toolchain-verification.json" in run
+    assert "release-inspection.json" in run
     assert "release-checksums.txt" in run
