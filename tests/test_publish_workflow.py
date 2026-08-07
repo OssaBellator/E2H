@@ -149,7 +149,8 @@ def test_release_bundle_is_verified_at_every_trust_handoff() -> None:
 def test_sbom_is_attested_against_exact_distributions() -> None:
     workflow, _ = _workflow()
     attest_steps = [
-        step for step in _steps(workflow["jobs"]["attest"])
+        step
+        for step in _steps(workflow["jobs"]["attest"])
         if str(step.get("uses", "")).startswith("actions/attest@")
     ]
     assert len(attest_steps) == 2
