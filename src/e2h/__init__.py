@@ -61,10 +61,10 @@ from e2h.openai_responses import (
 )
 from e2h.openai_runtime import (
     OpenAIHTTPResult,
-    OpenAIRuntimeError,
     OpenAIResponsesInvocation,
     OpenAIResponsesRequest,
     OpenAIResponsesRuntimeResult,
+    OpenAIRuntimeError,
     build_openai_responses_request,
     load_openai_responses_invocation,
     run_openai_responses,
