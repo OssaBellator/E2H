@@ -35,6 +35,13 @@ def _metadata(name: str = "e2h", version: str = "0.25.0") -> bytes:
     ).encode()
 
 
+def _write_wheel_metadata(directory: Path, payload: bytes) -> Path:
+    path = directory / "e2h-0.25.0-py3-none-any.whl"
+    with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("e2h-0.25.0.dist-info/METADATA", payload)
+    return path
+
+
 def _write_wheel(directory: Path, *, name: str = "e2h", version: str = "0.25.0") -> Path:
     filename = f"{name.replace('-', '_')}-{version}-py3-none-any.whl"
     path = directory / filename
@@ -69,6 +76,26 @@ def _release_dir(tmp_path: Path) -> Path:
     _write_wheel(directory)
     _write_sdist(directory)
     return directory
+
+
+def _artifact_pair() -> tuple[ReleaseArtifact, ReleaseArtifact]:
+    wheel = ReleaseArtifact(
+        filename="e2h-0.25.0-py3-none-any.whl",
+        kind="wheel",
+        size_bytes=10,
+        sha256="a" * 64,
+        package_name="e2h",
+        package_version="0.25.0",
+    )
+    sdist = ReleaseArtifact(
+        filename="e2h-0.25.0.tar.gz",
+        kind="sdist",
+        size_bytes=10,
+        sha256="b" * 64,
+        package_name="e2h",
+        package_version="0.25.0",
+    )
+    return wheel, sdist
 
 
 def test_seal_and_verify_release_pair(tmp_path: Path) -> None:
@@ -123,12 +150,19 @@ def test_inconsistent_archive_metadata_is_rejected(tmp_path: Path) -> None:
         seal_release_artifacts(directory)
 
 
-def test_tampered_artifact_fails_verification(tmp_path: Path) -> None:
+def test_tampered_and_renamed_artifacts_fail_verification(tmp_path: Path) -> None:
     directory = _release_dir(tmp_path)
     manifest = seal_release_artifacts(directory)
     wheel = next(path for path in directory.iterdir() if path.suffix == ".whl")
-    wheel.write_bytes(wheel.read_bytes() + b"tampered")
+    original = wheel.read_bytes()
+    wheel.write_bytes(original + b"tampered")
     with pytest.raises(ReleaseIntegrityError, match="does not match manifest"):
+        verify_release_artifacts(manifest, directory)
+
+    wheel.write_bytes(original)
+    renamed = directory / "e2h-0.25.0-1-py3-none-any.whl"
+    wheel.rename(renamed)
+    with pytest.raises(ReleaseIntegrityError, match="artifact set does not match"):
         verify_release_artifacts(manifest, directory)
 
 
@@ -141,32 +175,65 @@ def test_extra_or_unsupported_distribution_file_is_rejected(tmp_path: Path) -> N
 
 
 def test_manifest_requires_sorted_unique_consistent_artifacts() -> None:
-    wheel = ReleaseArtifact(
-        filename="e2h-0.25.0-py3-none-any.whl",
-        kind="wheel",
-        size_bytes=10,
-        sha256="a" * 64,
-        package_name="e2h",
-        package_version="0.25.0",
-    )
-    sdist = ReleaseArtifact(
-        filename="e2h-0.25.0.tar.gz",
-        kind="sdist",
-        size_bytes=10,
-        sha256="b" * 64,
-        package_name="e2h",
-        package_version="0.25.0",
-    )
+    wheel, sdist = _artifact_pair()
     with pytest.raises(ValidationError, match="sorted"):
-        ReleaseManifest(project="e2h", version="0.25.0", artifacts=[wheel, sdist])
+        ReleaseManifest(project="e2h", version="0.25.0", artifacts=[sdist, wheel])
+    with pytest.raises(ValidationError, match="unique"):
+        ReleaseManifest(project="e2h", version="0.25.0", artifacts=[wheel, wheel, sdist])
     with pytest.raises(ValidationError, match="package version"):
         ReleaseManifest(
             project="e2h",
             version="0.24.0",
             artifacts=sorted([wheel, sdist], key=lambda item: item.filename),
         )
+    other_sdist = ReleaseArtifact(
+        filename=sdist.filename,
+        kind=sdist.kind,
+        size_bytes=sdist.size_bytes,
+        sha256=sdist.sha256,
+        package_name="other",
+        package_version=sdist.package_version,
+    )
+    with pytest.raises(ValidationError, match="package name"):
+        ReleaseManifest(
+            project="e2h",
+            version="0.25.0",
+            artifacts=sorted([wheel, other_sdist], key=lambda item: item.filename),
+        )
     with pytest.raises(ValidationError, match="wheel and an sdist"):
         ReleaseManifest(project="e2h", version="0.25.0", artifacts=[wheel])
+    with pytest.raises(ValidationError, match="portable basename"):
+        ReleaseArtifact(
+            filename="../e2h.whl",
+            kind="wheel",
+            size_bytes=10,
+            sha256="a" * 64,
+            package_name="e2h",
+            package_version="0.25.0",
+        )
+    with pytest.raises(ValidationError, match="canonical JSON"):
+        ReleaseManifest(
+            project="e2h",
+            version="0.25.0",
+            artifacts=sorted([wheel, sdist], key=lambda item: item.filename),
+            metadata={"bad": float("nan")},
+        )
+
+
+def test_invalid_wheel_and_sdist_archives_are_rejected(tmp_path: Path) -> None:
+    wheel_dir = tmp_path / "wheel"
+    wheel_dir.mkdir()
+    (wheel_dir / "e2h-0.25.0-py3-none-any.whl").write_bytes(b"not a zip")
+    _write_sdist(wheel_dir)
+    with pytest.raises(ReleaseIntegrityError, match="invalid wheel archive"):
+        seal_release_artifacts(wheel_dir)
+
+    sdist_dir = tmp_path / "sdist"
+    sdist_dir.mkdir()
+    _write_wheel(sdist_dir)
+    (sdist_dir / "e2h-0.25.0.tar.gz").write_bytes(b"not a tarball")
+    with pytest.raises(ReleaseIntegrityError, match="invalid sdist archive"):
+        seal_release_artifacts(sdist_dir)
 
 
 def test_invalid_wheel_and_sdist_metadata_are_rejected(tmp_path: Path) -> None:
@@ -179,6 +246,20 @@ def test_invalid_wheel_and_sdist_metadata_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ReleaseIntegrityError, match=r"exactly one \.dist-info/METADATA"):
         seal_release_artifacts(wheel_dir)
 
+    missing_name = tmp_path / "missing-name"
+    missing_name.mkdir()
+    _write_wheel_metadata(missing_name, b"Metadata-Version: 2.4\nVersion: 0.25.0\n\n")
+    _write_sdist(missing_name)
+    with pytest.raises(ReleaseIntegrityError, match="missing Name"):
+        seal_release_artifacts(missing_name)
+
+    missing_version = tmp_path / "missing-version"
+    missing_version.mkdir()
+    _write_wheel_metadata(missing_version, b"Metadata-Version: 2.4\nName: e2h\n\n")
+    _write_sdist(missing_version)
+    with pytest.raises(ReleaseIntegrityError, match="missing Version"):
+        seal_release_artifacts(missing_version)
+
     sdist_dir = tmp_path / "sdist"
     sdist_dir.mkdir()
     _write_wheel(sdist_dir)
@@ -190,6 +271,33 @@ def test_invalid_wheel_and_sdist_metadata_are_rejected(tmp_path: Path) -> None:
         archive.addfile(info, io.BytesIO(payload))
     with pytest.raises(ReleaseIntegrityError, match="exactly one top-level PKG-INFO"):
         seal_release_artifacts(sdist_dir)
+
+
+def test_release_directory_safety_checks(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ReleaseIntegrityError, match="directory is empty"):
+        seal_release_artifacts(empty)
+
+    not_directory = tmp_path / "artifact.whl"
+    not_directory.write_bytes(b"not a directory")
+    with pytest.raises(ReleaseIntegrityError, match="real directory"):
+        seal_release_artifacts(not_directory)
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _write_wheel(nested)
+    _write_sdist(nested)
+    (nested / "subdir").mkdir()
+    with pytest.raises(ReleaseIntegrityError, match="regular distribution files"):
+        seal_release_artifacts(nested)
+
+    empty_artifact = tmp_path / "empty-artifact"
+    empty_artifact.mkdir()
+    (empty_artifact / "e2h-0.25.0-py3-none-any.whl").touch()
+    _write_sdist(empty_artifact)
+    with pytest.raises(ReleaseIntegrityError, match="must not be empty"):
+        seal_release_artifacts(empty_artifact)
 
 
 def test_loader_rejects_invalid_documents(tmp_path: Path) -> None:
@@ -205,6 +313,14 @@ def test_loader_rejects_invalid_documents(tmp_path: Path) -> None:
 
     wrong_root.write_text('{"value": NaN}', encoding="utf-8")
     with pytest.raises(ReleaseIntegrityError, match="non-standard JSON constant"):
+        load_release_manifest(wrong_root)
+
+    wrong_root.write_bytes(b"\xff\xfe")
+    with pytest.raises(ReleaseIntegrityError, match="must be UTF-8"):
+        load_release_manifest(wrong_root)
+
+    wrong_root.write_text("{", encoding="utf-8")
+    with pytest.raises(ReleaseIntegrityError, match="invalid release manifest JSON"):
         load_release_manifest(wrong_root)
 
 
@@ -247,7 +363,7 @@ def test_cli_seal_verify_inspect_and_schema(tmp_path: Path) -> None:
     assert json.loads(schema.stdout)["type"] == "object"
 
 
-def test_cli_verification_failure_returns_one(tmp_path: Path) -> None:
+def test_cli_failures_return_expected_exit_codes(tmp_path: Path) -> None:
     directory = _release_dir(tmp_path)
     manifest = seal_release_artifacts(directory)
     manifest_path = tmp_path / "manifest.json"
@@ -257,3 +373,13 @@ def test_cli_verification_failure_returns_one(tmp_path: Path) -> None:
     result = runner.invoke(release_app, ["verify", str(manifest_path), str(directory)])
     assert result.exit_code == 1
     assert "verification failed" in result.stderr
+
+    unsupported = tmp_path / "unsupported"
+    unsupported.mkdir()
+    (unsupported / "notes.txt").write_text("no distributions", encoding="utf-8")
+    seal = runner.invoke(
+        release_app,
+        ["seal", str(unsupported), "--output", str(tmp_path / "out.json")],
+    )
+    assert seal.exit_code == 2
+    assert "Unable to seal" in seal.stderr
