@@ -92,8 +92,7 @@ def _promotion_checks(
             )
         if p_value_fraction > Fraction(str(rule.max_one_sided_p_value)):
             reasons.append(
-                f"one-sided p-value {p_value:.6g} exceeds allowed "
-                f"{rule.max_one_sided_p_value:.6g}"
+                f"one-sided p-value {p_value:.6g} exceeds allowed {rule.max_one_sided_p_value:.6g}"
             )
         checks.append(
             PromotionCheck(
