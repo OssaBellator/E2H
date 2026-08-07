@@ -5,11 +5,30 @@ build-backend = "hatchling.build"
 [project]
 name = "e2h"
 version = "0.27.0"
-description = "Evidence-to-Harness: reproducible task capsules and deterministic replay for AI harness improvement."
+description = "Evidence-to-Harness: reproducible evaluations, harness optimization, and verifiable AI-agent evidence."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "E2H contributors" }]
+keywords = [
+  "ai-agents",
+  "benchmarking",
+  "evaluation",
+  "observability",
+  "reproducibility",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Testing",
+]
 dependencies = [
   "a2a-sdk[http-server]>=1.1.2,<2",
   "duckdb>=1.4,<2",
@@ -29,6 +48,13 @@ dev = [
   "ruff>=0.11,<1",
   "types-PyYAML>=6.0.12,<7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/OssaBellator/E2H"
+Repository = "https://github.com/OssaBellator/E2H"
+Issues = "https://github.com/OssaBellator/E2H/issues"
+Documentation = "https://github.com/OssaBellator/E2H/tree/main/docs"
+Roadmap = "https://github.com/OssaBellator/E2H/blob/main/ROADMAP.md"
 
 [project.scripts]
 e2h = "e2h.main_cli:app"
