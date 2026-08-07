@@ -1,0 +1,75 @@
+# E2H MCP verification server
+
+E2H exposes a local MCP server for bounded evidence-memory queries, artifact verification, snapshot verification, and explicitly enabled task-capsule replay.
+
+The server uses the stable MCP Python SDK 2.x line and serves over stdio. The filesystem trust boundary is an operator-selected root. Tool arguments can name only paths that resolve inside that root; returned status and verification records do not include absolute local paths.
+
+## Start the server
+
+```bash
+uv sync --extra dev
+uv run e2h-mcp --root . --store .e2h/evidence.duckdb
+```
+
+The default server registers these tools:
+
+- `e2h_status` reports the configured capability boundary without revealing the absolute root path.
+- `e2h_memory_query` reads only E2H's predefined DuckDB analytical views. Raw SQL is never accepted. Row counts are bounded by the operator-selected maximum, and each response includes a canonical SHA-256 digest over the returned rows and store metadata.
+- `e2h_verify_artifact` hashes one regular file inside the configured root and evaluates an optional expected SHA-256 plus minimum/maximum byte bounds. The operator also sets a hard maximum number of bytes that any one call may hash.
+- `e2h_verify_snapshot` runs E2H's full snapshot archive, manifest, member, size, and blob-digest verification and returns the content-addressed snapshot and archive identities.
+
+A configured memory database must already exist. The MCP server does not create a store on behalf of a model call.
+
+## Replay is opt-in
+
+Replay executes capsule-declared commands and is therefore not registered unless the operator enables it when launching the server:
+
+```bash
+uv run e2h-mcp \
+  --root . \
+  --store .e2h/evidence.duckdb \
+  --allow-replay \
+  --backend auto
+```
+
+`e2h_replay` accepts only a capsule path and workspace path relative to the configured root. The execution backend and optional container-runtime override are server configuration, not model-controlled tool arguments.
+
+By default replay results omit stdout and stderr and return their SHA-256 digests, character counts, truncation flags, status, failures, and an exact replay-result digest. This keeps routine MCP calls from automatically copying command output into model context. An operator can deliberately expose E2H's already bounded command output with `--expose-replay-output`.
+
+For untrusted workloads, use capsule sandbox declarations and an operator-selected container backend. Enabling replay is not a sandbox by itself.
+
+## Example host configuration
+
+Any MCP host that can launch a stdio server can start E2H with an equivalent command. A generic configuration shape is:
+
+```json
+{
+  "servers": {
+    "e2h": {
+      "command": "uv",
+      "args": [
+        "run",
+        "e2h-mcp",
+        "--root",
+        ".",
+        "--store",
+        ".e2h/evidence.duckdb"
+      ]
+    }
+  }
+}
+```
+
+Resolve the working directory and command path according to the host's configuration rules. Do not place secrets in MCP tool arguments or in committed host configuration.
+
+## Evidence semantics
+
+The MCP layer does not claim that a SHA-256 digest proves an external statement is true. Digests bind the bytes or structured result E2H actually observed:
+
+- experiment-store source rows retain the content hashes produced by E2H ingestion;
+- memory responses receive a digest over the exact bounded query result and selected store metadata;
+- artifact checks hash the exact stable file observed during the call;
+- snapshot checks reuse E2H's manifest and blob verification;
+- replay responses bind both the validated capsule and the exact full `RunResult`, even when raw command output is omitted from the MCP response.
+
+These boundaries are intended to make agent-visible memory and verification results auditable without promoting hidden reasoning or unverified text into trusted executable state.
