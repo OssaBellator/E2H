@@ -161,6 +161,30 @@ jobs:
           assert verification["source_commit_verified"] is True
           assert verification["evidence"] == evidence
           PY
+      - name: Package deterministic source snapshot twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src .venv/bin/python -m e2h snapshot create \
+            source-a source-a.e2hsnap
+          PYTHONPATH=src .venv/bin/python -m e2h snapshot create \
+            source-b source-b.e2hsnap
+          cmp source-a.e2hsnap source-b.e2hsnap
+          PYTHONPATH=src .venv/bin/python -m e2h snapshot verify source-a.e2hsnap
+          PYTHONPATH=src .venv/bin/python -m e2h snapshot inspect \
+            source-a.e2hsnap --json > release-source-inspection.json
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+
+          release = json.loads(Path("release-inspection.json").read_text(encoding="utf-8"))
+          source = json.loads(Path("release-source-inspection.json").read_text(encoding="utf-8"))
+          source_tree = release["metadata"]["release_toolchain"]["source_tree_sha256"]
+          assert source["snapshot_id"] == source_tree
+          assert len(source["snapshot_id"]) == 64
+          PY
+          mv source-a.e2hsnap e2h-source.e2hsnap
+          rm source-b.e2hsnap
       - name: Stage checksum-bound release bundle
         shell: bash
         run: |
@@ -168,19 +192,23 @@ jobs:
           mkdir -p release/dist
           cp dist-a/*.whl dist-a/*.tar.gz release/dist/
           cp sbom-a.cdx.json release/e2h-sbom.cdx.json
+          cp e2h-source.e2hsnap release/
           cp release-manifest.json \
             release-verification.json \
             release-toolchain-verification.json \
             release-inspection.json \
+            release-source-inspection.json \
             release/
           (
             cd release
             sha256sum dist/*.tar.gz dist/*.whl \
               e2h-sbom.cdx.json \
+              e2h-source.e2hsnap \
               release-manifest.json \
               release-verification.json \
               release-toolchain-verification.json \
               release-inspection.json \
+              release-source-inspection.json \
               > release-checksums.txt
           )
       - name: Upload verified release bundle

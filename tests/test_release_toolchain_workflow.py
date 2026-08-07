@@ -61,18 +61,23 @@ def test_both_release_callers_use_same_local_build_with_expected_tag_policy() ->
     }
 
 
-def test_toolchain_evidence_stays_inside_checksum_bound_bundle() -> None:
+def test_source_snapshot_and_toolchain_evidence_stay_checksum_bound() -> None:
     workflow = _workflow(REUSABLE)
     steps = workflow["jobs"]["build"]["steps"]
     runs = "\n".join(str(step.get("run", "")) for step in steps)
     assert "release-manifest.json" in runs
     assert "release-inspection.json" in runs
     assert "release-toolchain-verification.json" in runs
+    assert "release-source-inspection.json" in runs
+    assert "e2h-source.e2hsnap" in runs
     assert "sha256sum dist/*.tar.gz dist/*.whl" in runs
-    assert "release-manifest.json" in runs
-    assert "release-verification.json" in runs
-    assert "release-toolchain-verification.json" in runs
-    assert "release-inspection.json" in runs
+
+    package = next(
+        step for step in steps if step.get("name") == "Package deterministic source snapshot twice"
+    )
+    package_run = str(package["run"])
+    assert "cmp source-a.e2hsnap source-b.e2hsnap" in package_run
+    assert 'source["snapshot_id"] == source_tree' in package_run
 
     upload = next(
         step for step in steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")

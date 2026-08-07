@@ -72,6 +72,7 @@ def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> Non
         "Export and canonicalize runtime SBOM twice",
         "Require byte-identical builds and canonical runtime SBOMs",
         "Seal and verify release artifacts",
+        "Package deterministic source snapshot twice",
         "Stage checksum-bound release bundle",
         "Upload verified release bundle",
     }
@@ -98,7 +99,7 @@ def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> Non
         for line in run.splitlines()
         if line.strip().startswith("PYTHONPATH=src .venv/bin/python -m e2h ")
     ]
-    assert len(cli_lines) == 6
+    assert len(cli_lines) == 10
 
     sbom = next(
         step for step in steps if step.get("name") == "Export and canonicalize runtime SBOM twice"
@@ -125,6 +126,24 @@ def test_reusable_release_build_verifies_toolchain_against_independent_source() 
     assert 'verification["evidence"] == evidence' in run
 
 
+def test_reusable_release_build_packages_verified_source_snapshot_twice() -> None:
+    workflow, _ = _workflow()
+    steps = workflow["jobs"]["build"]["steps"]
+    package = next(
+        step for step in steps if step.get("name") == "Package deterministic source snapshot twice"
+    )
+    run = str(package["run"])
+    assert "snapshot create" in run
+    assert "source-a source-a.e2hsnap" in run
+    assert "source-b source-b.e2hsnap" in run
+    assert "cmp source-a.e2hsnap source-b.e2hsnap" in run
+    assert "snapshot verify source-a.e2hsnap" in run
+    assert "release-source-inspection.json" in run
+    assert 'source["snapshot_id"] == source_tree' in run
+    assert "mv source-a.e2hsnap e2h-source.e2hsnap" in run
+    assert "rm source-b.e2hsnap" in run
+
+
 def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> None:
     workflow, _ = _workflow()
     steps = workflow["jobs"]["build"]["steps"]
@@ -138,10 +157,13 @@ def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> N
     stage = next(
         step for step in steps if step.get("name") == "Stage checksum-bound release bundle"
     )
-    run = stage["run"]
+    run = str(stage["run"])
     assert "release/e2h-sbom.cdx.json" in run
+    assert "cp e2h-source.e2hsnap release/" in run
+    assert "e2h-source.e2hsnap" in run
     assert "release-manifest.json" in run
     assert "release-verification.json" in run
     assert "release-toolchain-verification.json" in run
     assert "release-inspection.json" in run
+    assert "release-source-inspection.json" in run
     assert "release-checksums.txt" in run

@@ -23,7 +23,7 @@ jobs:
       validate-release-tag: true
 
   attest:
-    name: Attest verified distributions and SBOM
+    name: Attest verified distributions, source, and SBOM
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -50,6 +50,7 @@ jobs:
           subject-path: |
             release/dist/*.tar.gz
             release/dist/*.whl
+            release/e2h-source.e2hsnap
       - name: Attest CycloneDX runtime SBOM
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
@@ -98,10 +99,12 @@ jobs:
             release/dist/*.tar.gz
             release/dist/*.whl
             release/e2h-sbom.cdx.json
+            release/e2h-source.e2hsnap
             release/release-manifest.json
             release/release-verification.json
             release/release-toolchain-verification.json
             release/release-inspection.json
+            release/release-source-inspection.json
             release/release-checksums.txt
           )
           if draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
@@ -198,10 +201,12 @@ jobs:
             release/dist/*.tar.gz \
             release/dist/*.whl \
             release/e2h-sbom.cdx.json \
+            release/e2h-source.e2hsnap \
             release/release-manifest.json \
             release/release-verification.json \
             release/release-toolchain-verification.json \
             release/release-inspection.json \
+            release/release-source-inspection.json \
             release/release-checksums.txt; do
             gh release verify-asset "$GITHUB_REF_NAME" "$asset" > /dev/null
           done
