@@ -10,7 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import uvicorn
@@ -208,7 +208,7 @@ def parse_verification_message(message: Message, *, max_bytes: int) -> Verificat
     if not isinstance(payload, dict):
         raise A2AAgentError("verification request must be a JSON object")
     try:
-        return cast(VerificationCommand, _COMMAND_ADAPTER.validate_python(payload))
+        return _COMMAND_ADAPTER.validate_python(payload)
     except ValidationError as exc:
         raise A2AAgentError(f"verification request validation failed: {exc}") from exc
 
