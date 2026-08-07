@@ -1,0 +1,275 @@
+{
+  "schema_version": "0.1",
+  "id": "e2h-long-horizon-v0.1",
+  "title": "E2H long-horizon constraint retention and correction benchmark v0.1",
+  "tasks": [
+    {
+      "schema_version": "0.1",
+      "id": "release-brief-corrections",
+      "title": "Release brief constraints survive distractors and corrections",
+      "constraint_keys": ["audience", "format", "dates", "tone"],
+      "turns": [
+        {
+          "id": "r01",
+          "role": "user",
+          "content": "For the final release brief, write for internal engineering staff.",
+          "updates": [
+            {"id": "r-u1", "key": "audience", "action": "set", "value": "internal engineering staff"}
+          ]
+        },
+        {"id": "r02", "role": "assistant", "content": "Understood. I will keep the final audience in mind.", "updates": []},
+        {
+          "id": "r03",
+          "role": "user",
+          "content": "Use concise bullets for the final brief.",
+          "updates": [
+            {"id": "r-u2", "key": "format", "action": "set", "value": "concise bullets"}
+          ]
+        },
+        {"id": "r04", "role": "user", "content": "Separately, what is a canary deployment?", "updates": []},
+        {"id": "r05", "role": "assistant", "content": "A canary deployment exposes a change to a small subset before broader rollout.", "updates": []},
+        {
+          "id": "r06",
+          "role": "user",
+          "content": "Keep the final brief's tone neutral.",
+          "updates": [
+            {"id": "r-u3", "key": "tone", "action": "set", "value": "neutral"}
+          ]
+        },
+        {"id": "r07", "role": "assistant", "content": "Noted.", "updates": []},
+        {"id": "r08", "role": "user", "content": "What does a feature flag help with?", "updates": []},
+        {"id": "r09", "role": "assistant", "content": "It lets operators change exposure without shipping a new build.", "updates": []},
+        {
+          "id": "r10",
+          "role": "user",
+          "content": "Correction: the final release brief is for customer support, not internal engineering.",
+          "updates": [
+            {"id": "r-u4", "key": "audience", "action": "set", "value": "customer support", "supersedes": "r-u1"}
+          ]
+        },
+        {
+          "id": "r11",
+          "role": "user",
+          "content": "Do not use calendar dates in the final brief; describe rollout timing with relative windows only.",
+          "updates": [
+            {"id": "r-u5", "key": "dates", "action": "set", "value": "relative rollout windows only"}
+          ]
+        },
+        {"id": "r12", "role": "assistant", "content": "I will apply both changes when the final brief is requested.", "updates": []},
+        {"id": "r13", "role": "user", "content": "Quick aside: define rollback in one sentence.", "updates": []},
+        {"id": "r14", "role": "assistant", "content": "Rollback restores a previously known-good version or state.", "updates": []},
+        {
+          "id": "r15",
+          "role": "user",
+          "content": "Remove the neutral-tone restriction; the final brief may match the source material's tone.",
+          "updates": [
+            {"id": "r-u6", "key": "tone", "action": "revoke", "supersedes": "r-u3"}
+          ]
+        },
+        {
+          "id": "r16",
+          "role": "user",
+          "content": "Formatting correction: use a two-column table instead of concise bullets.",
+          "updates": [
+            {"id": "r-u7", "key": "format", "action": "set", "value": "two-column table", "supersedes": "r-u2"}
+          ]
+        },
+        {"id": "r17", "role": "assistant", "content": "The later formatting and tone instructions replace the earlier ones.", "updates": []},
+        {"id": "r18", "role": "user", "content": "Before the final brief, remind me what blue-green deployment means.", "updates": []}
+      ],
+      "probes": [
+        {"id": "r-p1", "after_turn_id": "r06"},
+        {"id": "r-p2", "after_turn_id": "r14"},
+        {"id": "r-p3", "after_turn_id": "r18"}
+      ],
+      "metadata": {"focus": ["retention", "correction", "revocation"], "turn_count": 18}
+    },
+    {
+      "schema_version": "0.1",
+      "id": "research-brief-corrections",
+      "title": "Research brief source and length constraints evolve over time",
+      "constraint_keys": ["sources", "speculation", "length", "citation_style"],
+      "turns": [
+        {
+          "id": "q01",
+          "role": "user",
+          "content": "For the eventual research brief, use only the supplied documents as sources.",
+          "updates": [
+            {"id": "q-u1", "key": "sources", "action": "set", "value": "supplied documents only"}
+          ]
+        },
+        {"id": "q02", "role": "assistant", "content": "Understood.", "updates": []},
+        {
+          "id": "q03",
+          "role": "user",
+          "content": "Do not add unsupported speculation to the eventual brief.",
+          "updates": [
+            {"id": "q-u2", "key": "speculation", "action": "set", "value": "no unsupported speculation"}
+          ]
+        },
+        {"id": "q04", "role": "user", "content": "What is the difference between a primary and secondary source?", "updates": []},
+        {"id": "q05", "role": "assistant", "content": "A primary source is direct evidence; a secondary source interprets or analyzes primary material.", "updates": []},
+        {
+          "id": "q06",
+          "role": "user",
+          "content": "Keep the eventual brief to at most 400 words.",
+          "updates": [
+            {"id": "q-u3", "key": "length", "action": "set", "value": "400 words maximum"}
+          ]
+        },
+        {"id": "q07", "role": "assistant", "content": "I will keep that limit for the final brief.", "updates": []},
+        {"id": "q08", "role": "user", "content": "As an aside, what does triangulation mean in research?", "updates": []},
+        {"id": "q09", "role": "assistant", "content": "It means comparing multiple sources or methods to test whether a conclusion is supported consistently.", "updates": []},
+        {
+          "id": "q10",
+          "role": "user",
+          "content": "Correction: the final brief may be up to 700 words; replace the earlier 400-word limit.",
+          "updates": [
+            {"id": "q-u4", "key": "length", "action": "set", "value": "700 words maximum", "supersedes": "q-u3"}
+          ]
+        },
+        {
+          "id": "q11",
+          "role": "user",
+          "content": "Use inline source IDs when citing evidence in the final brief.",
+          "updates": [
+            {"id": "q-u5", "key": "citation_style", "action": "set", "value": "inline source IDs"}
+          ]
+        },
+        {"id": "q12", "role": "assistant", "content": "Noted: the later length limit and inline source IDs apply.", "updates": []},
+        {"id": "q13", "role": "user", "content": "What is a literature gap?", "updates": []},
+        {"id": "q14", "role": "assistant", "content": "It is an important question or area that existing literature has not adequately addressed.", "updates": []},
+        {
+          "id": "q15",
+          "role": "user",
+          "content": "Source correction: public sources are now allowed as secondary evidence, but supplied documents must remain primary.",
+          "updates": [
+            {"id": "q-u6", "key": "sources", "action": "set", "value": "supplied documents primary; public sources allowed as secondary", "supersedes": "q-u1"}
+          ]
+        },
+        {"id": "q16", "role": "assistant", "content": "I will use the revised source boundary.", "updates": []},
+        {
+          "id": "q17",
+          "role": "user",
+          "content": "Remove the explicit citation-style rule; use whatever readable citations fit the final brief.",
+          "updates": [
+            {"id": "q-u7", "key": "citation_style", "action": "revoke", "supersedes": "q-u5"}
+          ]
+        },
+        {"id": "q18", "role": "assistant", "content": "The citation-style restriction is removed.", "updates": []},
+        {"id": "q19", "role": "user", "content": "One more aside: what is a confounder?", "updates": []},
+        {"id": "q20", "role": "assistant", "content": "A confounder is a factor related to both an exposure and an outcome that can distort an observed relationship.", "updates": []}
+      ],
+      "probes": [
+        {"id": "q-p1", "after_turn_id": "q06"},
+        {"id": "q-p2", "after_turn_id": "q16"},
+        {"id": "q-p3", "after_turn_id": "q20"}
+      ],
+      "metadata": {"focus": ["retention", "correction", "revocation"], "turn_count": 20}
+    },
+    {
+      "schema_version": "0.1",
+      "id": "coding-task-corrections",
+      "title": "Coding constraints change without losing unrelated requirements",
+      "constraint_keys": ["runtime", "network", "output", "dependencies", "tests"],
+      "turns": [
+        {
+          "id": "c01",
+          "role": "user",
+          "content": "For the eventual implementation, target Python 3.11.",
+          "updates": [
+            {"id": "c-u1", "key": "runtime", "action": "set", "value": "Python 3.11"}
+          ]
+        },
+        {
+          "id": "c02",
+          "role": "user",
+          "content": "The eventual implementation must not require network access.",
+          "updates": [
+            {"id": "c-u2", "key": "network", "action": "set", "value": "no network access"}
+          ]
+        },
+        {"id": "c03", "role": "assistant", "content": "I will retain those environment constraints.", "updates": []},
+        {
+          "id": "c04",
+          "role": "user",
+          "content": "The program's final output format should be JSON.",
+          "updates": [
+            {"id": "c-u3", "key": "output", "action": "set", "value": "JSON"}
+          ]
+        },
+        {"id": "c05", "role": "user", "content": "As an aside, explain idempotence in one sentence.", "updates": []},
+        {"id": "c06", "role": "assistant", "content": "An idempotent operation can be repeated without changing the result after the first successful application.", "updates": []},
+        {
+          "id": "c07",
+          "role": "user",
+          "content": "Use only the Python standard library for the eventual implementation.",
+          "updates": [
+            {"id": "c-u4", "key": "dependencies", "action": "set", "value": "Python standard library only"}
+          ]
+        },
+        {"id": "c08", "role": "assistant", "content": "Noted.", "updates": []},
+        {
+          "id": "c09",
+          "role": "user",
+          "content": "Runtime correction: target Python 3.12 instead of Python 3.11.",
+          "updates": [
+            {"id": "c-u5", "key": "runtime", "action": "set", "value": "Python 3.12", "supersedes": "c-u1"}
+          ]
+        },
+        {"id": "c10", "role": "user", "content": "What does a pure function mean?", "updates": []},
+        {"id": "c11", "role": "assistant", "content": "A pure function has no observable side effects and returns the same result for the same inputs.", "updates": []},
+        {
+          "id": "c12",
+          "role": "user",
+          "content": "The eventual implementation's test suite must run with pytest.",
+          "updates": [
+            {"id": "c-u6", "key": "tests", "action": "set", "value": "pytest"}
+          ]
+        },
+        {"id": "c13", "role": "assistant", "content": "I will retain the testing requirement.", "updates": []},
+        {
+          "id": "c14",
+          "role": "user",
+          "content": "Network correction: localhost access is allowed, but no external network access is permitted.",
+          "updates": [
+            {"id": "c-u7", "key": "network", "action": "set", "value": "localhost only", "supersedes": "c-u2"}
+          ]
+        },
+        {"id": "c15", "role": "user", "content": "What is a golden-file test?", "updates": []},
+        {"id": "c16", "role": "assistant", "content": "It compares current output against a reviewed expected artifact.", "updates": []},
+        {
+          "id": "c17",
+          "role": "user",
+          "content": "Output correction: emit YAML rather than JSON.",
+          "updates": [
+            {"id": "c-u8", "key": "output", "action": "set", "value": "YAML", "supersedes": "c-u3"}
+          ]
+        },
+        {"id": "c18", "role": "assistant", "content": "The YAML output requirement replaces JSON.", "updates": []},
+        {
+          "id": "c19",
+          "role": "user",
+          "content": "Remove the standard-library-only restriction; dependencies may be chosen as needed.",
+          "updates": [
+            {"id": "c-u9", "key": "dependencies", "action": "revoke", "supersedes": "c-u4"}
+          ]
+        },
+        {"id": "c20", "role": "assistant", "content": "The dependency restriction is removed; the other constraints remain.", "updates": []},
+        {"id": "c21", "role": "user", "content": "Before implementation, define a smoke test.", "updates": []},
+        {"id": "c22", "role": "assistant", "content": "A smoke test is a small check that verifies the most important path works at all.", "updates": []}
+      ],
+      "probes": [
+        {"id": "c-p1", "after_turn_id": "c08"},
+        {"id": "c-p2", "after_turn_id": "c16"},
+        {"id": "c-p3", "after_turn_id": "c22"}
+      ],
+      "metadata": {"focus": ["retention", "correction", "revocation"], "turn_count": 22}
+    }
+  ],
+  "metadata": {
+    "origin": "synthetic",
+    "evaluation": "exact active constraint mapping at each probe",
+    "labels": "private constraint updates are removed from public exports"
+  }
+}

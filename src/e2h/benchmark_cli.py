@@ -16,9 +16,11 @@ from e2h.benchmark import (
     load_failure_pattern_corpus,
     verify_failure_pattern_corpus,
 )
+from e2h.long_horizon_cli import long_horizon_app
 from e2h.trace import write_json_atomic
 
 benchmark_app = typer.Typer(no_args_is_help=True, help="Validate E2H community benchmark corpora.")
+benchmark_app.add_typer(long_horizon_app, name="long-horizon")
 console = Console()
 error_console = Console(stderr=True)
 
