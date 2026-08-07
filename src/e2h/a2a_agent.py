@@ -9,7 +9,8 @@ import importlib.metadata
 import json
 import logging
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from pathlib import Path
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import uvicorn
@@ -21,7 +22,7 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, Message
-from google.protobuf.json_format import MessageToJson
+from google.protobuf.json_format import MessageToJson  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from starlette.applications import Starlette
 
@@ -87,7 +88,7 @@ VerificationCommand = Annotated[
     | ReplayCommand,
     Field(discriminator="operation"),
 ]
-_COMMAND_ADAPTER = TypeAdapter(VerificationCommand)
+_COMMAND_ADAPTER: TypeAdapter[VerificationCommand] = TypeAdapter(VerificationCommand)
 
 
 class A2AVerificationResponse(StrictModel):
@@ -157,15 +158,23 @@ def _response(
     result: dict[str, Any] | None = None,
     error: str | None = None,
 ) -> A2AVerificationResponse:
+    ok = error is None
     material = {
         "schema_version": "0.1",
         "operation": operation,
-        "ok": error is None,
+        "ok": ok,
         "result": result,
         "error": error,
     }
     digest = hashlib.sha256(_canonical_json_bytes(material)).hexdigest()
-    return A2AVerificationResponse(**material, response_sha256=digest)
+    return A2AVerificationResponse(
+        schema_version="0.1",
+        operation=operation,
+        ok=ok,
+        result=result,
+        error=error,
+        response_sha256=digest,
+    )
 
 
 def parse_verification_message(message: Message, *, max_bytes: int) -> VerificationCommand:
@@ -199,7 +208,7 @@ def parse_verification_message(message: Message, *, max_bytes: int) -> Verificat
     if not isinstance(payload, dict):
         raise A2AAgentError("verification request must be a JSON object")
     try:
-        return _COMMAND_ADAPTER.validate_python(payload)
+        return cast(VerificationCommand, _COMMAND_ADAPTER.validate_python(payload))
     except ValidationError as exc:
         raise A2AAgentError(f"verification request validation failed: {exc}") from exc
 
@@ -259,11 +268,13 @@ class E2HVerificationAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Return exactly one structured Message, as required by A2A message-only mode."""
         operation = "invalid_request"
+        message = context.message
+        message_context_id = message.context_id if message is not None else ""
         try:
-            if context.message is None:
+            if message is None:
                 raise A2AAgentError("verification request does not contain a message")
             command = parse_verification_message(
-                context.message,
+                message,
                 max_bytes=self.max_request_bytes,
             )
             operation = command.operation
@@ -284,7 +295,7 @@ class E2HVerificationAgentExecutor(AgentExecutor):
                 ),
             )
             payload = response.model_dump(mode="json")
-        context_id = context.context_id or context.message.context_id or None
+        context_id = context.context_id or message_context_id or None
         await event_queue.enqueue_event(
             new_data_message(
                 payload,
@@ -479,8 +490,6 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     """Run the E2H verification agent over A2A 1.0 JSON-RPC."""
-    from pathlib import Path
-
     args = _parser().parse_args()
     public_url = args.public_url or f"http://{args.host}:{args.port}"
     try:
