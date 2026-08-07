@@ -408,7 +408,7 @@ def _tool_policy_violations(
     if tools.selection == "named":
         if len(calls) != 1:
             violations.append(
-                f"provider returned {len(calls)} tool calls despite selection='named' requiring exactly one"
+                f"provider returned {len(calls)} tool calls; selection='named' requires exactly one"
             )
         wrong = sorted({name for name in names if name != tools.selected_tool})
         if wrong:
