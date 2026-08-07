@@ -7,6 +7,7 @@ import hashlib
 import os
 import stat
 from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path
 
 from e2h.snapshot import (
@@ -32,9 +33,7 @@ def _hash_regular_file(
     *,
     limits: SnapshotLimits,
 ) -> tuple[str, int, bool]:
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -74,10 +73,8 @@ def _hash_regular_file(
     except OSError as exc:
         raise ReleaseSourceError(f"unable to hash source file {relative}: {exc}") from exc
     finally:
-        try:
+        with suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
 
 
 def source_tree_sha256(
@@ -115,13 +112,17 @@ def source_tree_sha256(
         except OSError as exc:
             raise ReleaseSourceError(f"unable to stat source entry {relative}: {exc}") from exc
         if stat.S_ISLNK(mode):
-            raise ReleaseSourceError(f"symbolic links are not supported in release source: {relative}")
+            raise ReleaseSourceError(
+                f"symbolic links are not supported in release source: {relative}"
+            )
         if stat.S_ISDIR(mode):
             entries.append(SnapshotEntry(path=relative, kind="directory"))
             try:
                 descendants = sorted(current.iterdir(), key=lambda item: item.name)
             except OSError as exc:
-                raise ReleaseSourceError(f"unable to list source directory {relative}: {exc}") from exc
+                raise ReleaseSourceError(
+                    f"unable to list source directory {relative}: {exc}"
+                ) from exc
             stack.extend(reversed(descendants))
             continue
         if not stat.S_ISREG(mode):
