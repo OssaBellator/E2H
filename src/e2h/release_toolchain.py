@@ -101,7 +101,7 @@ def _constraints_hatchling_version(raw: bytes) -> str:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ReleaseToolchainError("build-constraints.txt must be UTF-8") from exc
-    matches = re.findall(r"(?m)^hatchling==([^\s\\]+)\s*\\$", text)
+    matches: list[str] = re.findall(r"(?m)^hatchling==([^\s\\]+)\s*\\$", text)
     if len(matches) != 1:
         raise ReleaseToolchainError(
             "build-constraints.txt must contain one exact hashed Hatchling requirement"
