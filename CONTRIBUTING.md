@@ -85,6 +85,8 @@ The `uv` binary itself is separately pinned by the root `uv.toml`; changing that
 
 The PEP 517 build backend is another separately reviewed toolchain input. `uv build` creates an isolated build environment and resolves `[build-system].requires` independently of the project `uv.lock`, so E2H pins Hatchling to one exact version in `pyproject.toml`. Keep build isolation enabled; update the Hatchling pin deliberately after reviewing the target release, then require release-integrity CI to reproduce both wheel and sdist bytes before merging.
 
+Release construction also uses one exact Python maintenance release in both release-integrity CI and the tag-only publication build. Keep that release interpreter pin synchronized across those workflows. The ordinary compatibility matrix intentionally stays on minor selectors (`3.11`, `3.12`, `3.13`) so supported Python lines continue exercising their newest available patch updates; do not globally replace those compatibility selectors with the release-construction patch pin.
+
 External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
 
 1. reviews the upstream release or security-fix commit;
