@@ -380,7 +380,7 @@ def _tool_policy_violations(
     if tools.selection == "named":
         wrong = sorted(
             {
-                cast(str, name)
+                name
                 for name in names
                 if isinstance(name, str) and name != tools.selected_tool
             }
