@@ -37,6 +37,11 @@ def _external_uses(workflow: dict[str, Any]) -> list[str]:
     assert isinstance(jobs, dict)
     for job in jobs.values():
         assert isinstance(job, dict)
+        job_use = job.get("uses")
+        if job_use is not None:
+            assert isinstance(job_use, str)
+            if not job_use.startswith("./"):
+                uses.append(job_use)
         steps = job.get("steps", [])
         assert isinstance(steps, list)
         for step in steps:
@@ -81,6 +86,25 @@ def test_every_external_workflow_action_uses_reviewed_immutable_commit() -> None
             seen_actions.add(repository)
 
     assert seen_actions == set(REVIEWED_ACTION_PINS)
+
+
+def test_local_reusable_workflow_calls_stay_same_repository_and_exist() -> None:
+    seen_local_calls = 0
+    for path in _workflow_paths():
+        workflow = _load_workflow(path)
+        jobs = workflow["jobs"]
+        for job_name, job in jobs.items():
+            job_use = job.get("uses")
+            if job_use is None:
+                continue
+            assert isinstance(job_use, str), (path, job_name)
+            if not job_use.startswith("./"):
+                continue
+            seen_local_calls += 1
+            assert job_use.startswith("./.github/workflows/"), (path, job_name, job_use)
+            target = ROOT / job_use.removeprefix("./")
+            assert target.is_file(), (path, job_name, job_use)
+    assert seen_local_calls >= 1
 
 
 def test_workflows_do_not_use_mutable_action_refs_in_raw_yaml() -> None:
