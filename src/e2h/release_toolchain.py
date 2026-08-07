@@ -226,9 +226,7 @@ def verify_release_toolchain_evidence(
         "build_constraints_sha256",
     )
     mismatches = [
-        field
-        for field in comparable_fields
-        if getattr(evidence, field) != getattr(source, field)
+        field for field in comparable_fields if getattr(evidence, field) != getattr(source, field)
     ]
     if mismatches:
         raise ReleaseToolchainError(
