@@ -107,9 +107,7 @@ def test_release_bundle_is_verified_before_attestation_and_publication() -> None
     for name in ("attest", "publish"):
         runs = "\n".join(str(step.get("run", "")) for step in _steps(jobs[name]))
         assert "sha256sum -c release-checksums.txt" in runs
-        assert any(
-            item.startswith("actions/download-artifact@") for item in _uses(jobs[name])
-        )
+        assert any(item.startswith("actions/download-artifact@") for item in _uses(jobs[name]))
 
     publish_steps = _steps(jobs["publish"])
     publish = next(step for step in publish_steps if str(step.get("uses", "")).startswith("pypa/"))
