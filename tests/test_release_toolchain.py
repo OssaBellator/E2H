@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 import e2h.release_toolchain as toolchain
 from e2h.release_cli import release_app
+from e2h.release_source import source_tree_sha256
 from e2h.release_toolchain import (
     ReleaseToolchainError,
     collect_release_toolchain_evidence,
@@ -36,6 +37,7 @@ def _write_toolchain_root(tmp_path: Path) -> Path:
         "    --hash=sha256:" + "b" * 64 + "\n",
         encoding="utf-8",
     )
+    (root / "README.md").write_text("release source\n", encoding="utf-8")
     return root
 
 
@@ -72,6 +74,7 @@ def test_collect_release_toolchain_evidence_binds_reviewed_inputs(
     assert evidence.source_commit == "a" * 40
     assert evidence.runner_generation == "ubuntu-24.04"
     assert evidence.source_date_epoch == 1_704_067_200
+    assert evidence.source_tree_sha256 == source_tree_sha256(root)
     for filename, field in (
         ("uv.toml", "uv_toml_sha256"),
         ("pyproject.toml", "pyproject_sha256"),
@@ -169,6 +172,7 @@ def test_cli_seal_embeds_and_inspect_exposes_toolchain_metadata(
     assert evidence["python_version"] == "3.13.14"
     assert evidence["uv_required_version"] == "0.12.2"
     assert evidence["build_backend_version"] == "1.31.0"
+    assert len(evidence["source_tree_sha256"]) == 64
 
     inspected = runner.invoke(release_app, ["inspect", str(manifest_path), "--json"])
     assert inspected.exit_code == 0
