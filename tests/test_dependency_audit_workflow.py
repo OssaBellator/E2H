@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 WORKFLOW = ROOT / ".github" / "workflows" / "dependency-audit.yml"
 PYPROJECT = ROOT / "pyproject.toml"
 CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
@@ -66,7 +67,7 @@ def test_dependency_audit_uses_reviewed_bootstrap_actions() -> None:
     ]
 
 
-def test_dependency_audit_never_reresolves_the_target_graph() -> None:
+def test_dependency_audit_never_reresolves_target_graphs() -> None:
     _, raw = _workflow()
     assert "uv sync --locked --no-dev --group audit" in raw
     assert "uv export \\" in raw
@@ -74,12 +75,13 @@ def test_dependency_audit_never_reresolves_the_target_graph() -> None:
     assert "--locked \\" in raw
     assert "--no-dev \\" in raw
     assert "--no-emit-local \\" in raw
-    assert "pip-audit \\" in raw
+    assert raw.count("pip-audit \\") == 2
     assert "--requirement .e2h/runtime-requirements.txt" in raw
-    assert "--no-deps \\" in raw
-    assert "--disable-pip \\" in raw
-    assert "--require-hashes \\" in raw
-    assert "--vulnerability-service pypi" in raw
+    assert "--requirement build-constraints.txt" in raw
+    assert raw.count("--no-deps \\") == 2
+    assert raw.count("--disable-pip \\") == 2
+    assert raw.count("--require-hashes \\") == 2
+    assert raw.count("--vulnerability-service pypi") == 2
     assert "--fix" not in raw
     assert "--ignore-vuln" not in raw
     assert "|| true" not in raw
