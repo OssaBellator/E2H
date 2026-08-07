@@ -52,3 +52,9 @@
 - [x] Sanitized real-world failure patterns.
 - [x] Long-horizon constraint retention and correction tasks.
 - [x] Reproducible coding, research, and browser environments.
+
+## Milestone 6 — Distribution integrity
+
+- [x] Deterministic wheel/sdist manifests and reproducible-build CI.
+- OIDC-based package publication with provenance attestations.
+- Signed release tags, changelog automation, and SBOM publication.
