@@ -22,6 +22,18 @@ EXPECTED_ACTIONS = {
     "actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d",
     "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
 }
+EXPECTED_PROVENANCE_SUBJECTS = {
+    "release/dist/*.tar.gz",
+    "release/dist/*.whl",
+    "release/e2h-sbom.cdx.json",
+    "release/e2h-source.e2hsnap",
+    "release/release-manifest.json",
+    "release/release-verification.json",
+    "release/release-toolchain-verification.json",
+    "release/release-inspection.json",
+    "release/release-source-inspection.json",
+    "release/release-checksums.txt",
+}
 _SHA_PIN = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 
 
@@ -186,7 +198,7 @@ def test_release_bundle_is_verified_at_every_trust_handoff() -> None:
     }
 
 
-def test_source_snapshot_gets_generic_provenance_and_sbom_stays_distribution_scoped() -> None:
+def test_complete_release_bundle_gets_provenance_and_sbom_stays_distribution_scoped() -> None:
     workflow, _ = _workflow()
     attest_steps = [
         step
@@ -195,10 +207,12 @@ def test_source_snapshot_gets_generic_provenance_and_sbom_stays_distribution_sco
     ]
     assert len(attest_steps) == 2
     provenance = next(step for step in attest_steps if "sbom-path" not in step.get("with", {}))
-    provenance_subjects = str(provenance["with"]["subject-path"])
-    assert "release/dist/*.tar.gz" in provenance_subjects
-    assert "release/dist/*.whl" in provenance_subjects
-    assert "release/e2h-source.e2hsnap" in provenance_subjects
+    provenance_subjects = {
+        line.strip()
+        for line in str(provenance["with"]["subject-path"]).splitlines()
+        if line.strip()
+    }
+    assert provenance_subjects == EXPECTED_PROVENANCE_SUBJECTS
 
     sbom = next(step for step in attest_steps if "sbom-path" in step.get("with", {}))
     assert sbom["with"]["sbom-path"] == "release/e2h-sbom.cdx.json"
@@ -206,6 +220,8 @@ def test_source_snapshot_gets_generic_provenance_and_sbom_stays_distribution_sco
     assert "release/dist/*.tar.gz" in subject_path
     assert "release/dist/*.whl" in subject_path
     assert "e2h-source.e2hsnap" not in subject_path
+    assert "release-manifest.json" not in subject_path
+    assert "release-checksums.txt" not in subject_path
 
 
 def test_github_release_is_drafted_then_published_as_immutable_and_verified() -> None:
