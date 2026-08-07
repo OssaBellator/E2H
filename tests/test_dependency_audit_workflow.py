@@ -69,13 +69,14 @@ def test_dependency_audit_uses_reviewed_bootstrap_actions() -> None:
 
 def test_dependency_audit_never_reresolves_target_graphs() -> None:
     _, raw = _workflow()
-    assert "uv sync --locked --no-dev --group audit" in raw
+    assert "uv sync --locked --no-default-groups --group audit" in raw
     assert "uv export \\" in raw
     assert "--format requirements.txt" in raw
     assert "--locked \\" in raw
-    assert "--no-dev \\" in raw
+    assert "--no-default-groups \\" in raw
     assert "--no-emit-local \\" in raw
-    assert raw.count("pip-audit \\") == 2
+    assert "--no-dev" not in raw
+    assert raw.count("uv run --no-sync pip-audit \\") == 2
     assert "--requirement .e2h/runtime-requirements.txt" in raw
     assert "--requirement build-constraints.txt" in raw
     assert raw.count("--no-deps \\") == 2
