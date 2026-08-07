@@ -30,8 +30,8 @@ jobs:
           git archive HEAD | tar -x -C source-b
       - name: Build release artifacts twice
         run: |
-          (cd source-a && uv build --out-dir ../dist-a)
-          (cd source-b && uv build --out-dir ../dist-b)
+          (cd source-a && uv build --build-constraint build-constraints.txt --require-hashes --out-dir ../dist-a)
+          (cd source-b && uv build --build-constraint build-constraints.txt --require-hashes --out-dir ../dist-b)
           rm -f dist-a/.gitignore dist-b/.gitignore
       - name: Export and canonicalize runtime SBOM twice
         run: |
