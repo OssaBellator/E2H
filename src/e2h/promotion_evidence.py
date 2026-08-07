@@ -224,9 +224,7 @@ class PromotionProposal(StrictModel):
             for report in self.evidence
         }
         if len(commitments) != 1:
-            raise ValueError(
-                "promotion evidence must share dataset and partition commitments"
-            )
+            raise ValueError("promotion evidence must share dataset and partition commitments")
         return self
 
 
