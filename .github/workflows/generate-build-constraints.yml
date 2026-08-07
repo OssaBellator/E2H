@@ -31,7 +31,7 @@ jobs:
       - name: Commit generated constraints
         run: |
           set -euo pipefail
-          if git diff --quiet -- build-constraints.txt; then
+          if [[ -z "$(git status --porcelain -- build-constraints.txt)" ]]; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
