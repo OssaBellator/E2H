@@ -65,7 +65,8 @@ def test_package_metadata_points_to_public_repository_surfaces() -> None:
 
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.11"
-    assert project["license"] == {"text": "Apache-2.0"}
+    assert project["license"] == "Apache-2.0"
+    assert project["license-files"] == ["LICENSE"]
     assert set(project["keywords"]) >= {
         "ai-agents",
         "benchmarking",
@@ -76,7 +77,7 @@ def test_package_metadata_points_to_public_repository_surfaces() -> None:
     classifiers = set(project["classifiers"])
     for version in ("3.11", "3.12", "3.13"):
         assert f"Programming Language :: Python :: {version}" in classifiers
-    assert "License :: OSI Approved :: Apache Software License" in classifiers
+    assert not any(classifier.startswith("License ::") for classifier in classifiers)
 
     assert project["urls"] == {
         "Homepage": "https://github.com/OssaBellator/E2H",
