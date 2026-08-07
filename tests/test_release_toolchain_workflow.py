@@ -34,7 +34,7 @@ def test_reusable_build_binds_manifest_to_reviewed_toolchain_context() -> None:
     job, command = _seal_command()
     assert job["runs-on"] == EXPECTED_RUNNER
     assert job["env"]["SOURCE_DATE_EPOCH"] == EXPECTED_EPOCH
-    assert "--toolchain-root ." in command
+    assert "--toolchain-root source-a" in command
     assert '--source-commit "$GITHUB_SHA"' in command
     assert f"--runner-generation {EXPECTED_RUNNER}" in command
     assert '--source-date-epoch "$SOURCE_DATE_EPOCH"' in command
