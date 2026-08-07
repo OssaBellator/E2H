@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Mapping, cast
+from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -25,7 +26,6 @@ from e2h.variants import (
     ToolVariant,
     VariantError,
     variant_document_sha256,
-    variant_sha256,
     verify_variant_document,
 )
 
@@ -214,10 +214,16 @@ def _context_items(context: ContextVariant) -> list[LiteralContextItem]:
 
     if context.ordering == "priority":
         rendered.sort(key=lambda entry: (-entry[1].priority, entry[0]))
-    return [item.model_copy(update={"content": content, "max_chars": len(content)}) for _, item, content in rendered]
+    return [
+        item.model_copy(update={"content": content, "max_chars": len(content)})
+        for _, item, content in rendered
+    ]
 
 
-def _build_messages(document: HarnessVariantDocument, invocation: OpenAIResponsesInvocation) -> list[dict[str, Any]]:
+def _build_messages(
+    document: HarnessVariantDocument,
+    invocation: OpenAIResponsesInvocation,
+) -> list[dict[str, Any]]:
     variant = document.variant
     if variant.prompt is None:
         raise OpenAIRuntimeError("OpenAI runtime requires a prompt variant")
@@ -247,7 +253,9 @@ def _build_messages(document: HarnessVariantDocument, invocation: OpenAIResponse
     return [*before, *prompt, *after]
 
 
-def _build_tools(tools: ToolVariant | None) -> tuple[list[dict[str, Any]], Any | None, bool | None]:
+def _build_tools(
+    tools: ToolVariant | None,
+) -> tuple[list[dict[str, Any]], Any | None, bool | None]:
     if tools is None:
         return [], None, None
     rendered = [
@@ -330,7 +338,9 @@ def _archive_input_items(request: OpenAIResponsesRequest) -> list[dict[str, Any]
         role = raw_message.get("role")
         content = raw_message.get("content")
         if not isinstance(role, str) or not isinstance(content, str):
-            raise OpenAIRuntimeError("materialized request messages require string role and content")
+            raise OpenAIRuntimeError(
+                "materialized request messages require string role and content"
+            )
         items.append(
             {
                 "id": f"{request.invocation_id}.input.{index}",
@@ -352,7 +362,11 @@ def _tool_policy_violations(
     raw_output = response.get("output")
     if not isinstance(raw_output, list):
         return ["provider response output is not an array"]
-    calls = [item for item in raw_output if isinstance(item, dict) and item.get("type") == "function_call"]
+    calls = [
+        item
+        for item in raw_output
+        if isinstance(item, dict) and item.get("type") == "function_call"
+    ]
     names = [item.get("name") for item in calls]
     declared = {tool.id for tool in tools.tools}
     violations: list[str] = []
@@ -360,7 +374,9 @@ def _tool_policy_violations(
     if unknown:
         violations.append(f"provider called undeclared tools: {', '.join(unknown)}")
     if len(calls) > tools.max_calls:
-        violations.append(f"provider returned {len(calls)} tool calls; max_calls is {tools.max_calls}")
+        violations.append(
+            f"provider returned {len(calls)} tool calls; max_calls is {tools.max_calls}"
+        )
     if tools.selection == "none" and calls:
         violations.append("provider returned tool calls despite selection='none'")
     if tools.selection == "required" and not calls:
@@ -375,7 +391,8 @@ def _tool_policy_violations(
         )
         if wrong:
             violations.append(
-                f"provider called tools outside selected_tool {tools.selected_tool!r}: {', '.join(wrong)}"
+                f"provider called tools outside selected_tool {tools.selected_tool!r}: "
+                f"{', '.join(wrong)}"
             )
     return violations
 
@@ -397,7 +414,7 @@ def _http_transport(
 ) -> OpenAIHTTPResult:
     request = Request(endpoint, data=body, headers=dict(headers), method="POST")
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
+        with urlopen(request, timeout=timeout_seconds) as response:
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
             request_id = response.headers.get("x-request-id")
     except HTTPError as exc:
