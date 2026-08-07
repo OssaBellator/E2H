@@ -1,0 +1,3 @@
+Source ID: source-b
+
+Project Birch reached general availability on 2026-04-19. Its release note says the preceding release candidate had been available to invited testers before the production release.

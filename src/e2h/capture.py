@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import load_mapping_document
+
 _MAX_CAPTURE_BYTES = 10 * 1024 * 1024
 _MAX_OBSERVATIONS = 1_000
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$"
@@ -44,10 +46,6 @@ def _ensure_json(value: Any, noun: str) -> None:
         json.dumps(value, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{noun} must be JSON-serializable") from exc
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
 
 
 def _aware(value: datetime, noun: str) -> datetime:
@@ -142,24 +140,17 @@ def capture_document_sha256(document: CaptureDocument) -> str:
 
 
 def load_capture_document(path: Path) -> CaptureDocument:
-    """Load one bounded UTF-8 JSON capture document and verify all content digests."""
+    """Load one bounded strict JSON capture document and verify all content digests."""
+    if path.suffix.lower() != ".json":
+        raise CaptureError("capture must use .json")
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise CaptureError(f"unable to read capture: {exc}") from exc
-    if len(raw) > _MAX_CAPTURE_BYTES:
-        raise CaptureError(f"capture exceeds {_MAX_CAPTURE_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CaptureError("capture must be UTF-8") from exc
-    try:
-        payload = json.loads(text, parse_constant=_reject_json_constant)
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise CaptureError(f"invalid capture JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise CaptureError("capture root must be an object")
-    try:
+        payload = load_mapping_document(
+            path,
+            noun="capture",
+            max_bytes=_MAX_CAPTURE_BYTES,
+        )
         return CaptureDocument.model_validate(payload)
     except ValueError as exc:
+        if isinstance(exc, CaptureError):
+            raise
         raise CaptureError(str(exc)) from exc

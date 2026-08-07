@@ -241,9 +241,12 @@ def test_update_and_probe_identifiers_are_strict() -> None:
             probes=[LongHorizonProbe(id="p1", after_turn_id="t1")],
         )
 
-    task = _simple_task()
-    with pytest.raises(ValidationError, match="after_turn_id"):
-        task.model_copy(update={"probes": [LongHorizonProbe(id="p2", after_turn_id="missing")]})
+    corpus = LongHorizonCorpus(id="mutated", title="Mutated", tasks=[_simple_task()])
+    corpus.tasks[0] = corpus.tasks[0].model_copy(
+        update={"probes": [LongHorizonProbe(id="p2", after_turn_id="missing")]}
+    )
+    with pytest.raises(LongHorizonError, match="after_turn_id"):
+        export_public_long_horizon_corpus(corpus)
 
 
 def test_perfect_predictions_score_one_without_expected_label_output() -> None:
@@ -376,3 +379,22 @@ def test_cli_schema_supports_all_artifact_kinds() -> None:
         assert result.exit_code == 0
         schema = json.loads(result.stdout)
         assert schema["type"] == "object"
+
+
+def test_empty_prediction_document_scores_zero() -> None:
+    corpus = load_long_horizon_corpus(SEED)
+    predictions = LongHorizonPredictionDocument(
+        public_corpus_sha256=public_long_horizon_corpus_sha256(corpus),
+        predictions=[],
+    )
+    report = evaluate_long_horizon_predictions(corpus, predictions)
+    assert report.submitted == 0
+    assert report.correct == 0
+    assert report.score == 0.0
+
+
+def test_long_horizon_loader_rejects_duplicate_mapping_keys(tmp_path: Path) -> None:
+    source = tmp_path / "duplicate.json"
+    source.write_text('{"schema_version":"0.1","id":"one","id":"two"}', encoding="utf-8")
+    with pytest.raises(LongHorizonError, match="duplicate object key"):
+        load_long_horizon_corpus(source)

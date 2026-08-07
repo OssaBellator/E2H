@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import load_mapping_document
 from e2h.failures import FailureCategory, FailureCode
 from e2h.privacy import RedactionPolicyError, apply_redaction_policy
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
@@ -172,6 +172,15 @@ class FailurePatternCorpus(StrictModel):
         return self
 
 
+def _validated_failure_pattern_corpus(
+    corpus: FailurePatternCorpus,
+) -> FailurePatternCorpus:
+    try:
+        return FailurePatternCorpus.model_validate(corpus.model_dump(mode="json"))
+    except ValueError as exc:
+        raise BenchmarkError(f"invalid benchmark corpus: {exc}") from exc
+
+
 class FailurePatternVerification(StrictModel):
     """Privacy and provenance verification for a benchmark corpus."""
 
@@ -190,6 +199,7 @@ class FailurePatternVerification(StrictModel):
 
 def failure_pattern_corpus_sha256(corpus: FailurePatternCorpus) -> str:
     """Return the canonical digest of one normalized benchmark corpus."""
+    corpus = _validated_failure_pattern_corpus(corpus)
     payload = json.dumps(
         corpus.model_dump(mode="json"),
         sort_keys=True,
@@ -210,7 +220,7 @@ def _privacy_trace(corpus: FailurePatternCorpus) -> Trace:
             event_type=TraceEventType.RUN_STARTED,
             timestamp=timestamp,
             context=context,
-            payload={"corpus_id": corpus.id},
+            payload={"corpus_id": corpus.id, "metadata": corpus.metadata},
         )
     ]
     for pattern in corpus.patterns:
@@ -246,6 +256,7 @@ def _privacy_trace(corpus: FailurePatternCorpus) -> Trace:
 
 def verify_failure_pattern_corpus(corpus: FailurePatternCorpus) -> FailurePatternVerification:
     """Verify provenance claims and reject residual common PII/secret patterns."""
+    corpus = _validated_failure_pattern_corpus(corpus)
     try:
         outcome = apply_redaction_policy(
             [_privacy_trace(corpus)],
@@ -274,33 +285,16 @@ def verify_failure_pattern_corpus(corpus: FailurePatternCorpus) -> FailurePatter
     )
 
 
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
-
-
 def load_failure_pattern_corpus(path: Path) -> FailurePatternCorpus:
     """Load one bounded strict JSON/YAML failure-pattern corpus."""
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise BenchmarkError(f"unable to read benchmark corpus: {exc}") from exc
-    if len(raw) > _MAX_CORPUS_BYTES:
-        raise BenchmarkError(f"benchmark corpus exceeds {_MAX_CORPUS_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BenchmarkError("benchmark corpus must be UTF-8") from exc
-    try:
-        if path.suffix.lower() == ".json":
-            payload = json.loads(text, parse_constant=_reject_json_constant)
-        elif path.suffix.lower() in {".yaml", ".yml"}:
-            payload = yaml.safe_load(text)
-        else:
-            raise BenchmarkError("benchmark corpus must use .json, .yaml, or .yml")
-        if not isinstance(payload, dict):
-            raise BenchmarkError("benchmark corpus root must be an object")
+        payload = load_mapping_document(
+            path,
+            noun="benchmark corpus",
+            max_bytes=_MAX_CORPUS_BYTES,
+        )
         return FailurePatternCorpus.model_validate(payload)
-    except BenchmarkError:
-        raise
-    except (ValueError, yaml.YAMLError) as exc:
+    except ValueError as exc:
+        if isinstance(exc, BenchmarkError):
+            raise
         raise BenchmarkError(f"invalid benchmark corpus: {exc}") from exc

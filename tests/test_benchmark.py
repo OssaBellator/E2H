@@ -266,3 +266,22 @@ def test_benchmark_schema_exposes_patterns_and_provenance() -> None:
     definitions = schema["$defs"]
     assert "FailurePattern" in definitions
     assert "PublicSource" in definitions
+
+
+def test_benchmark_loader_rejects_duplicate_mapping_keys(tmp_path: Path) -> None:
+    source = tmp_path / "duplicate.json"
+    source.write_text('{"schema_version":"0.1","id":"one","id":"two"}', encoding="utf-8")
+    with pytest.raises(BenchmarkError, match="duplicate object key"):
+        load_failure_pattern_corpus(source)
+
+
+def test_benchmark_privacy_scan_includes_corpus_metadata() -> None:
+    corpus = FailurePatternCorpus(
+        id="metadata-privacy",
+        title="Metadata privacy",
+        patterns=[_pattern()],
+        metadata={"contact": "reviewer@example.com"},
+    )
+    verification = verify_failure_pattern_corpus(corpus)
+    assert verification.verified is False
+    assert verification.privacy_findings >= 1

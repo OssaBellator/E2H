@@ -10,8 +10,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from e2h.document import load_mapping_document
 
 _MAX_CORPUS_BYTES = 4 * 1024 * 1024
 _MAX_TASKS = 1_000
@@ -49,10 +50,6 @@ def _validate_metadata(value: dict[str, Any], noun: str) -> dict[str, Any]:
     if len(_canonical_json_bytes(value)) > _MAX_METADATA_BYTES:
         raise ValueError(f"{noun} exceeds {_MAX_METADATA_BYTES} bytes")
     return value
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
 
 
 class LongHorizonRole(StrEnum):
@@ -187,13 +184,13 @@ class LongHorizonTask(StrictModel):
         for probe in self.probes:
             if probe.id in probe_ids:
                 raise ValueError("probe ids must be unique")
-            turn_index = turn_ids.get(probe.after_turn_id)
-            if turn_index is None:
+            probe_turn_index = turn_ids.get(probe.after_turn_id)
+            if probe_turn_index is None:
                 raise ValueError("probe after_turn_id must reference a task turn")
-            if turn_index < previous_turn_index:
+            if probe_turn_index < previous_turn_index:
                 raise ValueError("probes must be ordered by their referenced turn")
             probe_ids.add(probe.id)
-            previous_turn_index = turn_index
+            previous_turn_index = probe_turn_index
         return self
 
 
@@ -217,6 +214,13 @@ class LongHorizonCorpus(StrictModel):
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("long-horizon task ids must be unique")
         return self
+
+
+def _validated_long_horizon_corpus(corpus: LongHorizonCorpus) -> LongHorizonCorpus:
+    try:
+        return LongHorizonCorpus.model_validate(corpus.model_dump(mode="json"))
+    except ValueError as exc:
+        raise LongHorizonError(f"invalid long-horizon corpus: {exc}") from exc
 
 
 class PublicLongHorizonTurn(StrictModel):
@@ -270,7 +274,7 @@ class LongHorizonPredictionDocument(StrictModel):
 
     schema_version: Literal["0.1"] = "0.1"
     public_corpus_sha256: str = Field(pattern=_SHA256_PATTERN)
-    predictions: list[LongHorizonProbePrediction] = Field(min_length=1, max_length=100_000)
+    predictions: list[LongHorizonProbePrediction] = Field(default_factory=list, max_length=100_000)
 
     @model_validator(mode="after")
     def prediction_pairs_must_be_unique(self) -> LongHorizonPredictionDocument:
@@ -278,6 +282,15 @@ class LongHorizonPredictionDocument(StrictModel):
         if len(pairs) != len(set(pairs)):
             raise ValueError("long-horizon prediction task/probe pairs must be unique")
         return self
+
+
+def _validated_long_horizon_predictions(
+    predictions: LongHorizonPredictionDocument,
+) -> LongHorizonPredictionDocument:
+    try:
+        return LongHorizonPredictionDocument.model_validate(predictions.model_dump(mode="json"))
+    except ValueError as exc:
+        raise LongHorizonError(f"invalid long-horizon predictions: {exc}") from exc
 
 
 class LongHorizonTaskScore(StrictModel):
@@ -327,11 +340,13 @@ class LongHorizonEvaluationReport(StrictModel):
 
 def long_horizon_corpus_sha256(corpus: LongHorizonCorpus) -> str:
     """Return the private canonical identity including evaluator labels."""
+    corpus = _validated_long_horizon_corpus(corpus)
     return hashlib.sha256(_canonical_json_bytes(corpus.model_dump(mode="json"))).hexdigest()
 
 
 def export_public_long_horizon_corpus(corpus: LongHorizonCorpus) -> PublicLongHorizonCorpus:
     """Remove evaluator-side updates and metadata from a candidate-visible corpus."""
+    corpus = _validated_long_horizon_corpus(corpus)
     return PublicLongHorizonCorpus(
         id=corpus.id,
         title=corpus.title,
@@ -380,6 +395,8 @@ def evaluate_long_horizon_predictions(
     predictions: LongHorizonPredictionDocument,
 ) -> LongHorizonEvaluationReport:
     """Score exact active-constraint maps without returning hidden expected mappings."""
+    corpus = _validated_long_horizon_corpus(corpus)
+    predictions = _validated_long_horizon_predictions(predictions)
     expected_public_sha256 = public_long_horizon_corpus_sha256(corpus)
     if predictions.public_corpus_sha256 != expected_public_sha256:
         raise LongHorizonError("prediction public corpus digest does not match the supplied corpus")
@@ -443,46 +460,30 @@ def evaluate_long_horizon_predictions(
 def load_long_horizon_corpus(path: Path) -> LongHorizonCorpus:
     """Load one bounded strict JSON/YAML labelled long-horizon corpus."""
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise LongHorizonError(f"unable to read long-horizon corpus: {exc}") from exc
-    if len(raw) > _MAX_CORPUS_BYTES:
-        raise LongHorizonError(f"long-horizon corpus exceeds {_MAX_CORPUS_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise LongHorizonError("long-horizon corpus must be UTF-8") from exc
-    try:
-        if path.suffix.lower() == ".json":
-            payload = json.loads(text, parse_constant=_reject_json_constant)
-        elif path.suffix.lower() in {".yaml", ".yml"}:
-            payload = yaml.safe_load(text)
-        else:
-            raise LongHorizonError("long-horizon corpus must use .json, .yaml, or .yml")
-        if not isinstance(payload, dict):
-            raise LongHorizonError("long-horizon corpus root must be an object")
+        payload = load_mapping_document(
+            path,
+            noun="long-horizon corpus",
+            max_bytes=_MAX_CORPUS_BYTES,
+        )
         return LongHorizonCorpus.model_validate(payload)
-    except LongHorizonError:
-        raise
-    except (ValueError, yaml.YAMLError) as exc:
+    except ValueError as exc:
+        if isinstance(exc, LongHorizonError):
+            raise
         raise LongHorizonError(f"invalid long-horizon corpus: {exc}") from exc
 
 
 def load_long_horizon_predictions(path: Path) -> LongHorizonPredictionDocument:
-    """Load one bounded JSON prediction document."""
+    """Load one bounded strict JSON prediction document."""
+    if path.suffix.lower() != ".json":
+        raise LongHorizonError("long-horizon predictions must use .json")
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise LongHorizonError(f"unable to read long-horizon predictions: {exc}") from exc
-    if len(raw) > _MAX_CORPUS_BYTES:
-        raise LongHorizonError(f"long-horizon predictions exceed {_MAX_CORPUS_BYTES} bytes")
-    try:
-        payload = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise LongHorizonError(f"invalid long-horizon prediction JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise LongHorizonError("long-horizon prediction root must be an object")
-    try:
+        payload = load_mapping_document(
+            path,
+            noun="prediction",
+            max_bytes=_MAX_CORPUS_BYTES,
+        )
         return LongHorizonPredictionDocument.model_validate(payload)
     except ValueError as exc:
-        raise LongHorizonError(str(exc)) from exc
+        if isinstance(exc, LongHorizonError):
+            raise
+        raise LongHorizonError(f"invalid long-horizon predictions: {exc}") from exc

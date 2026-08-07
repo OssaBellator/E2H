@@ -1,0 +1,106 @@
+{
+  "schema_version": "0.1",
+  "suite_id": "e2h-reproducible-environments-v0.1",
+  "suite_sha256": "855b80ebb4368b8fdc2532d1a22b04814ebc46be434dcf4445f233f50e389d6c",
+  "environments": [
+    {
+      "id": "coding-python-normalizer",
+      "kind": "coding",
+      "source_sha256": "fc627a6c9c0342ecb25111632338e7494c50fd45c106313de9f70fb342f7e24f",
+      "file_count": 3,
+      "total_bytes": 1855,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "bc267d87dd69a60b0617bf22f7d2f2d15918aeafa0714071762f080aeacb3ec3",
+          "size": 547,
+          "executable": false
+        },
+        {
+          "path": "checks/check.py",
+          "sha256": "4cf00fcadce9315d60cb37d807f468bbe8b6540e18e58bff45db7dde6717a10c",
+          "size": 1058,
+          "executable": false
+        },
+        {
+          "path": "src/task.py",
+          "sha256": "db89b98914b79753399336e76033f3521f1f7071f33b2edbd164fd0cfdc8ac5f",
+          "size": 250,
+          "executable": false
+        }
+      ]
+    },
+    {
+      "id": "research-local-evidence",
+      "kind": "research",
+      "source_sha256": "42fef220beb393b0c5890ef0170c7fae678918b8ce84fee7634718608a1f5031",
+      "file_count": 5,
+      "total_bytes": 2424,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "6a88e3d302aaac88fde29abf1e874f598c4d512d82f12ea5b31aafdebe882449",
+          "size": 702,
+          "executable": false
+        },
+        {
+          "path": "checks/check.py",
+          "sha256": "7bb2f8004ccc52fc5fd71a3a46f2e58b2452aa6b609ec9843efcd525f95c6c9e",
+          "size": 1083,
+          "executable": false
+        },
+        {
+          "path": "sources/source-a.txt",
+          "sha256": "7159ca4c874d918b231ed43f118a1033bb8ac31dda0a93b55200133304dcb223",
+          "size": 211,
+          "executable": false
+        },
+        {
+          "path": "sources/source-b.txt",
+          "sha256": "791b00600a87b95d50a71c620ff18c7d8210bbb026895550271f8a7cf9aca355",
+          "size": 202,
+          "executable": false
+        },
+        {
+          "path": "sources/source-c.txt",
+          "sha256": "a9c065831da7e5fd4e7e8e89ce053494109eb960282e5ca713dad0d842291468",
+          "size": 226,
+          "executable": false
+        }
+      ]
+    },
+    {
+      "id": "browser-static-release",
+      "kind": "browser",
+      "source_sha256": "d8ff7735daeaa9455469aabc4a38154358c292738507783452b3dba618a00201",
+      "file_count": 4,
+      "total_bytes": 2138,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "d5360d337143da8dae02ec17fd681ad19fd3fdda1a7659ff73128daaf6f12394",
+          "size": 654,
+          "executable": false
+        },
+        {
+          "path": "checks/check.py",
+          "sha256": "4b8ca92e21b135d422e6e509b325afed24ce68ae7e2887c5fccb9e9a27f6f4b5",
+          "size": 729,
+          "executable": false
+        },
+        {
+          "path": "site/details.html",
+          "sha256": "fb7e0bbea1fdcb8ff44dfcef3c166a29bf72e56e54618ebed4c92e6fd38a8c17",
+          "size": 403,
+          "executable": false
+        },
+        {
+          "path": "site/index.html",
+          "sha256": "dc687fb463fe5dde0b73e61a063ea619693b41b401769a8046c59f91a241534a",
+          "size": 352,
+          "executable": false
+        }
+      ]
+    }
+  ]
+}

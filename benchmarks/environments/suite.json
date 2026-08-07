@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.1",
+  "id": "e2h-reproducible-environments-v0.1",
+  "title": "E2H reproducible coding, research, and browser environments v0.1",
+  "environments": [
+    {
+      "schema_version": "0.1",
+      "id": "coding-python-normalizer",
+      "kind": "coding",
+      "source_dir": "benchmarks/environments/coding-python",
+      "network": "none",
+      "entrypoint": ["python", "checks/check.py"],
+      "candidate_artifact": "src/task.py",
+      "description": "Implement a deterministic identifier normalizer using only the local workspace and checker."
+    },
+    {
+      "schema_version": "0.1",
+      "id": "research-local-evidence",
+      "kind": "research",
+      "source_dir": "benchmarks/environments/research-local",
+      "network": "none",
+      "entrypoint": ["python", "checks/check.py"],
+      "candidate_artifact": "answer.json",
+      "description": "Answer a research question from a fixed local evidence packet with source identifiers."
+    },
+    {
+      "schema_version": "0.1",
+      "id": "browser-static-release",
+      "kind": "browser",
+      "source_dir": "benchmarks/environments/browser-static",
+      "network": "localhost_only",
+      "entrypoint": ["python", "-m", "http.server", "8000", "--directory", "site"],
+      "candidate_artifact": "result.json",
+      "description": "Navigate a deterministic two-page local site and report the release code and observed path."
+    }
+  ]
+}
