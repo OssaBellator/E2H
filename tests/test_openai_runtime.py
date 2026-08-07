@@ -9,8 +9,8 @@ from e2h.genome import capsule_sha256
 from e2h.models import TaskCapsule
 from e2h.openai_runtime import (
     OpenAIHTTPResult,
-    OpenAIRuntimeError,
     OpenAIResponsesInvocation,
+    OpenAIRuntimeError,
     build_openai_responses_request,
     load_openai_responses_invocation,
     run_openai_responses,
@@ -312,7 +312,13 @@ def test_runtime_rejects_non_openai_routes_workflows_and_referenced_context() ->
 def test_invocation_loader_is_strict(tmp_path: Path) -> None:
     path = tmp_path / "invocation.yaml"
     path.write_text(
-        """schema_version: \"0.1\"\nid: runtime-002\nvariables:\n  task: verify it\nroute_metadata:\n  tier: fast\n""",
+        """schema_version: "0.1"
+id: runtime-002
+variables:
+  task: verify it
+route_metadata:
+  tier: fast
+""",
         encoding="utf-8",
     )
     loaded = load_openai_responses_invocation(path)
