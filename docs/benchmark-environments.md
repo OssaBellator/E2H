@@ -55,7 +55,7 @@ uv run e2h benchmark environments verify \
   --root .
 ```
 
-Verification fails if the suite spec changed without resealing, if an environment was added/removed, if a kind changed, or if any source file's path, contents, size, or executable bit differs from the lock.
+Verification fails if the suite spec changed without resealing, if an environment was added/removed or reordered, if a kind changed, or if any source file's path, contents, size, or executable bit differs from the lock. JSON and YAML inputs use E2H's shared strict document loader, so duplicate mapping keys are rejected instead of being silently overwritten.
 
 ## Materialize one environment
 
@@ -69,6 +69,8 @@ uv run e2h benchmark environments materialize \
 ```
 
 Materialization first verifies the entire suite, then copies the selected source tree to a destination that must not already exist, and scans the copy again. If the copied tree does not match the lock exactly, the destination is removed and the command fails.
+
+The source scanner compares filesystem identity before and after hashing so a file that changes during verification fails closed. Materialization also preserves any raced-in symlink as a symlink for the post-copy scan to reject, rather than following it to an out-of-tree target.
 
 This operation does not install dependencies or execute the environment entrypoint. Execution policy remains an operator/runtime concern; the environment artifact defines reproducible bytes and the intended network boundary.
 
