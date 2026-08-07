@@ -7,8 +7,10 @@ E2H accepts focused contributions that preserve its core evidence rule: external
 Use Python 3.11 or newer and install the locked development environment with `uv`:
 
 ```bash
-uv sync --extra dev
+uv sync --locked --extra dev
 ```
+
+The repository pins the supported `uv` frontend through `[tool.uv].required-version`; use that version when regenerating dependency or release artifacts.
 
 Run the core local checks before opening a pull request:
 
@@ -76,7 +78,7 @@ Dependabot monitors two independent update streams in `.github/dependabot.yml`:
 - the `uv` ecosystem for `pyproject.toml` and `uv.lock`;
 - the `github-actions` ecosystem for external workflow actions.
 
-Python dependency pull requests must preserve the locked workflow. If a dependency change affects `pyproject.toml`, the corresponding reviewed `uv.lock` change must be present and all release-integrity/SBOM checks must pass.
+Python dependency pull requests must preserve the locked workflow. Runtime and development dependency changes that affect the project resolution must include the corresponding reviewed `uv.lock` change. Build-system-only requirements can legitimately leave `uv.lock` unchanged because isolated PEP 517 build dependencies are outside the project runtime lock; those changes must remain compatible with the reviewed `[tool.uv].build-constraint-dependencies` policy and pass the release-integrity/SBOM checks.
 
 External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
 
