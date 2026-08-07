@@ -1,96 +1,108 @@
 # E2H — Evidence-to-Harness
 
-E2H is an open-source capability flywheel for turning real AI-agent evidence into reproducible evaluations and validated harness improvements.
+E2H is an open-source toolkit for turning observable AI-agent evidence into reproducible evaluations, controlled harness experiments, and verifiable release artifacts.
 
-The repository now contains twelve connected vertical slices: deterministic **task capsule replay**, an observable **trace + replay-matrix layer**, a privacy-aware **evidence ingestion layer**, a review-gated **capsule compiler**, declarative **file, JSON, and artifact oracles**, content-addressed **workspace snapshots**, an optional **container sandbox backend**, a transactional **DuckDB/Parquet experiment store**, native **OpenAI Responses, Anthropic Messages, and Gemini GenerateContent evidence ingestion**, and configurable **redaction policies with privacy review reports**.
+The project is built around a simple rule: **claims should be backed by replayable or content-addressed evidence rather than hidden reasoning or unverifiable state**. E2H therefore keeps execution, evidence capture, optimization, benchmark data, and release integrity explicit and machine-checkable.
 
-## What works today
+Python 3.11, 3.12, and 3.13 are exercised in CI.
 
-- Strict JSON/YAML task capsule and experiment validation.
-- Explicit command arguments with no shell interpolation.
-- Capsule-declared working-directory boundary checks, including resolved symlink checks.
-- Per-command timeouts, expected exit codes, fail-fast behavior, and bounded in-memory output capture.
-- Normalized observable trace events for conversations, messages, spans, tools, artifacts, feedback, runs, and checks.
-- Variant × repetition replay matrices with stable run IDs and per-variant reliability summaries.
-- Canonical transcript JSON, OTLP/HTTP JSON, archived OpenAI Responses, Anthropic Messages, and Gemini GenerateContent ingestion.
-- Provider-native message, function-call, function-output, usage, status, and request metadata normalization.
-- Explicit user-correction capture linked to earlier assistant messages.
-- Configurable secret, email, phone, custom-regex, and exact-allowlist redaction policies.
-- Non-reversible privacy review reports with counts, policy digests, and residual findings.
-- Content-addressed source provenance without exposing local filesystem paths.
-- Immutable capsule proposals with evidence references and stable proposal IDs.
-- Controlled mutation verification plus human approval/rejection gates.
-- Capsule materialization only after matching review and verification evidence.
-- Declarative file, RFC 6901 JSON, and artifact digest/size oracle templates.
-- Automatic operator-specific oracle mutations for strong verification.
-- Deterministic content-addressed workspace and artifact snapshot bundles.
-- Snapshot verification, safe restoration, and portable compiler references.
-- Optional immutable-image container execution with filesystem, network, user, and resource controls.
-- Backend selection for direct replay, matrices, and compiler mutation verification.
-- Transactional DuckDB ingestion for run and replay-matrix result artifacts.
-- Stable analytical views and compressed Parquet export without retaining raw command output.
-- Atomic JSON reports and deterministic JSONL trace evidence.
-- CLI commands for validation, replay, experiments, and evidence ingestion.
-- Unit tests, coverage enforcement, linting, strict type checks, and end-to-end CI smoke workflows.
+## What E2H provides
+
+| Area | Capabilities |
+| --- | --- |
+| Replay | Versioned task capsules, deterministic command grading, bounded output capture, direct/container execution, variant × repetition matrices |
+| Evidence | Canonical transcripts, OTLP/HTTP traces, OpenAI Responses, Anthropic Messages, Gemini GenerateContent, corrections, privacy redaction/review, content-addressed provenance |
+| Harness compilation | Review-gated capsule proposals, controlled mutation verification, file/JSON/artifact oracles, workspace snapshots, human approval before materialization |
+| Optimization | Typed harness genomes and patches, prompt/tool/context/routing/workflow variants, DSPy/GEPA adapters, train/validation/sealed-test partitions, promotion/rollback gates |
+| Frontier integrations | OpenAI Responses runtime adapter, MCP verification server, A2A verification agent, browser and VS Code capture clients |
+| Community benchmark | Sanitized real-world failure patterns, long-horizon correction/constraint tasks, reproducible coding/research/browser environments |
+| Distribution integrity | Reproducible wheel/sdist builds, deterministic release manifests, canonical CycloneDX runtime SBOMs, OIDC PyPI publication, provenance/SBOM attestations, immutable GitHub releases |
+
+E2H records **observable events and artifacts only**. It does not attempt to capture or reconstruct hidden model chain-of-thought.
+
+## Install from a source checkout
+
+E2H uses [`uv`](https://docs.astral.sh/uv/) for its development and locked-environment workflow.
+
+```bash
+git clone https://github.com/OssaBellator/E2H.git
+cd E2H
+uv sync --extra dev
+uv run e2h --help
+```
+
+The project requires Python 3.11 or newer.
 
 ## Quick start
 
+Validate and replay the smoke capsule:
+
 ```bash
-uv sync --extra dev
 uv run e2h validate examples/smoke/capsule.yaml
-uv run e2h run examples/smoke/capsule.yaml --workspace . --output .e2h/result.json
+uv run e2h run examples/smoke/capsule.yaml \
+  --workspace . \
+  --output .e2h/result.json
+```
+
+Run a variant × repetition experiment:
+
+```bash
 uv run e2h experiment validate examples/matrix/experiment.yaml
 uv run e2h experiment run examples/matrix/experiment.yaml \
   --root . \
   --output .e2h/matrix.json \
   --traces .e2h/matrix.jsonl \
   --require-all-pass
+```
+
+Import and privacy-review a transcript:
+
+```bash
 uv run e2h ingest transcript examples/ingest/transcript.json \
   --redaction-policy examples/ingest/redaction-policy.yaml \
   --redaction-report .e2h/redaction-review.json \
   --output .e2h/transcript-bundle.json \
   --traces .e2h/transcript.jsonl
-uv run e2h ingest otlp examples/ingest/otlp.json \
-  --output .e2h/otlp-bundle.json \
-  --traces .e2h/otlp.jsonl
-uv run e2h ingest openai-responses examples/ingest/openai-responses.json \
-  --output .e2h/openai-responses-bundle.json \
-  --traces .e2h/openai-responses.jsonl
-uv run e2h ingest anthropic-messages examples/ingest/anthropic-messages.json \
-  --output .e2h/anthropic-messages-bundle.json \
-  --traces .e2h/anthropic-messages.jsonl
-uv run e2h ingest gemini-generate-content examples/ingest/gemini-generate-content.json \
-  --output .e2h/gemini-bundle.json \
-  --traces .e2h/gemini.jsonl
-uv run e2h compile proposal .e2h/transcript-bundle.json examples/compile/spec.yaml \
-  --output .e2h/compiler-proposal.json
-uv run e2h compile verify .e2h/compiler-proposal.json \
-  --workspace . --output .e2h/compiler-verification.json --require-strong
-uv run e2h compile review .e2h/compiler-proposal.json \
-  --reviewer maintainer --decision approve --output .e2h/compiler-approved.json
-uv run e2h compile materialize .e2h/compiler-approved.json \
-  .e2h/compiler-verification.json --output .e2h/compiled-capsule.yaml
-uv run e2h snapshot create examples .e2h/examples.e2hsnap \
-  --include compile --include ingest
-uv run e2h snapshot verify .e2h/examples.e2hsnap
-uv run e2h snapshot restore .e2h/examples.e2hsnap .e2h/restored-examples
-uv run e2h run examples/sandbox/capsule.yaml --backend container --workspace .
-uv run e2h store init .e2h/evidence.duckdb
-uv run e2h store ingest .e2h/evidence.duckdb .e2h/result.json .e2h/matrix.json
-uv run e2h store query .e2h/evidence.duckdb variants --json
-uv run e2h store export .e2h/evidence.duckdb .e2h/runs.parquet --view runs
 ```
 
-Run all checks:
+Compile sanitized evidence into a review-gated capsule:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src
-uv run pytest
+uv run e2h compile proposal \
+  .e2h/transcript-bundle.json \
+  examples/compile/spec.yaml \
+  --output .e2h/compiler-proposal.json
+
+uv run e2h compile verify \
+  .e2h/compiler-proposal.json \
+  --workspace . \
+  --output .e2h/compiler-verification.json \
+  --require-strong
+
+uv run e2h compile review \
+  .e2h/compiler-proposal.json \
+  --reviewer maintainer \
+  --decision approve \
+  --output .e2h/compiler-approved.json
+
+uv run e2h compile materialize \
+  .e2h/compiler-approved.json \
+  .e2h/compiler-verification.json \
+  --output .e2h/compiled-capsule.yaml
 ```
 
-## Capsule example
+Create and verify a content-addressed workspace snapshot:
+
+```bash
+uv run e2h snapshot create examples .e2h/examples.e2hsnap \
+  --include compile \
+  --include ingest
+uv run e2h snapshot verify .e2h/examples.e2hsnap
+```
+
+## Replay model
+
+A task capsule declares the initial working directory, allowed tool/network boundary, resource limits, and deterministic success checks.
 
 ```yaml
 schema_version: "0.1"
@@ -113,40 +125,32 @@ success:
       argv: [python, scripts/check_contract.py]
 ```
 
-Commands are executed directly as argument vectors. E2H intentionally does not invoke a shell.
+Commands are executed as argument vectors; E2H intentionally does not invoke a shell. Working-directory and path checks resolve symlinks before execution. Output capture and time/resource limits are bounded.
 
-## Experiment example
+For untrusted workloads, use the container backend or an external sandbox appropriate to the threat model. A valid capsule describes the intended execution contract; it does not make arbitrary candidate code safe.
 
-```yaml
-schema_version: "0.1"
-id: billing-harness-comparison
-capsule: benchmarks/billing/capsule.yaml
-workspace: .
-repetitions: 5
-variants:
-  - id: baseline
-    env:
-      HARNESS_PROFILE: baseline
-  - id: verify-first
-    env:
-      HARNESS_PROFILE: verify-first
-    metadata:
-      change: require-artifact-verification
-```
+## Observable evidence
 
-Environment overlays are the first typed variant mechanism. They make the matrix immediately useful for command-driven harnesses while leaving room for prompt, tool, context, routing, and workflow variant types in later schema versions.
+E2H normalizes visible messages, tool calls/results, traces, artifacts, feedback, runs, and checks into an observable trace model.
 
-Each matrix cell receives protected `E2H_VARIANT_ID` and `E2H_REPETITION` environment variables. Results preserve the complete run report, while the JSONL trace contains only observable evidence—never hidden model reasoning.
+Supported evidence inputs include:
 
-## Transcript ingestion
+- canonical transcript JSON;
+- OTLP/HTTP JSON traces;
+- archived OpenAI Responses API request/response evidence;
+- archived Anthropic Messages API evidence;
+- archived Gemini GenerateContent evidence.
 
-The canonical transcript format is intentionally provider-neutral:
+Provider adapters retain visible messages, tool/function activity, status, usage, and selected provider metadata. Hidden reasoning payloads, encrypted reasoning content, binary media bodies, and equivalent opaque internals are deliberately excluded.
+
+### Corrections
+
+Canonical transcript corrections are explicit rather than inferred from sentiment:
 
 ```json
 {
   "schema_version": "0.1",
   "id": "conversation-123",
-  "capsule_id": "billing-regression",
   "messages": [
     {
       "id": "m1",
@@ -165,118 +169,221 @@ The canonical transcript format is intentionally provider-neutral:
 }
 ```
 
-Corrections must be explicit, must come from a user message, and must reference an earlier assistant message. This avoids unreliable sentiment or phrase heuristics.
-
-## OpenAI Responses ingestion
-
-`e2h ingest openai-responses` consumes an archived export envelope rather than making a live API request. Each record contains the raw `response` object returned by the Responses API plus the `input_items` retrieved for that response. This mirrors the provider API split: response output items are returned on the response object, while input items are retrieved separately when reconstructing observable request context.
-
-The adapter normalizes input, developer, user, and assistant messages into `message.observed` events. Standard `function_call` and `function_call_output` items become linked `tool.called` and `tool.completed` events keyed by `call_id`. Response model, status, token usage, errors, incomplete details, request ID, conversation ID, previous-response linkage, and item IDs are retained as `openai.response` artifacts. Unknown output-item types remain observable provider artifacts rather than being silently discarded.
-
-Reasoning items receive a deliberately narrower treatment. E2H records only provider-supplied summary text, status, and booleans indicating whether reasoning or encrypted content was present. It never copies `reasoning_text` or `encrypted_content` into normalized evidence. The built-in redactor then processes all retained messages, arguments, tool outputs, summaries, and response metadata by default.
-
-Stable provider item IDs are deduplicated across chained response records, so an item returned as output in one response and replayed as input to the next produces one observable event. Function outputs from partial exports are still retained and explicitly marked as unlinked when their originating call is absent.
-
-The export envelope is intentionally SDK-independent and additive-field tolerant inside provider payloads. E2H requires only the core response identity, object type, Unix creation time, model, ordered output array, and typed provider items; this preserves archived evidence across SDK upgrades without accepting malformed core structure.
-
-## Anthropic Messages ingestion
-
-`e2h ingest anthropic-messages` consumes archived request/response envelopes and never makes a live API request. Each record contains a timezone-aware capture timestamp, exporter-assigned stable IDs for request messages, the request history, an optional system prompt, and the raw Anthropic response message. Stable IDs let chained histories be deduplicated while conflicting reuse fails validation.
-
-Visible text becomes `message.observed` evidence. Client `tool_use` and Anthropic `server_tool_use` blocks become `tool.called` events; request `tool_result` blocks and provider result blocks become linked `tool.completed` events keyed by `tool_use_id`. Usage, model, stop reason, stop sequence, request ID, container metadata, and content-block types are retained in `anthropic.message` artifacts. Unknown future block types remain observable provider artifacts instead of being silently discarded.
-
-Thinking blocks have a deliberately narrow evidence boundary. Normalized records retain only the block type and booleans indicating whether thinking, signature, or redacted data was present. E2H never copies thinking text, signatures, redacted-thinking data, image bytes, or opaque `encrypted_content` into evidence. Text citations and non-binary source metadata remain observable and pass through the shared redaction policy engine.
-
-The envelope is SDK-independent and additive-field tolerant inside provider payloads, but requires core response identity, `message` type, assistant role, model, content array, token usage, timezone-aware record ordering, and consistent message/tool IDs. Partial archives retain unlinked tool results explicitly for review.
-
-## Gemini GenerateContent ingestion
-
-`e2h ingest gemini-generate-content` consumes archived request/response envelopes and never makes a live Google API request. Each record contains a timezone-aware capture timestamp, exporter-assigned stable IDs for request contents and response candidates, optional system instructions, the raw GenerateContent response, and request/model metadata. Candidate IDs are archive metadata because provider candidates do not carry durable content IDs; they enable chained-history deduplication and conflict detection.
-
-Text becomes `message.observed` evidence. `functionCall`, server `toolCall`, and `executableCode` parts become `tool.called` events; matching `functionResponse`, `toolResponse`, and `codeExecutionResult` parts become linked `tool.completed` events. Candidate finish state, citations, grounding, safety ratings, URL context, response model/version, prompt feedback, and detailed usage metadata remain observable artifacts.
-
-Thought parts have a strict presence-only boundary. E2H records whether thought text and a thought signature were present, but never copies either value. Inline media bytes and opaque thought signatures are excluded; file URIs, MIME types, and other non-binary source metadata remain observable and pass through the shared redaction policy engine.
-
-The archive is SDK-independent and accepts snake_case or provider JSON camelCase fields. It validates response IDs, candidate alignment, timezone ordering, content identity, function-call identity, candidate roles, and canonical JSON values. Partial archives retain unlinked function or tool results explicitly for review.
+A correction must come from a user message and reference an earlier assistant message.
 
 ## Privacy and provenance
 
-Ingestion uses the built-in `default` policy unless `--redaction-policy` selects a strict JSON or YAML policy. Policies can independently enable secret, email, and phone detectors, add trusted custom Python regular expressions, and retain exact allowlisted values. Placeholders include a truncated SHA-256 digest, so repeated values remain comparable without storing the original value. Redaction records contain only the class, rule identifier, safe JSON-pointer location, digest, and placeholder.
+Evidence ingestion applies a configurable redaction policy for secrets, email addresses, phone numbers, trusted custom regular expressions, and exact allowlists.
 
-Every ingestion bundle now includes a `redaction_review` with the canonical policy digest, counts by class and custom rule, unique-value counts, warnings, and hashed residual findings. `--redaction-report` writes that review separately. Review reports never include raw matches or allowlist values. `--no-redact` remains available and now acts as review-only mode: evidence is retained verbatim while sensitive-looking residuals are reported by digest and location.
+Redaction review artifacts retain classes, rules, safe JSON-pointer locations, digests, counts, and warnings without reproducing raw matched values. `--no-redact` is a review-only mode for trusted local workflows; it preserves source evidence and reports residual sensitive-looking patterns rather than silently declaring the input safe.
 
-Custom rules are trusted Python regular expressions and can be computationally expensive or over-broad. Policy authors must review them like code. Exact allowlists deliberately retain matching values, and pattern matching cannot prove complete de-identification; manual review remains recommended before evidence leaves its original trust boundary.
+Every ingestion bundle records content-addressed source provenance without writing absolute local filesystem paths.
 
-Every ingestion bundle records the source filename, byte length, SHA-256 content hash, importer format, and whether redaction was enabled. Absolute source paths are never written to the bundle. Use `--no-redact` only for trusted local workflows where raw evidence is intentionally retained.
+Pattern matching cannot prove complete de-identification. Evidence intended to leave its original trust boundary should still receive human review.
 
-The OTLP importer accepts OTLP/HTTP JSON `resourceSpans`, preserves resource, scope, span, event, status, and parent identifiers, and retains nanosecond ordering even though normalized timestamps use Python's microsecond-resolution datetime representation.
+## Capsule compiler and deterministic oracles
 
-## Capsule compilation
+The compiler converts sanitized evidence plus trusted human-authored checks into an immutable capsule proposal.
 
-The compiler turns a sanitized ingestion bundle plus a human-authored compiler specification into an immutable proposal. Evidence may supply the goal and provenance, but executable checks and mutation probes remain explicit trusted declarations; imported text is never silently promoted into a command.
+A proposal cannot become an executable capsule merely because imported text suggests a command. Executable checks remain explicit trusted declarations. Materialization requires:
 
-Each proposal ID is the SHA-256 digest of its immutable core. Verification binds to that exact capsule and ordered mutation plan. A strong report requires the baseline capsule to pass and every declared controlled environment mutation to make the oracle fail. Human reviews are append-only, and the latest approval or rejection determines whether materialization is allowed.
+1. a matching immutable proposal;
+2. baseline verification;
+3. declared mutation probes that demonstrate the oracle detects controlled regressions;
+4. an approval review bound to the same proposal and verification evidence.
 
-`e2h compile materialize` rejects stale or mismatched reports, weak verification, and unapproved proposals by default. Mutation verification executes the proposed commands, so it has the same security boundary as ordinary task capsule replay and should run in an external sandbox for untrusted workloads.
+Declarative oracle templates cover:
 
-## Declarative oracles
+- file presence/absence, exact text, contained text, and SHA-256;
+- RFC 6901 JSON-pointer equality/presence/absence;
+- artifact size and SHA-256 constraints.
 
-Compiler specifications may declare `file`, `json`, and `artifact` oracles alongside command checks. Oracles are compiled into ordinary bounded `CommandCheck` entries that execute without shell interpolation, so materialized capsules remain compatible with the replay runner and trace model.
+Generated operator-specific mutations make strong verification prove that each oracle fails under its intended regression.
 
-File oracles support presence, absence, exact UTF-8 text, contained text, and SHA-256 checks. JSON oracles use RFC 6901 pointers with equality, presence, and absence modes. Artifact oracles enforce byte-size bounds and optional SHA-256 digests. All paths remain relative, reject parent traversal, and are resolved against the check working directory to prevent symlink escapes.
+## Snapshots and experiment store
 
-By default, each oracle receives a generated mutation probe. Presence checks are inverted, JSON equality values are structurally changed, and content/artifact checks receive a digest mismatch. Strong verification therefore proves that the baseline passes and every declared oracle detects its operator-specific regression. Set `auto_mutate_oracles: false` only when mutations are supplied by another trusted workflow.
+Workspace snapshots are deterministic ZIP bundles with a canonical manifest, sorted path entries, executable bits, byte sizes, and content-addressed blobs. Creation/restoration reject unsafe paths, symlinks, duplicate or traversal-style archive members, and configured size limits.
 
-## Workspace snapshots
+Replay results can be persisted into the DuckDB/Parquet experiment store:
 
-`e2h snapshot create` records selected workspace or artifact trees as deterministic ZIP bundles. A canonical `manifest.json` contains sorted directory and file entries, executable bits, byte lengths, and SHA-256 digests; identical file content is stored once under `blobs/<sha256>`. Fixed archive timestamps, modes, and member ordering make equivalent snapshots byte-for-byte reproducible.
-
-Creation rejects symbolic links, special filesystem entries, unsafe include paths, and configured entry or byte limits. Verification rejects duplicate, unexpected, oversized, or traversal-style archive members and recomputes every blob digest. Restoration first verifies the complete archive, writes into a sibling staging directory, and atomically moves the result into a new or empty destination. It never extracts ZIP member paths directly.
-
-`e2h snapshot reference` emits a portable `SnapshotReference` containing the manifest-derived snapshot ID, archive SHA-256, locator, and workspace/artifact role. Compiler specifications may attach these references under `snapshots`; they become immutable `e2h_compiler.snapshots` metadata and therefore participate in capsule and proposal identity without embedding archive bytes in the proposal.
-
-Default creation excludes `.git`, `.venv`, `.e2h`, Python caches, and bytecode. Supplying `--exclude` replaces that default list, so trusted workflows can define an explicit capture policy.
-
-## Container sandbox
-
-Capsules may declare a `sandbox` policy with an immutable `name@sha256:<digest>` image. The default `auto` backend selects container execution when that policy is present and otherwise preserves the existing local runner. Operators may explicitly choose `--backend local` or `--backend container`; replay matrices and compiler mutation verification expose the same selection. `--container-runtime` is a trusted-administrator override for a Docker-compatible CLI binary.
-
-The Docker adapter invokes the runtime directly as an argument vector—never through a shell. It bind-mounts the selected workspace read-only by default, uses `/workspace` as the container root, maps capsule working directories into that mount, disables networking when `allowed_actions.network` is `deny`, drops all Linux capabilities, sets `no-new-privileges`, requires a non-root numeric user, bounds PIDs, memory, CPUs, and `/tmp`, and makes the image root filesystem read-only by default. Workspace write access and bridge networking require explicit capsule declarations.
-
-Each container run uses a private CID file. When the attached runtime process exceeds the command timeout, E2H terminates that client process and then force-removes the recorded container. Cleanup failures are promoted to infrastructure errors rather than hidden behind an ordinary timeout result.
-
-The Docker daemon, runtime binary, image registry, and host kernel remain trusted infrastructure. Do not allow untrusted capsule authors to choose the runtime binary or Docker socket. An immutable image reference prevents tag drift but does not establish that the image itself is safe; curate and scan permitted images separately.
-
-## Experiment store
-
-`e2h store ingest` transactionally normalizes standalone `RunResult` artifacts and complete replay-matrix `ExperimentResult` artifacts into DuckDB. Source artifacts are identified by their SHA-256 bytes, so re-ingesting an identical file is idempotent. A failed validation or multi-row insertion rolls back without leaving a partial source, run, check, or summary record.
-
-The normalized schema separates provenance sources, runs, per-check outcomes, and variant summaries. Stable query views expose runs, checks, failures, variants, capsule aggregates, and source provenance. Queries are bounded to 10,000 rows and selected from a fixed enum rather than accepting arbitrary SQL through the CLI.
-
-For privacy, the store does not retain command stdout or stderr. Check rows contain character lengths, SHA-256 digests, truncation flags, exit status, duration, working directory, and canonical argument JSON. Source provenance records only the artifact basename, content digest, kind, schema version, and ingestion time; absolute source paths are not stored.
-
-`e2h store export` uses DuckDB to write Zstandard-compressed Parquet for any stable view. This produces portable analytical datasets without requiring a separate Arrow dependency. The DuckDB file and Parquet outputs inherit the confidentiality of their source evidence and should be retained accordingly.
-
-## Architecture direction
-
-```text
-observable evidence
-  -> privacy-safe trace normalization
-  -> executable task capsules
-  -> counterfactual replay matrix
-  -> structured failure diagnosis
-  -> typed harness patches
-  -> sealed promotion gates
-  -> MCP / A2A / API runtime bundles
+```bash
+uv run e2h store init .e2h/evidence.duckdb
+uv run e2h store ingest \
+  .e2h/evidence.duckdb \
+  .e2h/result.json \
+  .e2h/matrix.json
+uv run e2h store query .e2h/evidence.duckdb variants --json
+uv run e2h store export \
+  .e2h/evidence.duckdb \
+  .e2h/runs.parquet \
+  --view runs
 ```
 
-See [`ROADMAP.md`](ROADMAP.md) for planned milestones.
+The analytical store does not retain raw command output.
 
-## Security model
+## Controlled optimization
 
-Task capsules should be treated as code. The local runner verifies that capsule-declared working directories resolve within the selected workspace, avoids shell expansion, bounds retained output in memory, and terminates POSIX process groups on timeout, but it does not provide OS-level isolation or enforce network policy. The optional container backend adds declared filesystem, network, identity, and resource controls; its Docker daemon, image supply chain, and host kernel remain trusted boundaries. Use disposable workers and curated immutable images for untrusted capsules.
+E2H represents harness changes as typed variants and genomes rather than arbitrary source edits. Supported optimization surfaces include prompt, tool, context, routing, and workflow changes.
 
-Evidence importers parse data rather than execute it, but imported content can still contain sensitive or adversarial text. Redaction is pattern-based and cannot guarantee removal of every possible identifier. Review sanitized evidence before publishing it or using it outside the original trust boundary.
+The optimization layer provides:
+
+- typed genome/patch validation;
+- DSPy and GEPA adapter artifacts;
+- content-addressed train/validation/sealed-test partitions;
+- label-free public sealed-test identities;
+- aggregate-only sealed evaluation reports;
+- statistical promotion gates and rollback metadata.
+
+Use the installed command groups for the full schemas and workflows:
+
+```bash
+uv run e2h variant --help
+uv run e2h genome --help
+uv run e2h optimizer --help
+uv run e2h partition --help
+uv run e2h promotion --help
+```
+
+## Frontier integrations
+
+### OpenAI Responses runtime
+
+The runtime adapter executes the explicit E2H runtime contract against the OpenAI Responses API surface while preserving observable request/result evidence. See:
+
+```bash
+uv run e2h runtime --help
+```
+
+### MCP
+
+`e2h-mcp` exposes verified memory queries and artifact/snapshot checks. Replay is operator-gated rather than enabled implicitly.
+
+```bash
+uv run e2h-mcp --help
+```
+
+### A2A
+
+`e2h-a2a` exposes deterministic verification operations through the A2A protocol. Replay capability is advertised only when enabled by the operator.
+
+```bash
+uv run e2h-a2a --help
+```
+
+### Capture clients
+
+The browser Manifest V3 extension and VS Code extension capture only explicit user selections and export local E2H capture envelopes with per-selection SHA-256 digests. They do not perform background harvesting.
+
+Validate exported captures with:
+
+```bash
+uv run e2h capture --help
+```
+
+## Community benchmark
+
+E2H ships three complementary benchmark surfaces.
+
+### Sanitized failure patterns
+
+`benchmarks/failure-patterns/v0.1.json` contains paraphrased public failure reports mapped to E2H's failure taxonomy. Sanitized real-world claims require public-source provenance plus an explicit sanitization attestation and detector-backed privacy review.
+
+```bash
+uv run e2h benchmark validate \
+  benchmarks/failure-patterns/v0.1.json
+```
+
+See [`docs/community-benchmark.md`](docs/community-benchmark.md).
+
+### Long-horizon correction and retention
+
+The long-horizon benchmark keeps machine-readable constraint updates private while exporting candidate-visible dialogue/probes with a separate public digest. Corrections and revocations explicitly supersede the active update they replace. Evaluation returns aggregate scores rather than expected labels.
+
+```bash
+uv run e2h benchmark long-horizon validate \
+  benchmarks/long-horizon/v0.1.json
+```
+
+See [`docs/long-horizon-benchmark.md`](docs/long-horizon-benchmark.md).
+
+### Reproducible environments
+
+The coding, research, and browser benchmark environments are content-locked local source trees. Coding/research fixtures require no network; the browser fixture is localhost-only.
+
+```bash
+uv run e2h benchmark environments verify \
+  benchmarks/environments/suite.json \
+  benchmarks/environments/suite.lock.json \
+  --root .
+```
+
+See [`docs/benchmark-environments.md`](docs/benchmark-environments.md).
+
+## Release and supply-chain integrity
+
+E2H applies the same verification principle to its own distributions.
+
+A release build is created twice from independent clean `git archive` source copies. CI requires byte-identical wheel and sdist artifacts, seals build A into a deterministic release manifest, and verifies build B against that manifest.
+
+The runtime dependency graph is exported from `uv.lock` as CycloneDX 1.5. Because raw CycloneDX generation includes optional per-generation UUID/timestamp fields, E2H validates the document, removes only those fields, and publishes canonical JSON whose dependency/tool/component data is byte-reproducible.
+
+The tag-only production workflow is designed to provide:
+
+- OIDC-only PyPI Trusted Publishing, with no stored PyPI token;
+- SLSA provenance for the exact wheel/sdist;
+- a CycloneDX SBOM attestation bound to those distributions;
+- GitHub-generated release notes;
+- draft release staging before PyPI publication;
+- immutable GitHub release publication only after PyPI succeeds;
+- native GitHub release/asset attestation verification after publication.
+
+A release tag is a real external publication event and is intentionally not created by pull-request CI.
+
+Operational documentation:
+
+- [`docs/release-integrity.md`](docs/release-integrity.md)
+- [`docs/trusted-publishing.md`](docs/trusted-publishing.md)
+- [`docs/immutable-releases.md`](docs/immutable-releases.md)
+
+## Security boundaries
+
+E2H is designed to fail closed around common evidence and filesystem hazards, but it is not a general-purpose security sandbox.
+
+Important boundaries:
+
+- untrusted candidate code can still be malicious;
+- custom privacy regexes are trusted code-like configuration and can be expensive or over-broad;
+- redaction detectors reduce exposure risk but cannot prove de-identification;
+- hashes prove byte identity, not that bytes are trustworthy;
+- release attestations prove provenance/integrity relationships, not absence of vulnerabilities;
+- network/identity/container restrictions depend on the selected runtime and host enforcement.
+
+See [`SECURITY.md`](SECURITY.md) for vulnerability reporting.
+
+## Development
+
+Install development dependencies:
+
+```bash
+uv sync --extra dev
+```
+
+Run the core local checks:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+uv run pytest
+```
+
+The repository also has dedicated CI for provider ingestion, privacy policy behavior, experiment-store behavior, capture clients, and release integrity. Security-sensitive changes require adversarial tests for the boundary being changed.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request.
+
+## Project status
+
+The implementation roadmap through distribution integrity is complete. [`ROADMAP.md`](ROADMAP.md) records the delivered milestones and remains the reference for any future explicitly scoped milestone work.
 
 ## License
 
