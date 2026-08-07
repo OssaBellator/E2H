@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 import e2h.release_toolchain as toolchain
 from e2h.release import (
+    ReleaseManifest,
     release_manifest_sha256,
     seal_release_artifacts,
     verify_release_artifacts,
@@ -61,19 +62,16 @@ def _write_release_pair(directory: Path) -> None:
         archive.addfile(info, io.BytesIO(metadata))
 
 
-def _release_inspection(manifest: object) -> dict[str, object]:
+def _release_inspection(manifest: ReleaseManifest) -> dict[str, object]:
     # Keep this fixture independent from the bundle verifier's private helper.
-    typed = manifest
-    assert hasattr(typed, "artifacts")
-    artifacts = typed.artifacts
     return {
-        "schema_version": typed.schema_version,
-        "project": typed.project,
-        "version": typed.version,
-        "manifest_sha256": release_manifest_sha256(typed),
-        "artifact_count": len(artifacts),
-        "total_bytes": sum(artifact.size_bytes for artifact in artifacts),
-        "metadata": typed.metadata,
+        "schema_version": manifest.schema_version,
+        "project": manifest.project,
+        "version": manifest.version,
+        "manifest_sha256": release_manifest_sha256(manifest),
+        "artifact_count": len(manifest.artifacts),
+        "total_bytes": sum(artifact.size_bytes for artifact in manifest.artifacts),
+        "metadata": manifest.metadata,
         "artifacts": [
             {
                 "filename": artifact.filename,
@@ -81,7 +79,7 @@ def _release_inspection(manifest: object) -> dict[str, object]:
                 "size_bytes": artifact.size_bytes,
                 "sha256": artifact.sha256,
             }
-            for artifact in artifacts
+            for artifact in manifest.artifacts
         ],
     }
 
@@ -258,7 +256,7 @@ def test_verify_release_bundle_rejects_extra_files_and_symlinks(
     (bundle / "extra.txt").unlink()
 
     sbom = bundle / "e2h-sbom.cdx.json"
-    target = bundle / "real-sbom.json"
+    target = tmp_path / "real-sbom.json"
     target.write_bytes(sbom.read_bytes())
     sbom.unlink()
     sbom.symlink_to(target)
