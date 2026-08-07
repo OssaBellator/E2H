@@ -117,7 +117,11 @@ jobs:
           uv run e2h release seal dist-a \
             --output release-manifest.json \
             --project e2h \
-            --version "$VERSION"
+            --version "$VERSION" \
+            --toolchain-root . \
+            --source-commit "$GITHUB_SHA" \
+            --runner-generation ubuntu-24.04 \
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
           uv run e2h release verify release-manifest.json dist-b --json \
             > release-verification.json
           mkdir -p release/dist
