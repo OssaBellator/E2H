@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "E2H Capture",
+  "version": "0.1.0",
+  "description": "Manually export selected page text as a verifiable E2H capture document.",
+  "permissions": ["activeTab", "scripting", "downloads"],
+  "action": {
+    "default_title": "E2H Capture",
+    "default_popup": "popup.html"
+  }
+}
