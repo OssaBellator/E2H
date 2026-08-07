@@ -287,10 +287,10 @@ class E2HMCPService:
             raise MCPServiceError("max_bytes must be non-negative")
         if min_bytes is not None and max_bytes is not None and min_bytes > max_bytes:
             raise MCPServiceError("min_bytes must not exceed max_bytes")
-        hash_limit = self.config.max_artifact_bytes
-        if max_bytes is not None:
-            hash_limit = min(hash_limit, max_bytes)
-        size, digest = _stable_file_sha256(path, max_bytes=hash_limit)
+        size, digest = _stable_file_sha256(
+            path,
+            max_bytes=self.config.max_artifact_bytes,
+        )
         digest_matches = None if expected_sha256 is None else digest == expected_sha256
         size_matches = (min_bytes is None or size >= min_bytes) and (
             max_bytes is None or size <= max_bytes
