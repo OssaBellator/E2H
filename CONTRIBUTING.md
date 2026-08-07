@@ -19,7 +19,7 @@ uv run mypy src
 uv run pytest
 ```
 
-The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, and CodeQL. A pull request is not ready to merge while any relevant permanent suite is failing.
+The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, locked runtime dependency auditing, and CodeQL. A pull request is not ready to merge while any relevant permanent suite is failing.
 
 ## Contribution shape
 
@@ -49,7 +49,7 @@ Regenerate them using the corresponding E2H or `uv` command, then review the res
 
 ## Tests for security-sensitive changes
 
-Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, release workflows, or code-scanning configuration require explicit adversarial tests.
+Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, dependency-audit policy, release workflows, or code-scanning configuration require explicit adversarial tests.
 
 Useful rejection cases include:
 
@@ -59,6 +59,7 @@ Useful rejection cases include:
 - stale or mismatched content digests and provenance identities;
 - credential-bearing jobs executing repository-controlled code;
 - mutable third-party action references in supply-chain or security workflows;
+- dependency scanners re-resolving the graph instead of auditing the reviewed lock;
 - missing/extra release artifacts and tampered handoffs.
 
 See [`SECURITY.md`](SECURITY.md) for vulnerability reporting. Do not put active exploit details or sensitive evidence into a public pull request merely to demonstrate a security problem.
@@ -87,6 +88,16 @@ External GitHub Actions remain pinned to full immutable commit SHAs in every per
 5. runs all relevant permanent suites.
 
 `actions/setup-node` and `github/codeql-action` are temporarily excluded from automated action updates because E2H pins reviewed post-release security-fix commits that are not tagged releases. Re-enable automated updates for either action only after a reviewed tagged release contains the corresponding fix.
+
+## Locked dependency auditing
+
+`.github/workflows/dependency-audit.yml` audits the exact production dependency resolution used by E2H rather than asking a scanner to solve dependencies independently. The workflow exports `uv.lock` to a runtime-only hashed requirements document with `--locked --no-dev --no-emit-local`, then runs the separately locked `pip-audit` tool with `--no-deps --disable-pip --require-hashes`.
+
+The audit tool belongs to the `audit` dependency group rather than project runtime or `dev` optional metadata. Changes to the scanner version must update `uv.lock` and `tests/test_dependency_audit_workflow.py`.
+
+Do not suppress dependency-audit failures with `continue-on-error`, `|| true`, broad vulnerability ignores, or automatic `--fix`. A vulnerability finding should be handled as a normal dependency change: review the advisory and exposure, update the dependency constraint/lock when an appropriate fixed version exists, and rerun release-integrity plus dependency-audit CI.
+
+A green dependency audit means the locked runtime packages had no vulnerabilities known to the configured advisory service at scan time. It does not prove that dependencies are free of undisclosed vulnerabilities, malicious behavior, or application-specific misuse.
 
 ## Code scanning
 

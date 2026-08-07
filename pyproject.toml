@@ -49,6 +49,11 @@ dev = [
   "types-PyYAML>=6.0.12,<7",
 ]
 
+[dependency-groups]
+audit = [
+  "pip-audit==2.10.1",
+]
+
 [project.urls]
 Homepage = "https://github.com/OssaBellator/E2H"
 Repository = "https://github.com/OssaBellator/E2H"
