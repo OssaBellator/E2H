@@ -41,6 +41,8 @@ def test_reusable_build_binds_manifest_to_reviewed_toolchain_context() -> None:
     assert "e2h release verify-toolchain" in command
     assert "release-manifest.json source-b" in command
     assert '--expected-source-commit "$GITHUB_SHA"' in command
+    assert 'len(evidence["source_tree_sha256"]) == 64' in command
+    assert 'verification["source_tree_verified"] is True' in command
 
 
 def test_both_release_callers_use_same_local_build_with_expected_tag_policy() -> None:
