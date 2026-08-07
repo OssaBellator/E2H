@@ -82,22 +82,23 @@ def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> Non
 
 def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> None:
     workflow, raw = _workflow()
-    steps = workflow["jobs"]["build"]["steps"]
+    build = workflow["jobs"]["build"]
+    assert build["env"]["PYTHONPATH"] == "src"
+
+    steps = build["steps"]
     runs = [str(step.get("run", "")) for step in steps if "run" in step]
     syncs = [run.strip() for run in runs if run.strip().startswith("uv sync ")]
-    assert syncs == [
-        "uv sync --locked --no-default-groups --build-constraint build-constraints.txt"
-    ]
+    assert syncs == ["uv sync --locked --no-default-groups --no-install-project"]
     assert "--extra dev" not in raw
+    assert "uv run " not in raw
 
-    uv_run_lines = [
+    cli_lines = [
         line.strip()
         for run in runs
         for line in run.splitlines()
-        if line.strip().startswith("uv run ")
+        if line.strip().startswith(".venv/bin/python -m e2h ")
     ]
-    assert uv_run_lines
-    assert all(line.startswith("uv run --no-sync ") for line in uv_run_lines)
+    assert len(cli_lines) == 5
 
     sbom = next(
         step for step in steps if step.get("name") == "Export and canonicalize runtime SBOM twice"
