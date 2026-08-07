@@ -28,7 +28,7 @@ def test_uv_toolchain_is_exactly_pinned_at_repository_root() -> None:
     assert config == {"required-version": f"=={EXPECTED_UV_VERSION}"}
 
 
-def test_workflows_use_central_uv_version_without_overrides() -> None:
+def test_workflows_discover_central_uv_version_after_checkout() -> None:
     seen = 0
     for path, workflow in _workflows():
         jobs = workflow.get("jobs")
@@ -37,12 +37,17 @@ def test_workflows_use_central_uv_version_without_overrides() -> None:
             assert isinstance(job, dict), path
             steps = job.get("steps", [])
             assert isinstance(steps, list), path
+            checked_out = False
             for step in steps:
                 assert isinstance(step, dict), path
                 uses = step.get("uses")
+                if isinstance(uses, str) and uses.startswith("actions/checkout@"):
+                    checked_out = True
+                    continue
                 if not isinstance(uses, str) or not uses.startswith("astral-sh/setup-uv@"):
                     continue
                 seen += 1
+                assert checked_out, f"setup-uv runs before checkout in {path}"
                 assert uses == SETUP_UV, f"unexpected setup-uv revision in {path}: {uses}"
                 inputs = step.get("with", {})
                 assert isinstance(inputs, dict), path
