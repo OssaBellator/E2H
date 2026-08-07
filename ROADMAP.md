@@ -57,4 +57,4 @@
 
 - [x] Deterministic wheel/sdist manifests and reproducible-build CI.
 - [x] OIDC-based package publication with provenance attestations.
-- Signed release tags, changelog automation, and SBOM publication.
+- [x] Cryptographically attested immutable releases, generated changelogs, and SBOM publication.

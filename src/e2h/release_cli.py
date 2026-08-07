@@ -18,6 +18,7 @@ from e2h.release import (
     seal_release_artifacts,
     verify_release_artifacts,
 )
+from e2h.sbom import SbomCanonicalizationError, canonicalize_cyclonedx_sbom_file
 from e2h.trace import write_json_atomic
 
 release_app = typer.Typer(
@@ -86,6 +87,21 @@ def verify_release(
         f"{verification.artifact_count} artifacts, "
         f"manifest_sha256={verification.manifest_sha256}"
     )
+
+
+@release_app.command("canonicalize-sbom")
+def canonicalize_sbom(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", "-o", dir_okay=False)],
+) -> None:
+    """Remove per-generation CycloneDX identity fields and emit canonical JSON."""
+    try:
+        rendered = canonicalize_cyclonedx_sbom_file(source)
+    except SbomCanonicalizationError as exc:
+        error_console.print(f"[red]Unable to canonicalize SBOM:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    write_json_atomic(output, rendered)
+    console.print(f"Wrote canonical CycloneDX SBOM to {output}")
 
 
 @release_app.command("inspect")

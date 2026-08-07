@@ -20,6 +20,7 @@ jobs:
       contents: read
     env:
       SOURCE_DATE_EPOCH: "1704067200"
+      UV_PREVIEW_FEATURES: "sbom-export"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,10 +64,19 @@ jobs:
           (cd source-a && uv build --out-dir ../dist-a)
           (cd source-b && uv build --out-dir ../dist-b)
           rm -f dist-a/.gitignore dist-b/.gitignore
-      - name: Require byte-identical builds
+      - name: Export and canonicalize runtime SBOM twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd source-a && uv export --locked --format cyclonedx1.5 --output-file ../sbom-a.raw.json)
+          (cd source-b && uv export --locked --format cyclonedx1.5 --output-file ../sbom-b.raw.json)
+          uv run e2h release canonicalize-sbom sbom-a.raw.json --output sbom-a.cdx.json
+          uv run e2h release canonicalize-sbom sbom-b.raw.json --output sbom-b.cdx.json
+      - name: Require byte-identical builds and canonical runtime SBOMs
         run: |
           uv run python - <<'PY'
           import hashlib
+          import json
           from pathlib import Path
 
           def digests(directory: str) -> dict[str, str]:
@@ -80,6 +90,24 @@ jobs:
           second = digests("dist-b")
           assert len(first) == 2, first
           assert first == second, (first, second)
+
+          sbom_a = Path("sbom-a.cdx.json").read_bytes()
+          sbom_b = Path("sbom-b.cdx.json").read_bytes()
+          assert sbom_a == sbom_b
+          payload = json.loads(sbom_a)
+          assert payload["bomFormat"] == "CycloneDX"
+          assert payload["specVersion"] == "1.5"
+          assert "serialNumber" not in payload
+          assert "timestamp" not in payload.get("metadata", {})
+          components = payload.get("components", [])
+          names = {
+              component.get("name")
+              for component in components
+              if isinstance(component, dict)
+          }
+          root = payload.get("metadata", {}).get("component", {})
+          assert root.get("name") == "e2h" or "e2h" in names
+          assert not {"mypy", "pytest", "pytest-cov", "ruff"} & names
           PY
       - name: Seal and verify release artifacts
         shell: bash
@@ -94,10 +122,12 @@ jobs:
             > release-verification.json
           mkdir -p release/dist
           cp dist-a/*.whl dist-a/*.tar.gz release/dist/
+          cp sbom-a.cdx.json release/e2h-sbom.cdx.json
           cp release-manifest.json release-verification.json release/
           (
             cd release
             sha256sum dist/*.tar.gz dist/*.whl \
+              e2h-sbom.cdx.json \
               release-manifest.json release-verification.json \
               > release-checksums.txt
           )
@@ -110,7 +140,7 @@ jobs:
           retention-days: 7
 
   attest:
-    name: Attest verified distributions
+    name: Attest verified distributions and SBOM
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -137,10 +167,77 @@ jobs:
           subject-path: |
             release/dist/*.tar.gz
             release/dist/*.whl
+      - name: Attest CycloneDX runtime SBOM
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: |
+            release/dist/*.tar.gz
+            release/dist/*.whl
+          sbom-path: release/e2h-sbom.cdx.json
+
+  release-draft:
+    name: Stage immutable GitHub release
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-release
+          path: release
+      - name: Verify artifact handoff and immutable-release policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd release
+            sha256sum -c release-checksums.txt
+          )
+          enabled="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "/repos/${GITHUB_REPOSITORY}/immutable-releases" \
+            --jq '.enabled')"
+          if [[ "$enabled" != "true" ]]; then
+            echo "Immutable GitHub releases must be enabled before publication." >&2
+            exit 1
+          fi
+      - name: Create or refresh draft release with generated notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(
+            release/dist/*.tar.gz
+            release/dist/*.whl
+            release/e2h-sbom.cdx.json
+            release/release-manifest.json
+            release/release-verification.json
+            release/release-checksums.txt
+          )
+          if draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            if [[ "$draft" != "true" ]]; then
+              echo "A published release already exists for $GITHUB_REF_NAME." >&2
+              exit 1
+            fi
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --draft \
+              --fail-on-no-commits \
+              --generate-notes \
+              --title "E2H ${GITHUB_REF_NAME#v}" \
+              --verify-tag
+          fi
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" = "true"
 
   publish:
     name: Publish verified distributions
-    needs: [build, attest]
+    needs: [build, attest, release-draft]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -169,3 +266,62 @@ jobs:
           verify-metadata: true
           print-hash: true
           attestations: true
+
+  release-publish:
+    name: Publish and verify immutable GitHub release
+    needs: [build, attest, release-draft, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pypi-release
+          path: release
+      - name: Verify artifact handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c release-checksums.txt
+      - name: Publish immutable release and verify GitHub attestation
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$GITHUB_REF_NAME" --draft=false --verify-tag
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$GITHUB_REF_NAME" --json isImmutable --jq '.isImmutable')" = "true"
+
+          verified=false
+          for attempt in 1 2 3 4 5 6; do
+            if gh release verify "$GITHUB_REF_NAME" --format json > release-attestation.json; then
+              verified=true
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$verified" != "true" ]]; then
+            echo "GitHub release attestation did not become verifiable." >&2
+            exit 1
+          fi
+
+          for asset in \
+            release/dist/*.tar.gz \
+            release/dist/*.whl \
+            release/e2h-sbom.cdx.json \
+            release/release-manifest.json \
+            release/release-verification.json \
+            release/release-checksums.txt; do
+            gh release verify-asset "$GITHUB_REF_NAME" "$asset" > /dev/null
+          done
+      - name: Upload release attestation verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: github-release-attestation
+          path: release-attestation.json
+          if-no-files-found: error
+          retention-days: 30
