@@ -56,5 +56,5 @@
 ## Milestone 6 — Distribution integrity
 
 - [x] Deterministic wheel/sdist manifests and reproducible-build CI.
-- OIDC-based package publication with provenance attestations.
+- [x] OIDC-based package publication with provenance attestations.
 - Signed release tags, changelog automation, and SBOM publication.
