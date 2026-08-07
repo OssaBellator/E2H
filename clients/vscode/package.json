@@ -1,0 +1,31 @@
+{
+  "name": "e2h-capture",
+  "displayName": "E2H Capture",
+  "description": "Manually export the active editor selection as a verifiable E2H capture document.",
+  "version": "0.1.0",
+  "publisher": "e2h-project",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "e2h.captureSelection",
+        "title": "Capture Selection as Evidence",
+        "category": "E2H"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "e2h.captureSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@100"
+        }
+      ]
+    }
+  }
+}
