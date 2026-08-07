@@ -8,7 +8,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "codeql.yml"
 CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-CODEQL_SHA = "6a90bf1f5426d0c367cad0b2000f3b721bab3122"
+CODEQL_SHA = "7d9249f5a57288b8a472ddd9cc3ece1921f7dc38"
 
 
 def _workflow() -> tuple[dict[str, Any], str]:
