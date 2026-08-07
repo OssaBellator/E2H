@@ -1,0 +1,47 @@
+name: Seal benchmark environments
+
+on:
+  push:
+    branches: [agent/reproducible-benchmark-environments]
+
+permissions:
+  contents: write
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/reproducible-benchmark-environments
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra dev
+      - run: uv run ruff check . --fix
+      - run: uv run ruff format .
+      - run: uv lock
+      - name: Generate environment content lock
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          from e2h.benchmark_env import load_benchmark_environment_suite, seal_benchmark_environment_suite
+
+          suite = load_benchmark_environment_suite(Path("benchmarks/environments/suite.json"))
+          lock = seal_benchmark_environment_suite(suite, root=Path("."))
+          Path("benchmarks/environments/suite.lock.json").write_text(
+              lock.model_dump_json(indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Commit deterministic maintenance changes
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Seal reproducible benchmark environments"
+          git push origin HEAD:agent/reproducible-benchmark-environments
