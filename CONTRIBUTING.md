@@ -4,7 +4,9 @@ E2H accepts focused contributions that preserve its core evidence rule: external
 
 ## Development setup
 
-Use Python 3.11 or newer and install the locked development environment with `uv`:
+Use Python 3.11 or newer and the exact `uv` version required by the root `uv.toml`. The same file is consumed by `astral-sh/setup-uv` in CI, so local and hosted dependency/build commands share one reviewed toolchain version. A different local `uv` version will refuse to run against this repository until the tool is updated to the required version.
+
+Install the locked development environment with `uv`:
 
 ```bash
 uv sync --extra dev
@@ -78,6 +80,8 @@ Dependabot monitors two independent update streams in `.github/dependabot.yml`:
 - the `github-actions` ecosystem for external workflow actions.
 
 Python dependency pull requests must preserve the locked workflow. If a dependency change affects `pyproject.toml`, the corresponding reviewed `uv.lock` change must be present and all release-integrity/SBOM checks must pass.
+
+The `uv` binary itself is separately pinned by the root `uv.toml`; changing that pin is a toolchain change, not an ordinary dependency refresh. Review the uv changelog for the target release and require the full permanent suite set to pass before merging a toolchain update.
 
 External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
 
