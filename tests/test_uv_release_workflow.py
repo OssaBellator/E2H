@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Any
 
-import tomllib
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
