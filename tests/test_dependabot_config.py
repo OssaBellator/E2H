@@ -33,7 +33,7 @@ def test_dependabot_uses_uv_for_locked_python_dependencies() -> None:
     assert not any(item["package-ecosystem"] == "pip" for item in updates)
 
 
-def test_dependabot_updates_actions_but_holds_untagged_setup_node_pin() -> None:
+def test_dependabot_updates_actions_but_holds_untagged_security_fix_pins() -> None:
     updates = _config()["updates"]
     actions = next(item for item in updates if item["package-ecosystem"] == "github-actions")
     assert actions["directory"] == "/"
@@ -44,7 +44,10 @@ def test_dependabot_updates_actions_but_holds_untagged_setup_node_pin() -> None:
             "patterns": ["*"],
         }
     }
-    assert actions["ignore"] == [{"dependency-name": "actions/setup-node"}]
+    assert actions["ignore"] == [
+        {"dependency-name": "actions/setup-node"},
+        {"dependency-name": "github/codeql-action"},
+    ]
 
 
 def test_dependabot_has_exactly_the_two_reviewed_update_streams() -> None:
