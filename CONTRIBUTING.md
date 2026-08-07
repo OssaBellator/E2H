@@ -84,7 +84,7 @@ Python dependency pull requests must preserve the locked workflow. If a dependen
 
 The `uv` binary itself is separately pinned by the root `uv.toml`; changing that pin is a toolchain change, not an ordinary dependency refresh. Review the uv changelog for the target release and require the full permanent suite set to pass before merging a toolchain update.
 
-The PEP 517 build backend is another separately reviewed toolchain input. `uv build` creates an isolated build environment and resolves `[build-system].requires` independently of the project `uv.lock`, so E2H pins Hatchling to one exact version in `pyproject.toml` and pins its resolved Python 3.13 build graph with hashes in `build-constraints.txt`. Both release build paths must use `--build-constraint build-constraints.txt --require-hashes`; keep build isolation enabled.
+The PEP 517 build backend is another separately reviewed toolchain input. `uv build` creates an isolated build environment and resolves `[build-system].requires` independently of the project `uv.lock`, so E2H pins Hatchling to one exact version in `pyproject.toml` and pins its resolved Python 3.13 build graph with hashes in `build-constraints.txt`. The reusable release build must use `--build-constraint build-constraints.txt --require-hashes`; keep build isolation enabled.
 
 When the Hatchling pin changes, regenerate the build constraints using the pinned repository uv and release Python versions:
 
@@ -99,7 +99,7 @@ printf 'hatchling==<reviewed-version>\n' \
 
 Review every version and hash in the generated file rather than accepting it mechanically. Then require the locked dependency audit and release-integrity CI to pass before merging.
 
-Release construction also uses one exact Python maintenance release in both release-integrity CI and the tag-only publication build. Keep that release interpreter pin synchronized across those workflows. The ordinary compatibility matrix intentionally stays on minor selectors (`3.11`, `3.12`, `3.13`) so supported Python lines continue exercising their newest available patch updates; do not globally replace those compatibility selectors with the release-construction patch pin.
+Release construction uses one exact Python maintenance release in `.github/workflows/reusable-release-build.yml`. Both release-integrity CI and the tag-only publisher call that same local reusable workflow, so release toolchain or construction changes belong there rather than in either caller. The ordinary compatibility matrix intentionally stays on minor selectors (`3.11`, `3.12`, `3.13`) so supported Python lines continue exercising their newest available patch updates.
 
 External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
 
@@ -131,7 +131,9 @@ Changes to the CodeQL language matrix, permissions, triggers, or action SHA must
 
 The tag-only publication workflow must not be exercised from a pull request by creating a real release tag. Normal CI validates release policy, reproducible builds, manifests, canonical SBOMs, and workflow action pins without publishing externally.
 
-Supply-chain workflow changes must preserve job-scoped permissions, immutable action pins, checksum-bound artifact handoffs, hashed isolated build constraints, and the separation between repository-controlled build code and OIDC-bearing publication/attestation jobs.
+`.github/workflows/reusable-release-build.yml` is the single executable release-construction contract. `release-integrity.yml` calls it with tag validation disabled, while `publish-pypi.yml` calls the same local workflow with tag/version/main-ancestry validation enabled. Do not duplicate build, SBOM, sealing, or checksum logic back into either caller.
+
+Supply-chain workflow changes must preserve job-scoped permissions, immutable action pins, checksum-bound artifact handoffs, hashed isolated build constraints, and the separation between the read-only repository-code build workflow and OIDC-bearing publication/attestation jobs. The reusable build must not request OIDC, write repository contents, consume secrets, or select a deployment environment.
 
 ## Documentation
 
