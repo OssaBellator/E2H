@@ -26,6 +26,7 @@ jobs:
         run: |
           uv build --out-dir dist-a
           uv build --out-dir dist-b
+          rm -f dist-a/.gitignore dist-b/.gitignore
       - name: Require byte-identical builds
         run: |
           uv run python - <<'PY'
