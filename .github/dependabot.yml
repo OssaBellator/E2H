@@ -18,5 +18,6 @@ updates:
       github-actions:
         patterns: ["*"]
     ignore:
+      - dependency-name: actions/dependency-review-action
       - dependency-name: actions/setup-node
       - dependency-name: github/codeql-action
