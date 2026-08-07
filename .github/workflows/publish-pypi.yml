@@ -62,8 +62,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd source-a && uv build --out-dir ../dist-a)
-          (cd source-b && uv build --out-dir ../dist-b)
+          (cd source-a && uv build --build-constraint build-constraints.txt --out-dir ../dist-a)
+          (cd source-b && uv build --build-constraint build-constraints.txt --out-dir ../dist-b)
           rm -f dist-a/.gitignore dist-b/.gitignore
       - name: Export and canonicalize runtime SBOM twice
         shell: bash
