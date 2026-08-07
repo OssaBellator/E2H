@@ -78,17 +78,19 @@ jobs:
           text = path.read_text(encoding='utf-8')
           start = text.index('    (environment / "src" / "task.py").write_text(\n')
           end = text.index('    result = _run_checker(environment)\n', start)
-          replacement = r'''    (environment / "src" / "task.py").write_text(
-        "import re\n"
-        "\n"
-        "def normalize_identifier(value: str) -> str:\n"
-        "    result = re.sub(r'[\\s_-]+', '-', value.strip()).strip('-').lower()\n"
-        "    if not result:\n"
-        "        raise ValueError('normalized identifier is empty')\n"
-        "    return result\n",
-        encoding="utf-8",
-    )
-'''
+          lines = [
+              '    (environment / "src" / "task.py").write_text(',
+              '        "import re\\n"',
+              '        "\\n"',
+              '        "def normalize_identifier(value: str) -> str:\\n"',
+              '        "    result = re.sub(r\'[\\\\s_-]+\', \'-\', value.strip()).strip(\'-\').lower()\\n"',
+              '        "    if not result:\\n"',
+              '        "        raise ValueError(\'normalized identifier is empty\')\\n"',
+              '        "    return result\\n",',
+              '        encoding="utf-8",',
+              '    )',
+          ]
+          replacement = '\n'.join(lines) + '\n'
           path.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
           PY
       - run: uv run ruff check . --fix
