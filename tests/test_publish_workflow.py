@@ -150,7 +150,11 @@ def test_reusable_release_build_requires_tag_main_reproducibility_and_runtime_sb
     assert '{"mypy", "pytest", "pytest-cov", "ruff"}' in build_runs
     assert "e2h release seal" in build_runs
     assert "e2h release verify" in build_runs
+    assert "e2h release verify-toolchain" in build_runs
+    assert "release-manifest.json source-b" in build_runs
+    assert '--expected-source-commit "$GITHUB_SHA"' in build_runs
     assert "e2h-sbom.cdx.json" in build_runs
+    assert "release-toolchain-verification.json" in build_runs
     assert "release-inspection.json" in build_runs
 
 
@@ -203,6 +207,7 @@ def test_github_release_is_drafted_then_published_as_immutable_and_verified() ->
     assert "--fail-on-no-commits" in draft_runs
     assert "gh release upload" in draft_runs
     assert "--clobber" in draft_runs
+    assert "release/release-toolchain-verification.json" in draft_runs
     assert "release/release-inspection.json" in draft_runs
 
     publish_runs = _runs(workflow["jobs"]["release-publish"])
@@ -212,6 +217,7 @@ def test_github_release_is_drafted_then_published_as_immutable_and_verified() ->
     assert "gh release verify" in publish_runs
     assert "gh release verify-asset" in publish_runs
     assert "release-attestation.json" in publish_runs
+    assert "release/release-toolchain-verification.json" in publish_runs
     assert "release/release-inspection.json" in publish_runs
 
 
