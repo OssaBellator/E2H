@@ -26,7 +26,13 @@ def test_workflows_do_not_use_moving_runner_aliases() -> None:
         for job_name, job in jobs.items():
             assert isinstance(job, dict), (path, job_name)
             runs_on = job.get("runs-on")
-            assert runs_on is not None, (path, job_name)
+            if runs_on is None:
+                uses = job.get("uses")
+                assert isinstance(uses, str) and uses.startswith("./.github/workflows/"), (
+                    path,
+                    job_name,
+                )
+                continue
             if not isinstance(runs_on, str):
                 continue
             assert runs_on not in MOVING_RUNNER_ALIASES, (
