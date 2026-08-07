@@ -25,7 +25,6 @@ jobs:
     env:
       SOURCE_DATE_EPOCH: "1704067200"
       UV_PREVIEW_FEATURES: "sbom-export"
-      PYTHONPATH: src
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -77,8 +76,8 @@ jobs:
           set -euo pipefail
           (cd source-a && uv export --locked --no-default-groups --format cyclonedx1.5 --output-file ../sbom-a.raw.json)
           (cd source-b && uv export --locked --no-default-groups --format cyclonedx1.5 --output-file ../sbom-b.raw.json)
-          .venv/bin/python -m e2h release canonicalize-sbom sbom-a.raw.json --output sbom-a.cdx.json
-          .venv/bin/python -m e2h release canonicalize-sbom sbom-b.raw.json --output sbom-b.cdx.json
+          PYTHONPATH=src .venv/bin/python -m e2h release canonicalize-sbom sbom-a.raw.json --output sbom-a.cdx.json
+          PYTHONPATH=src .venv/bin/python -m e2h release canonicalize-sbom sbom-b.raw.json --output sbom-b.cdx.json
       - name: Require byte-identical builds and canonical runtime SBOMs
         run: |
           .venv/bin/python - <<'PY'
@@ -121,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(.venv/bin/python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          .venv/bin/python -m e2h release seal dist-a \
+          PYTHONPATH=src .venv/bin/python -m e2h release seal dist-a \
             --output release-manifest.json \
             --project e2h \
             --version "$VERSION" \
@@ -129,9 +128,9 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --runner-generation ubuntu-24.04 \
             --source-date-epoch "$SOURCE_DATE_EPOCH"
-          .venv/bin/python -m e2h release verify release-manifest.json dist-b --json \
+          PYTHONPATH=src .venv/bin/python -m e2h release verify release-manifest.json dist-b --json \
             > release-verification.json
-          .venv/bin/python -m e2h release inspect release-manifest.json --json > release-inspection.json
+          PYTHONPATH=src .venv/bin/python -m e2h release inspect release-manifest.json --json > release-inspection.json
           .venv/bin/python - <<'PY'
           import json
           import os
