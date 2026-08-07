@@ -286,8 +286,7 @@ def _exact_one_sided_mcnemar_tail(
     if discordant == 0 or candidate_only_correct <= baseline_only_correct:
         return Fraction(1, 1)
     numerator = sum(
-        math.comb(discordant, value)
-        for value in range(candidate_only_correct, discordant + 1)
+        math.comb(discordant, value) for value in range(candidate_only_correct, discordant + 1)
     )
     return Fraction(numerator, 1 << discordant)
 
