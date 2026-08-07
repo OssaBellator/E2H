@@ -51,6 +51,12 @@ def _external_uses(workflow: dict[str, Any]) -> list[str]:
     return uses
 
 
+def _action_repository(action: str) -> str:
+    parts = action.split("/")
+    assert len(parts) >= 2, f"external action must use owner/repository syntax: {action}"
+    return "/".join(parts[:2])
+
+
 def test_every_external_workflow_action_uses_reviewed_immutable_commit() -> None:
     paths = _workflow_paths()
     assert paths
@@ -61,15 +67,18 @@ def test_every_external_workflow_action_uses_reviewed_immutable_commit() -> None
         for value in _external_uses(workflow):
             action, separator, revision = value.partition("@")
             assert separator == "@", f"workflow action has no revision in {path}: {value}"
-            assert action in REVIEWED_ACTION_PINS, f"unreviewed workflow action in {path}: {action}"
-            expected = REVIEWED_ACTION_PINS[action]
+            repository = _action_repository(action)
+            assert repository in REVIEWED_ACTION_PINS, (
+                f"unreviewed workflow action in {path}: {repository}"
+            )
+            expected = REVIEWED_ACTION_PINS[repository]
             assert revision == expected, (
                 f"workflow action is not pinned to the reviewed commit in {path}: "
-                f"{action}@{revision} != {action}@{expected}"
+                f"{action}@{revision} != {repository}@{expected}"
             )
             assert len(revision) == 40
             assert all(character in "0123456789abcdef" for character in revision)
-            seen_actions.add(action)
+            seen_actions.add(repository)
 
     assert seen_actions == set(REVIEWED_ACTION_PINS)
 
