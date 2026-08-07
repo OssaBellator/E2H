@@ -12,11 +12,13 @@ from e2h.promotion import (
     PromotionError,
     PromotionGatePolicy,
     PromotionProposal,
+    PromotionReceipt,
     RollbackPlan,
     evaluate_promotion,
     materialize_promotion,
     promotion_decision_sha256,
     record_rollback,
+    rollback_plan_sha256,
 )
 
 BASE_SHA = "1" * 64
@@ -119,6 +121,35 @@ def test_exact_threshold_boundaries_promote() -> None:
     assert decision.checks[0].one_sided_p_value == 0.5
 
 
+def test_candidate_must_strictly_outperform_baseline() -> None:
+    tied = _evidence()
+    tied.both_correct = 8
+    tied.baseline_only_correct = 1
+    tied.candidate_only_correct = 1
+    tied.neither_correct = 0
+    tied.baseline_score = 0.9
+    tied.candidate_score = 0.9
+    proposal = _proposal()
+    proposal.evidence[0] = tied
+    permissive = PromotionGatePolicy(
+        id="permissive-tie-policy",
+        rules=[
+            {
+                "role": "validation",
+                "min_total": 10,
+                "min_candidate_score": 0.9,
+                "min_absolute_improvement": 0,
+                "min_discordant_pairs": 2,
+                "max_one_sided_p_value": 1,
+            }
+        ],
+    )
+
+    decision = evaluate_promotion(permissive, proposal)
+    assert decision.decision is PromotionDecisionKind.REJECT
+    assert "candidate must outperform baseline" in decision.checks[0].reasons
+
+
 def test_decision_round_trip_recomputes_embedded_source_chain() -> None:
     decision = evaluate_promotion(_policy(), _proposal())
     assert PromotionDecision.model_validate_json(decision.model_dump_json()) == decision
@@ -145,6 +176,30 @@ def test_receipt_preserves_policy_and_proposal_digests() -> None:
     payload["policy_sha256"] = "5" * 64
     with pytest.raises(ValidationError, match="policy does not match"):
         type(receipt).model_validate(payload)
+
+
+def test_receipt_rejects_failed_embedded_decision() -> None:
+    failed = evaluate_promotion(
+        PromotionGatePolicy(id="failed-policy", rules=[{"role": "validation", "min_total": 11}]),
+        _proposal(),
+    )
+    rollback = _rollback(failed)
+
+    with pytest.raises(ValidationError, match="passing promotion decision"):
+        PromotionReceipt(
+            promotion_decision_sha256=promotion_decision_sha256(failed),
+            decision=failed,
+            policy_id=failed.policy_id,
+            policy_sha256=failed.policy_sha256,
+            proposal_id=failed.proposal_id,
+            proposal_sha256=failed.proposal_sha256,
+            active_variant_id=failed.candidate_variant_id,
+            active_variant_sha256=failed.candidate_variant_sha256,
+            previous_variant_id=failed.baseline_variant_id,
+            previous_variant_sha256=failed.baseline_variant_sha256,
+            rollback_plan_sha256=rollback_plan_sha256(rollback),
+            rollback=rollback,
+        )
 
 
 def test_rollback_observation_window_is_recorded_and_verified() -> None:
