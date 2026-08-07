@@ -40,6 +40,27 @@ jobs:
           )
           subprocess.run([sys.executable, '-'], input=normalized, text=True, check=True)
           PY
+      - name: Fix long-horizon strict typing
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/e2h/long_horizon.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        for probe in self.probes:\n            if probe.id in probe_ids:\n                raise ValueError("probe ids must be unique")\n            turn_index = turn_ids.get(probe.after_turn_id)\n            if turn_index is None:\n                raise ValueError("probe after_turn_id must reference a task turn")\n            if turn_index < previous_turn_index:\n                raise ValueError("probes must be ordered by their referenced turn")\n            probe_ids.add(probe.id)\n            previous_turn_index = turn_index\n'''
+          new = '''        for probe in self.probes:\n            if probe.id in probe_ids:\n                raise ValueError("probe ids must be unique")\n            probe_turn_index = turn_ids.get(probe.after_turn_id)\n            if probe_turn_index is None:\n                raise ValueError("probe after_turn_id must reference a task turn")\n            if probe_turn_index < previous_turn_index:\n                raise ValueError("probes must be ordered by their referenced turn")\n            probe_ids.add(probe.id)\n            previous_turn_index = probe_turn_index\n'''
+          if old not in text:
+              raise SystemExit('long-horizon probe typing block not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          path = Path('src/e2h/long_horizon_cli.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    models = {\n        LongHorizonSchemaKind.CORPUS: LongHorizonCorpus,\n        LongHorizonSchemaKind.PUBLIC: PublicLongHorizonCorpus,\n        LongHorizonSchemaKind.PREDICTIONS: LongHorizonPredictionDocument,\n        LongHorizonSchemaKind.REPORT: LongHorizonEvaluationReport,\n    }\n    rendered = json.dumps(models[kind].model_json_schema(), indent=2, sort_keys=True) + "\\n"\n'''
+          new = '''    if kind is LongHorizonSchemaKind.CORPUS:\n        schema = LongHorizonCorpus.model_json_schema()\n    elif kind is LongHorizonSchemaKind.PUBLIC:\n        schema = PublicLongHorizonCorpus.model_json_schema()\n    elif kind is LongHorizonSchemaKind.PREDICTIONS:\n        schema = LongHorizonPredictionDocument.model_json_schema()\n    else:\n        schema = LongHorizonEvaluationReport.model_json_schema()\n    rendered = json.dumps(schema, indent=2, sort_keys=True) + "\\n"\n'''
+          if old not in text:
+              raise SystemExit('long-horizon schema typing block not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - run: uv run ruff check . --fix
       - run: uv run ruff format .
       - run: uv lock
