@@ -17,7 +17,6 @@ from e2h.promotion_models import (
     promotion_receipt_sha256,
 )
 
-
 _ROLLBACK_OPERATORS: dict[
     RollbackOperator,
     Callable[[float, float], bool],
