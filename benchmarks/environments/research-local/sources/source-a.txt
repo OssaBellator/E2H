@@ -1,0 +1,3 @@
+Source ID: source-a
+
+Project Alder announced general availability on 2026-04-03 after a three-month public preview. The announcement says the general-availability release is suitable for production deployments.
