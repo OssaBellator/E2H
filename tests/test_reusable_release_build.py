@@ -80,6 +80,32 @@ def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> Non
     assert all("if" not in step for step in selected)
 
 
+def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> None:
+    workflow, raw = _workflow()
+    steps = workflow["jobs"]["build"]["steps"]
+    runs = [str(step.get("run", "")) for step in steps if "run" in step]
+    syncs = [run.strip() for run in runs if run.strip().startswith("uv sync ")]
+    assert syncs == [
+        "uv sync --locked --no-default-groups --build-constraint build-constraints.txt"
+    ]
+    assert "--extra dev" not in raw
+
+    uv_run_lines = [
+        line.strip()
+        for run in runs
+        for line in run.splitlines()
+        if line.strip().startswith("uv run ")
+    ]
+    assert uv_run_lines
+    assert all(line.startswith("uv run --no-sync ") for line in uv_run_lines)
+
+    sbom = next(
+        step for step in steps if step.get("name") == "Export and canonicalize runtime SBOM twice"
+    )
+    sbom_run = str(sbom["run"])
+    assert sbom_run.count("uv export --locked --no-default-groups") == 2
+
+
 def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> None:
     workflow, _ = _workflow()
     steps = workflow["jobs"]["build"]["steps"]
