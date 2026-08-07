@@ -22,6 +22,7 @@ from e2h.release_toolchain import (
     ReleaseToolchainError,
     collect_release_toolchain_evidence,
     release_toolchain_metadata,
+    verify_release_toolchain_evidence,
 )
 from e2h.sbom import SbomCanonicalizationError, canonicalize_cyclonedx_sbom_file
 from e2h.trace import write_json_atomic
@@ -139,6 +140,50 @@ def verify_release(
         f"[green]Verified[/green] {verification.project} {verification.version}: "
         f"{verification.artifact_count} artifacts, "
         f"manifest_sha256={verification.manifest_sha256}"
+    )
+
+
+@release_app.command("verify-toolchain")
+def verify_release_toolchain(
+    manifest_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    source_root: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
+    expected_source_commit: Annotated[
+        str | None,
+        typer.Option(
+            "--expected-source-commit",
+            help="Require the manifest source_commit to match this full commit SHA.",
+        ),
+    ] = None,
+    json_stdout: Annotated[
+        bool,
+        typer.Option("--json", help="Write toolchain verification proof as JSON."),
+    ] = False,
+) -> None:
+    """Verify manifest toolchain evidence against one source tree."""
+    manifest = _load(manifest_path)
+    try:
+        verification = verify_release_toolchain_evidence(
+            manifest.metadata,
+            source_root,
+            expected_source_commit=expected_source_commit,
+        )
+    except ReleaseToolchainError as exc:
+        error_console.print(f"[red]Release toolchain verification failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    rendered = verification.model_dump_json(indent=2) + "\n"
+    if json_stdout:
+        typer.echo(rendered, nl=False)
+        return
+    commit_status = (
+        "expected source commit matched"
+        if verification.source_commit_verified
+        else "source commit recorded only"
+    )
+    console.print(
+        "[green]Verified[/green] release toolchain source inputs: "
+        f"uv={verification.evidence.uv_required_version}, "
+        f"build_backend={verification.evidence.build_backend_version}, "
+        f"{commit_status}"
     )
 
 
