@@ -29,7 +29,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install locked audit tool
-        run: uv sync --locked --no-dev --group audit
+        run: uv sync --locked --no-default-groups --group audit
 
       - name: Export exact runtime dependency set
         run: |
@@ -37,13 +37,13 @@ jobs:
           uv export \
             --format requirements.txt \
             --locked \
-            --no-dev \
+            --no-default-groups \
             --no-emit-local \
             --output-file .e2h/runtime-requirements.txt
 
       - name: Audit exact runtime dependency set
         run: |
-          uv run --locked --no-dev --group audit pip-audit \
+          uv run --no-sync pip-audit \
             --requirement .e2h/runtime-requirements.txt \
             --no-deps \
             --disable-pip \
@@ -55,7 +55,7 @@ jobs:
 
       - name: Audit exact isolated build dependency set
         run: |
-          uv run --locked --no-dev --group audit pip-audit \
+          uv run --no-sync pip-audit \
             --requirement build-constraints.txt \
             --no-deps \
             --disable-pip \
