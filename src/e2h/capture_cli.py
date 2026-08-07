@@ -34,7 +34,10 @@ def _load(path: Path) -> CaptureDocument:
 @capture_app.command("validate")
 def validate_capture(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
-    json_stdout: Annotated[bool, typer.Option("--json", help="Write verification as JSON.")] = False,
+    json_stdout: Annotated[
+        bool,
+        typer.Option("--json", help="Write verification as JSON."),
+    ] = False,
 ) -> None:
     """Validate capture structure and every captured-content SHA-256."""
     document = _load(source)
