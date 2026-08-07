@@ -1,9 +1,82 @@
 # Contributing
 
-1. Create a focused branch.
-2. Install development dependencies with `uv sync --extra dev`.
-3. Add or update tests for every behavioral change.
-4. Run the lint, format, type, test, and smoke commands documented in `README.md`.
-5. Keep capsule schema changes backwards-compatible or introduce a new schema version.
+E2H accepts focused contributions that preserve its core evidence rule: externally visible claims should be backed by observable, reproducible, or content-addressed artifacts rather than hidden reasoning or implicit state.
 
-Security-sensitive changes to execution, path handling, redaction, or permissions require explicit adversarial tests.
+## Development setup
+
+Use Python 3.11 or newer and install the locked development environment with `uv`:
+
+```bash
+uv sync --extra dev
+```
+
+Run the core local checks before opening a pull request:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+uv run pytest
+```
+
+The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, and release integrity. A pull request is not ready to merge while any relevant permanent suite is failing.
+
+## Contribution shape
+
+Prefer small, coherent branches and pull requests. Each behavioral change should include tests that demonstrate both the intended behavior and important rejection/failure cases.
+
+When changing a public artifact or protocol:
+
+- preserve backwards compatibility within an existing schema version, or introduce an explicit new schema version;
+- keep additive provider payload handling separate from strict core identity/ordering requirements;
+- update generated JSON Schema behavior and documentation when the public contract changes;
+- avoid introducing shell interpolation where E2H currently uses explicit argument vectors;
+- keep observable evidence separate from hidden model reasoning or opaque provider internals.
+
+## Generated and content-addressed artifacts
+
+Do not hand-edit generated identities merely to make a test pass.
+
+Examples include:
+
+- `uv.lock`;
+- benchmark environment locks;
+- snapshot/release digests;
+- partition/public dataset identities;
+- release manifests and canonical SBOM output.
+
+Regenerate them using the corresponding E2H or `uv` command, then review the resulting diff. A generated digest changing unexpectedly is evidence to investigate, not formatting noise.
+
+## Tests for security-sensitive changes
+
+Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, or release workflows require explicit adversarial tests.
+
+Useful rejection cases include:
+
+- absolute paths, parent traversal, symlink escapes, and raced filesystem changes;
+- duplicate IDs/keys, malformed ordering, unsupported archive members, and oversized inputs;
+- residual secrets/PII and unsafe review/report output;
+- stale or mismatched content digests and provenance identities;
+- credential-bearing jobs executing repository-controlled code;
+- mutable third-party action references in supply-chain workflows;
+- missing/extra release artifacts and tampered handoffs.
+
+See [`SECURITY.md`](SECURITY.md) for vulnerability reporting. Do not put active exploit details or sensitive evidence into a public pull request merely to demonstrate a security problem.
+
+## Privacy-sensitive benchmark contributions
+
+Sanitized real-world benchmark patterns require public provenance, a sanitization attestation, detector-backed review, and human inspection. Do not copy raw issue logs, usernames, local paths, tokens, emails, phone numbers, or other unnecessary source identifiers into the benchmark corpus.
+
+Synthetic benchmark fixtures should remain clearly labeled as synthetic rather than being presented as real-world evidence.
+
+## Supply-chain workflow changes
+
+External GitHub Actions used by publication or release-integrity workflows must remain pinned to full immutable commit SHAs. Update the reviewed version comment at the same time and let the workflow-policy tests enforce the resulting trust boundary.
+
+The tag-only publication workflow must not be exercised from a pull request by creating a real release tag. Normal CI validates release policy, reproducible builds, manifests, and SBOM canonicalization without publishing externally.
+
+## Documentation
+
+Update the README or focused docs when a contribution changes a user-visible command, security boundary, benchmark contract, integration capability, or release procedure.
+
+Keep limitations explicit. Hashes establish byte identity, attestations establish provenance/integrity relationships, and redaction detectors reduce exposure risk; none of those mechanisms proves that arbitrary content or code is trustworthy.
