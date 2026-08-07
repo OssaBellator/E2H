@@ -153,9 +153,15 @@ def test_reusable_release_build_requires_tag_main_reproducibility_and_runtime_sb
     assert "e2h release verify-toolchain" in build_runs
     assert "release-manifest.json source-b" in build_runs
     assert '--expected-source-commit "$GITHUB_SHA"' in build_runs
+    assert "e2h snapshot create" in build_runs
+    assert "cmp source-a.e2hsnap source-b.e2hsnap" in build_runs
+    assert "e2h snapshot verify source-a.e2hsnap" in build_runs
+    assert 'source["snapshot_id"] == source_tree' in build_runs
     assert "e2h-sbom.cdx.json" in build_runs
+    assert "e2h-source.e2hsnap" in build_runs
     assert "release-toolchain-verification.json" in build_runs
     assert "release-inspection.json" in build_runs
+    assert "release-source-inspection.json" in build_runs
 
 
 def test_release_bundle_is_verified_at_every_trust_handoff() -> None:
@@ -180,7 +186,7 @@ def test_release_bundle_is_verified_at_every_trust_handoff() -> None:
     }
 
 
-def test_sbom_is_attested_against_exact_distributions() -> None:
+def test_source_snapshot_gets_generic_provenance_and_sbom_stays_distribution_scoped() -> None:
     workflow, _ = _workflow()
     attest_steps = [
         step
@@ -188,11 +194,18 @@ def test_sbom_is_attested_against_exact_distributions() -> None:
         if str(step.get("uses", "")).startswith("actions/attest@")
     ]
     assert len(attest_steps) == 2
+    provenance = next(step for step in attest_steps if "sbom-path" not in step.get("with", {}))
+    provenance_subjects = str(provenance["with"]["subject-path"])
+    assert "release/dist/*.tar.gz" in provenance_subjects
+    assert "release/dist/*.whl" in provenance_subjects
+    assert "release/e2h-source.e2hsnap" in provenance_subjects
+
     sbom = next(step for step in attest_steps if "sbom-path" in step.get("with", {}))
     assert sbom["with"]["sbom-path"] == "release/e2h-sbom.cdx.json"
     subject_path = str(sbom["with"]["subject-path"])
     assert "release/dist/*.tar.gz" in subject_path
     assert "release/dist/*.whl" in subject_path
+    assert "e2h-source.e2hsnap" not in subject_path
 
 
 def test_github_release_is_drafted_then_published_as_immutable_and_verified() -> None:
@@ -207,8 +220,10 @@ def test_github_release_is_drafted_then_published_as_immutable_and_verified() ->
     assert "--fail-on-no-commits" in draft_runs
     assert "gh release upload" in draft_runs
     assert "--clobber" in draft_runs
+    assert "release/e2h-source.e2hsnap" in draft_runs
     assert "release/release-toolchain-verification.json" in draft_runs
     assert "release/release-inspection.json" in draft_runs
+    assert "release/release-source-inspection.json" in draft_runs
 
     publish_runs = _runs(workflow["jobs"]["release-publish"])
     assert 'gh release edit "$GITHUB_REF_NAME" --draft=false --verify-tag' in publish_runs
@@ -217,8 +232,10 @@ def test_github_release_is_drafted_then_published_as_immutable_and_verified() ->
     assert "gh release verify" in publish_runs
     assert "gh release verify-asset" in publish_runs
     assert "release-attestation.json" in publish_runs
+    assert "release/e2h-source.e2hsnap" in publish_runs
     assert "release/release-toolchain-verification.json" in publish_runs
     assert "release/release-inspection.json" in publish_runs
+    assert "release/release-source-inspection.json" in publish_runs
 
 
 def test_generated_release_notes_have_ordered_categories_and_catchall() -> None:
