@@ -44,7 +44,7 @@
 
 - [x] OpenAI Responses API runtime adapter.
 - [x] MCP server for verified memory, replay, and artifact checks.
-- A2A verification agent.
+- [x] A2A verification agent.
 - Browser and VS Code capture clients.
 
 ## Milestone 5 — Community benchmark

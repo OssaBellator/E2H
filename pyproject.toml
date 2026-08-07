@@ -4,19 +4,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "e2h"
-version = "0.19.0"
+version = "0.20.0"
 description = "Evidence-to-Harness: reproducible task capsules and deterministic replay for AI harness improvement."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "E2H contributors" }]
 dependencies = [
+  "a2a-sdk[http-server]>=1.1.2,<2",
   "duckdb>=1.4,<2",
   "mcp>=2.0,<3",
   "pydantic>=2.10,<3",
   "pytz>=2024,<2027",
   "pyyaml>=6.0.2,<7",
   "typer>=0.16,<1",
+  "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ dev = [
 
 [project.scripts]
 e2h = "e2h.main_cli:app"
+e2h-a2a = "e2h.a2a_agent:main"
 e2h-genome = "e2h.genome_cli:genome_app"
 e2h-mcp = "e2h.mcp_server:main"
 e2h-optimizer = "e2h.optimizer_cli:optimizer_app"
