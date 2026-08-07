@@ -43,7 +43,7 @@
 ## Milestone 4 — Frontier integrations
 
 - [x] OpenAI Responses API runtime adapter.
-- MCP server for verified memory, replay, and artifact checks.
+- [x] MCP server for verified memory, replay, and artifact checks.
 - A2A verification agent.
 - Browser and VS Code capture clients.
 
