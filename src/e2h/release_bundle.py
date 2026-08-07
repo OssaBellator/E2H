@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import tempfile
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -69,20 +70,6 @@ class ReleaseBundleVerification(BaseModel):
 
 
 def _read_regular_bytes(path: Path, *, limit: int, noun: str) -> bytes:
-    try:
-        if path.is_symlink() or not path.is_file():
-            raise ReleaseBundleError(f"{noun} must be a regular file")
-        size = path.stat().st_size
-        if size <= 0:
-            raise ReleaseBundleError(f"{noun} must not be empty")
-        if size > limit:
-            raise ReleaseBundleError(f"{noun} exceeds {limit} bytes")
-        return path.read_bytes()
-    except OSError as exc:
-        raise ReleaseBundleError(f"unable to read {noun}: {exc}") from exc
-
-
-def _sha256_regular_file(path: Path, *, noun: str) -> str:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -94,43 +81,95 @@ def _sha256_regular_file(path: Path, *, noun: str) -> str:
             raise ReleaseBundleError(f"{noun} must be a regular file")
         if before.st_size <= 0:
             raise ReleaseBundleError(f"{noun} must not be empty")
-        if before.st_size > _MAX_BUNDLE_FILE_BYTES:
-            raise ReleaseBundleError(f"{noun} exceeds {_MAX_BUNDLE_FILE_BYTES} bytes")
-        digest = hashlib.sha256()
-        observed = 0
+        if before.st_size > limit:
+            raise ReleaseBundleError(f"{noun} exceeds {limit} bytes")
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            while chunk := handle.read(1024 * 1024):
-                observed += len(chunk)
-                if observed > _MAX_BUNDLE_FILE_BYTES:
-                    raise ReleaseBundleError(
-                        f"{noun} exceeds {_MAX_BUNDLE_FILE_BYTES} bytes"
-                    )
-                digest.update(chunk)
+            data = handle.read(limit + 1)
         after = os.fstat(descriptor)
-        before_identity = (
+        identity_before = (
             before.st_dev,
             before.st_ino,
             before.st_size,
             before.st_mtime_ns,
             before.st_mode,
         )
-        after_identity = (
+        identity_after = (
             after.st_dev,
             after.st_ino,
             after.st_size,
             after.st_mtime_ns,
             after.st_mode,
         )
-        if before_identity != after_identity or observed != before.st_size:
+        if identity_before != identity_after or len(data) != before.st_size:
+            raise ReleaseBundleError(f"{noun} changed while reading")
+        return data
+    except OSError as exc:
+        raise ReleaseBundleError(f"unable to read {noun}: {exc}") from exc
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
+
+
+def _copy_verified_file(
+    source: Path,
+    destination: Path,
+    *,
+    expected_digest: str,
+    noun: str,
+) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(source, flags)
+    except OSError as exc:
+        raise ReleaseBundleError(f"unable to open {noun}: {exc}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ReleaseBundleError(f"{noun} must be a regular file")
+        if before.st_size <= 0:
+            raise ReleaseBundleError(f"{noun} must not be empty")
+        if before.st_size > _MAX_BUNDLE_FILE_BYTES:
+            raise ReleaseBundleError(f"{noun} exceeds {_MAX_BUNDLE_FILE_BYTES} bytes")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        observed = 0
+        try:
+            output = destination.open("xb")
+        except OSError as exc:
+            raise ReleaseBundleError(f"unable to stage {noun}: {exc}") from exc
+        with output, os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while chunk := handle.read(1024 * 1024):
+                observed += len(chunk)
+                if observed > _MAX_BUNDLE_FILE_BYTES:
+                    raise ReleaseBundleError(
+                        f"{noun} exceeds {_MAX_BUNDLE_FILE_BYTES} bytes"
+                    )
+                output.write(chunk)
+                digest.update(chunk)
+        after = os.fstat(descriptor)
+        identity_before = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_mode,
+        )
+        identity_after = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_mode,
+        )
+        if identity_before != identity_after or observed != before.st_size:
             raise ReleaseBundleError(f"{noun} changed while hashing")
-        return digest.hexdigest()
+        if digest.hexdigest() != expected_digest:
+            raise ReleaseBundleError(f"release checksum mismatch: {source.name}")
     except OSError as exc:
         raise ReleaseBundleError(f"unable to hash {noun}: {exc}") from exc
     finally:
-        try:
+        with suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
 
 
 def _safe_checksum_path(value: str) -> str:
@@ -167,6 +206,20 @@ def _parse_checksums(path: Path) -> tuple[dict[str, str], bytes]:
             raise ReleaseBundleError(f"duplicate release checksum path: {relative}")
         checksums[relative] = match.group("digest")
     return checksums, raw
+
+
+def _validate_checksum_shape(checksums: dict[str, str]) -> None:
+    paths = set(checksums)
+    if not _STATIC_CHECKSUM_PATHS <= paths:
+        missing = sorted(_STATIC_CHECKSUM_PATHS - paths)
+        raise ReleaseBundleError(f"release checksum manifest is missing evidence: {missing}")
+    distribution_paths = paths - _STATIC_CHECKSUM_PATHS
+    if len(distribution_paths) != 2:
+        raise ReleaseBundleError("release checksum manifest must contain exactly two distributions")
+    if sum(path.startswith("dist/") and path.endswith(".whl") for path in distribution_paths) != 1:
+        raise ReleaseBundleError("release checksum manifest must contain exactly one wheel")
+    if sum(path.startswith("dist/") and path.endswith(".tar.gz") for path in distribution_paths) != 1:
+        raise ReleaseBundleError("release checksum manifest must contain exactly one sdist")
 
 
 def _load_json_object(path: Path, *, noun: str) -> dict[str, Any]:
@@ -231,6 +284,51 @@ def _verify_bundle_layout(directory: Path) -> None:
             raise ReleaseBundleError(f"release bundle entry must be a regular file: {entry.name}")
 
 
+def _verify_distribution_layout(directory: Path, checksums: dict[str, str]) -> None:
+    expected = {
+        PurePosixPath(relative).name
+        for relative in checksums
+        if relative.startswith("dist/")
+    }
+    dist = directory / "dist"
+    try:
+        entries = sorted(dist.iterdir(), key=lambda entry: entry.name)
+    except OSError as exc:
+        raise ReleaseBundleError(f"unable to inspect release dist directory: {exc}") from exc
+    actual = {entry.name for entry in entries}
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise ReleaseBundleError(
+            f"release dist layout does not match checksums; missing={missing}, extra={extra}"
+        )
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_file():
+            raise ReleaseBundleError(f"release distribution must be a regular file: {entry.name}")
+
+
+def _stage_verified_bundle(
+    directory: Path,
+    staging: Path,
+    checksums: dict[str, str],
+    checksum_raw: bytes,
+) -> None:
+    for relative, expected_digest in checksums.items():
+        relative_path = PurePosixPath(relative)
+        source = directory / Path(*relative_path.parts)
+        destination = staging / Path(*relative_path.parts)
+        _copy_verified_file(
+            source,
+            destination,
+            expected_digest=expected_digest,
+            noun=f"release bundle file {relative}",
+        )
+    try:
+        (staging / "release-checksums.txt").write_bytes(checksum_raw)
+    except OSError as exc:
+        raise ReleaseBundleError(f"unable to stage release checksum manifest: {exc}") from exc
+
+
 def _validate_stored_reports(
     directory: Path,
     manifest: ReleaseManifest,
@@ -284,19 +382,16 @@ def _validate_stored_reports(
         )
 
 
-def verify_release_bundle(
+def _verify_staged_bundle(
     directory: Path,
+    checksums: dict[str, str],
     *,
-    expected_source_commit: str | None = None,
-) -> ReleaseBundleVerification:
-    """Verify checksums and all semantic relationships in a complete release bundle."""
-    _verify_bundle_layout(directory)
+    expected_source_commit: str | None,
+) -> tuple[ReleaseManifest, bool]:
     try:
         manifest = load_release_manifest(directory / "release-manifest.json")
     except ValueError as exc:
         raise ReleaseBundleError(f"invalid release manifest: {exc}") from exc
-
-    checksums, checksum_raw = _parse_checksums(directory / "release-checksums.txt")
     expected_paths = _STATIC_CHECKSUM_PATHS | {
         f"dist/{artifact.filename}" for artifact in manifest.artifacts
     }
@@ -304,15 +399,8 @@ def verify_release_bundle(
         missing = sorted(expected_paths - set(checksums))
         extra = sorted(set(checksums) - expected_paths)
         raise ReleaseBundleError(
-            f"release checksum set does not match bundle; missing={missing}, extra={extra}"
+            f"release checksum set does not match manifest; missing={missing}, extra={extra}"
         )
-    for relative, expected_digest in checksums.items():
-        actual_digest = _sha256_regular_file(
-            directory / Path(*PurePosixPath(relative).parts),
-            noun=f"release bundle file {relative}",
-        )
-        if actual_digest != expected_digest:
-            raise ReleaseBundleError(f"release checksum mismatch: {relative}")
 
     try:
         release_verification = verify_release_artifacts(manifest, directory / "dist")
@@ -338,22 +426,21 @@ def verify_release_bundle(
     if source_manifest.snapshot_id != evidence.source_tree_sha256:
         raise ReleaseBundleError("release source snapshot does not match source_tree_sha256")
 
-    with tempfile.TemporaryDirectory(prefix="e2h-release-bundle-") as temporary:
-        restored = Path(temporary) / "source"
-        try:
-            restore_snapshot(source_path, restored)
-            producer_toolchain = verify_release_toolchain_evidence(
-                manifest.metadata,
-                restored,
-                expected_source_commit=evidence.source_commit,
-            )
-            consumer_toolchain = verify_release_toolchain_evidence(
-                manifest.metadata,
-                restored,
-                expected_source_commit=expected_source_commit,
-            )
-        except ValueError as exc:
-            raise ReleaseBundleError(f"release toolchain verification failed: {exc}") from exc
+    restored = directory.parent / "restored-source"
+    try:
+        restore_snapshot(source_path, restored)
+        producer_toolchain = verify_release_toolchain_evidence(
+            manifest.metadata,
+            restored,
+            expected_source_commit=evidence.source_commit,
+        )
+        consumer_toolchain = verify_release_toolchain_evidence(
+            manifest.metadata,
+            restored,
+            expected_source_commit=expected_source_commit,
+        )
+    except ValueError as exc:
+        raise ReleaseBundleError(f"release toolchain verification failed: {exc}") from exc
 
     _validate_stored_reports(
         directory,
@@ -362,6 +449,31 @@ def verify_release_bundle(
         source_manifest,
         producer_toolchain,
     )
+    return manifest, consumer_toolchain.source_commit_verified
+
+
+def verify_release_bundle(
+    directory: Path,
+    *,
+    expected_source_commit: str | None = None,
+) -> ReleaseBundleVerification:
+    """Verify checksums and all semantic relationships in a complete release bundle."""
+    _verify_bundle_layout(directory)
+    checksums, checksum_raw = _parse_checksums(directory / "release-checksums.txt")
+    _validate_checksum_shape(checksums)
+    _verify_distribution_layout(directory, checksums)
+
+    with tempfile.TemporaryDirectory(prefix="e2h-release-bundle-") as temporary:
+        staging = Path(temporary) / "bundle"
+        staging.mkdir()
+        _stage_verified_bundle(directory, staging, checksums, checksum_raw)
+        manifest, source_commit_verified = _verify_staged_bundle(
+            staging,
+            checksums,
+            expected_source_commit=expected_source_commit,
+        )
+        evidence = release_toolchain_evidence_from_metadata(manifest.metadata)
+        assert evidence.source_tree_sha256 is not None
 
     return ReleaseBundleVerification(
         project=manifest.project,
@@ -369,7 +481,7 @@ def verify_release_bundle(
         manifest_sha256=release_manifest_sha256(manifest),
         source_tree_sha256=evidence.source_tree_sha256,
         source_commit=evidence.source_commit,
-        source_commit_verified=consumer_toolchain.source_commit_verified,
+        source_commit_verified=source_commit_verified,
         artifact_count=len(manifest.artifacts),
         checksum_count=len(checksums),
         checksum_manifest_sha256=hashlib.sha256(checksum_raw).hexdigest(),
