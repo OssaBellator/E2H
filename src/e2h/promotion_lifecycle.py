@@ -168,6 +168,8 @@ class PromotionReceipt(StrictModel):
 
     @model_validator(mode="after")
     def embedded_artifacts_must_match(self) -> PromotionReceipt:
+        if self.decision.decision is not PromotionDecisionKind.PROMOTE:
+            raise ValueError("promotion receipt must embed a passing promotion decision")
         if self.promotion_decision_sha256 != promotion_decision_sha256(self.decision):
             raise ValueError("promotion receipt decision digest does not match embedded decision")
         if (
