@@ -118,7 +118,9 @@ def test_reusable_release_build_verifies_toolchain_against_independent_source() 
     assert "release-manifest.json source-b" in run
     assert '--expected-source-commit "$GITHUB_SHA"' in run
     assert "> release-toolchain-verification.json" in run
+    assert 'len(evidence["source_tree_sha256"]) == 64' in run
     assert 'verification["source_inputs_verified"] is True' in run
+    assert 'verification["source_tree_verified"] is True' in run
     assert 'verification["source_commit_verified"] is True' in run
     assert 'verification["evidence"] == evidence' in run
 

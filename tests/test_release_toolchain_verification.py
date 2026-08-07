@@ -35,6 +35,7 @@ def _write_toolchain_root(tmp_path: Path) -> Path:
         "    --hash=sha256:" + "b" * 64 + "\n",
         encoding="utf-8",
     )
+    (root / "README.md").write_text("release source\n", encoding="utf-8")
     return root
 
 
@@ -90,10 +91,12 @@ def test_verify_toolchain_matches_source_inputs_and_optional_commit(
 
     assert verification.verified is True
     assert verification.source_inputs_verified is True
+    assert verification.source_tree_verified is True
     assert verification.source_commit_verified is True
     assert verification.evidence.python_version == "3.13.14"
     assert verification.evidence.uv_required_version == "0.12.2"
     assert verification.evidence.build_backend_version == "1.31.0"
+    assert verification.evidence.source_tree_sha256 is not None
     assert (
         verification.evidence.uv_lock_sha256
         == hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest()
@@ -106,7 +109,40 @@ def test_verify_toolchain_without_expected_commit_marks_commit_unverified(
     root = _write_toolchain_root(tmp_path)
     verification = verify_release_toolchain_evidence(_metadata(root, monkeypatch), root)
     assert verification.source_inputs_verified is True
+    assert verification.source_tree_verified is True
     assert verification.source_commit_verified is False
+
+
+def test_verify_toolchain_rejects_non_toolchain_source_tampering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _write_toolchain_root(tmp_path)
+    metadata = _metadata(root, monkeypatch)
+    (root / "README.md").write_text("changed source\n", encoding="utf-8")
+
+    with pytest.raises(ReleaseToolchainError, match="source_tree_sha256"):
+        verify_release_toolchain_evidence(metadata, root)
+
+
+def test_legacy_toolchain_evidence_keeps_four_file_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _write_toolchain_root(tmp_path)
+    metadata = _metadata(root, monkeypatch)
+    raw = metadata["release_toolchain"]
+    assert isinstance(raw, dict)
+    legacy = {
+        "release_toolchain": {
+            key: value for key, value in raw.items() if key != "source_tree_sha256"
+        }
+    }
+    (root / "README.md").write_text("legacy extra source change\n", encoding="utf-8")
+
+    verification = verify_release_toolchain_evidence(legacy, root)
+    assert verification.source_inputs_verified is True
+    assert verification.source_tree_verified is False
+    assert verification.source_commit_verified is False
+    assert verification.evidence.source_tree_sha256 is None
 
 
 def test_verify_toolchain_rejects_source_tampering(
@@ -135,6 +171,17 @@ def test_verify_toolchain_rejects_version_drift_and_unsafe_source_files(
     (root / "uv.lock").unlink()
     (root / "uv.lock").symlink_to(target)
     with pytest.raises(ReleaseToolchainError, match="regular file"):
+        verify_release_toolchain_evidence(metadata, root)
+
+
+def test_verify_toolchain_rejects_symlink_in_full_source_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _write_toolchain_root(tmp_path)
+    metadata = _metadata(root, monkeypatch)
+    (root / "readme-link").symlink_to(root / "README.md")
+
+    with pytest.raises(ReleaseToolchainError, match="symbolic links are not supported"):
         verify_release_toolchain_evidence(metadata, root)
 
 
@@ -180,8 +227,10 @@ def test_cli_verify_toolchain_emits_machine_readable_proof(
     payload = json.loads(result.stdout)
     assert payload["verified"] is True
     assert payload["source_inputs_verified"] is True
+    assert payload["source_tree_verified"] is True
     assert payload["source_commit_verified"] is True
     assert payload["evidence"]["source_commit"] == "a" * 40
+    assert len(payload["evidence"]["source_tree_sha256"]) == 64
 
 
 def test_cli_verify_toolchain_fails_closed_on_legacy_or_tampered_inputs(

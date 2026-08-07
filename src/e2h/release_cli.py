@@ -174,6 +174,11 @@ def verify_release_toolchain(
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
+    tree_status = (
+        "full source tree matched"
+        if verification.source_tree_verified
+        else "legacy evidence without full source tree identity"
+    )
     commit_status = (
         "expected source commit matched"
         if verification.source_commit_verified
@@ -183,7 +188,7 @@ def verify_release_toolchain(
         "[green]Verified[/green] release toolchain source inputs: "
         f"uv={verification.evidence.uv_required_version}, "
         f"build_backend={verification.evidence.build_backend_version}, "
-        f"{commit_status}"
+        f"{tree_status}, {commit_status}"
     )
 
 
