@@ -25,8 +25,7 @@ def _write_toolchain_root(tmp_path: Path) -> Path:
     root.mkdir()
     (root / "uv.toml").write_text('required-version = "==0.12.2"\n', encoding="utf-8")
     (root / "pyproject.toml").write_text(
-        '[build-system]\nrequires = ["hatchling==1.31.0"]\n'
-        'build-backend = "hatchling.build"\n',
+        '[build-system]\nrequires = ["hatchling==1.31.0"]\nbuild-backend = "hatchling.build"\n',
         encoding="utf-8",
     )
     (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
@@ -95,9 +94,10 @@ def test_verify_toolchain_matches_source_inputs_and_optional_commit(
     assert verification.evidence.python_version == "3.13.14"
     assert verification.evidence.uv_required_version == "0.12.2"
     assert verification.evidence.build_backend_version == "1.31.0"
-    assert verification.evidence.uv_lock_sha256 == hashlib.sha256(
-        (root / "uv.lock").read_bytes()
-    ).hexdigest()
+    assert (
+        verification.evidence.uv_lock_sha256
+        == hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest()
+    )
 
 
 def test_verify_toolchain_without_expected_commit_marks_commit_unverified(
