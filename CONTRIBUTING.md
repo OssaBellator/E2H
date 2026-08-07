@@ -83,6 +83,8 @@ Python dependency pull requests must preserve the locked workflow. If a dependen
 
 The `uv` binary itself is separately pinned by the root `uv.toml`; changing that pin is a toolchain change, not an ordinary dependency refresh. Review the uv changelog for the target release and require the full permanent suite set to pass before merging a toolchain update.
 
+The PEP 517 build backend is another separately reviewed toolchain input. `uv build` creates an isolated build environment and resolves `[build-system].requires` independently of the project `uv.lock`, so E2H pins Hatchling to one exact version in `pyproject.toml`. Keep build isolation enabled; update the Hatchling pin deliberately after reviewing the target release, then require release-integrity CI to reproduce both wheel and sdist bytes before merging.
+
 External GitHub Actions remain pinned to full immutable commit SHAs in every permanent workflow. Dependabot can propose updates to SHA-pinned actions and their same-line release comments, but `tests/test_workflow_action_pins.py` deliberately contains the currently reviewed commit map. A bot PR that advances an action is expected to remain red until a maintainer:
 
 1. reviews the upstream release or security-fix commit;
