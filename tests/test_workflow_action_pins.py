@@ -11,6 +11,7 @@ WORKFLOW_DIR = ROOT / ".github" / "workflows"
 REVIEWED_ACTION_PINS = {
     "actions/attest": "508db95dd578ae2727ebd6217d5ba78e4fbda05d",
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/dependency-review-action": "1e966ba708e4b64bb0c9bfb7abb5a232840be16a",
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     "actions/setup-node": "e51e5fe84fc33b4c73ebe40526b2694712b5b858",
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
@@ -87,6 +88,7 @@ def test_workflows_do_not_use_mutable_action_refs_in_raw_yaml() -> None:
     for path in _workflow_paths():
         text = path.read_text(encoding="utf-8")
         assert "uses: actions/checkout@v" not in text
+        assert "uses: actions/dependency-review-action@v" not in text
         assert "uses: actions/setup-python@v" not in text
         assert "uses: actions/setup-node@v" not in text
         assert "uses: actions/upload-artifact@v" not in text
