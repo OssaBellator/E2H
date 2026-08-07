@@ -50,9 +50,7 @@ def test_toolchain_evidence_stays_inside_manifest_checksum_chain() -> None:
     integrity = _workflow(RELEASE_INTEGRITY)
     steps = integrity["jobs"]["reproducible-build"]["steps"]
     upload = next(
-        step
-        for step in steps
-        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        step for step in steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     )
     path = str(upload["with"]["path"])
     assert "release-manifest.json" in path
