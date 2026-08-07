@@ -115,9 +115,13 @@ def test_release_build_requires_version_main_reproducibility_and_runtime_sbom() 
     assert "git archive HEAD | tar -x -C source-b" in build_runs
     assert "assert first == second" in build_runs
     assert "uv export --locked --format cyclonedx1.5" in build_runs
+    assert "e2h release canonicalize-sbom sbom-a.raw.json" in build_runs
+    assert "e2h release canonicalize-sbom sbom-b.raw.json" in build_runs
     assert "assert sbom_a == sbom_b" in build_runs
     assert 'payload["bomFormat"] == "CycloneDX"' in build_runs
     assert 'payload["specVersion"] == "1.5"' in build_runs
+    assert '"serialNumber" not in payload' in build_runs
+    assert '"timestamp" not in payload.get("metadata", {})' in build_runs
     assert '{"mypy", "pytest", "pytest-cov", "ruff"}' in build_runs
     assert "e2h release seal" in build_runs
     assert "e2h release verify" in build_runs
