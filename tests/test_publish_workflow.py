@@ -9,7 +9,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "publish-pypi.yml"
 RELEASE_INTEGRITY_PATH = ROOT / ".github" / "workflows" / "release-integrity.yml"
+REUSABLE_PATH = ROOT / ".github" / "workflows" / "reusable-release-build.yml"
 RELEASE_NOTES_PATH = ROOT / ".github" / "release.yml"
+LOCAL_REUSABLE = "./.github/workflows/reusable-release-build.yml"
 
 EXPECTED_ACTIONS = {
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -62,6 +64,25 @@ def test_publish_workflow_is_tag_only_and_non_canceling() -> None:
     assert workflow["permissions"] == {"contents": "read"}
 
 
+def test_build_is_same_repo_reusable_workflow_with_read_only_permission() -> None:
+    workflow, _ = _workflow()
+    build = workflow["jobs"]["build"]
+    assert build == {
+        "name": "Build verified release",
+        "permissions": {"contents": "read"},
+        "uses": LOCAL_REUSABLE,
+        "with": {
+            "artifact-name": "pypi-release",
+            "validate-release-tag": True,
+        },
+    }
+
+    integrity, _ = _load_yaml(RELEASE_INTEGRITY_PATH)
+    integrity_build = integrity["jobs"]["reproducible-build"]
+    assert integrity_build["uses"] == LOCAL_REUSABLE
+    assert integrity_build["with"]["validate-release-tag"] is False
+
+
 def test_permissions_are_job_scoped_and_oidc_is_separated() -> None:
     workflow, _ = _workflow()
     jobs = workflow["jobs"]
@@ -105,9 +126,13 @@ def test_identity_and_release_jobs_never_checkout_repository_code() -> None:
         assert "python " not in runs
 
 
-def test_release_build_requires_version_main_reproducibility_and_runtime_sbom() -> None:
-    workflow, raw = _workflow()
-    build_runs = _runs(workflow["jobs"]["build"])
+def test_reusable_release_build_requires_tag_main_reproducibility_and_runtime_sbom() -> None:
+    reusable, raw = _load_yaml(REUSABLE_PATH)
+    trigger = _trigger(reusable)
+    assert isinstance(trigger, dict)
+    assert "workflow_call" in trigger
+    assert reusable["permissions"] == {"contents": "read"}
+    build_runs = _runs(reusable["jobs"]["build"])
     assert "^v[0-9]+\\.[0-9]+\\.[0-9]+$" in raw
     assert '"$GITHUB_REF_NAME" != "v$VERSION"' in build_runs
     assert "git merge-base --is-ancestor HEAD origin/main" in build_runs
@@ -126,6 +151,7 @@ def test_release_build_requires_version_main_reproducibility_and_runtime_sbom() 
     assert "e2h release seal" in build_runs
     assert "e2h release verify" in build_runs
     assert "e2h-sbom.cdx.json" in build_runs
+    assert "release-inspection.json" in build_runs
 
 
 def test_release_bundle_is_verified_at_every_trust_handoff() -> None:
@@ -177,6 +203,7 @@ def test_github_release_is_drafted_then_published_as_immutable_and_verified() ->
     assert "--fail-on-no-commits" in draft_runs
     assert "gh release upload" in draft_runs
     assert "--clobber" in draft_runs
+    assert "release/release-inspection.json" in draft_runs
 
     publish_runs = _runs(workflow["jobs"]["release-publish"])
     assert 'gh release edit "$GITHUB_REF_NAME" --draft=false --verify-tag' in publish_runs
@@ -185,6 +212,7 @@ def test_github_release_is_drafted_then_published_as_immutable_and_verified() ->
     assert "gh release verify" in publish_runs
     assert "gh release verify-asset" in publish_runs
     assert "release-attestation.json" in publish_runs
+    assert "release/release-inspection.json" in publish_runs
 
 
 def test_generated_release_notes_have_ordered_categories_and_catchall() -> None:
@@ -204,18 +232,17 @@ def test_generated_release_notes_have_ordered_categories_and_catchall() -> None:
 
 
 def test_supply_chain_workflows_pin_every_third_party_action_to_full_sha() -> None:
-    workflow, _ = _workflow()
+    publish, _ = _workflow()
+    reusable, _ = _load_yaml(REUSABLE_PATH)
     seen: set[str] = set()
-    for job in workflow["jobs"].values():
-        for use in _uses(job):
-            assert _SHA_PIN.fullmatch(use), use
-            seen.add(use)
+    for workflow in (publish, reusable):
+        for job in workflow["jobs"].values():
+            if "steps" not in job:
+                continue
+            for use in _uses(job):
+                assert _SHA_PIN.fullmatch(use), use
+                seen.add(use)
     assert seen == EXPECTED_ACTIONS
-
-    release_integrity, _ = _load_yaml(RELEASE_INTEGRITY_PATH)
-    for job in release_integrity["jobs"].values():
-        for use in _uses(job):
-            assert _SHA_PIN.fullmatch(use), use
 
 
 def test_publish_workflow_contains_no_static_pypi_credentials_or_manual_trigger() -> None:
