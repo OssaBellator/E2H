@@ -1,0 +1,62 @@
+name: Release integrity CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  reproducible-build:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_DATE_EPOCH: "1704067200"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra dev
+      - name: Build release artifacts twice
+        run: |
+          uv build --out-dir dist-a
+          uv build --out-dir dist-b
+      - name: Require byte-identical builds
+        run: |
+          uv run python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          def digests(directory: str) -> dict[str, str]:
+              return {
+                  path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in sorted(Path(directory).iterdir())
+                  if path.is_file()
+              }
+
+          first = digests("dist-a")
+          second = digests("dist-b")
+          assert len(first) == 2, first
+          assert first == second, (first, second)
+          PY
+      - name: Seal first build and verify second build
+        run: |
+          VERSION="$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          uv run e2h release seal dist-a \
+            --output release-manifest.json \
+            --project e2h \
+            --version "$VERSION"
+          uv run e2h release verify release-manifest.json dist-b --json \
+            > release-verification.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-integrity
+          path: |
+            dist-a/*
+            release-manifest.json
+            release-verification.json
