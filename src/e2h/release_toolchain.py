@@ -238,7 +238,9 @@ def verify_release_toolchain_evidence(
     source_commit_verified = False
     if expected_source_commit is not None:
         if _SOURCE_COMMIT_RE.fullmatch(expected_source_commit) is None:
-            raise ReleaseToolchainError("expected source commit must be a lowercase 40-character SHA")
+            raise ReleaseToolchainError(
+                "expected source commit must be a lowercase 40-character SHA"
+            )
         if evidence.source_commit != expected_source_commit:
             raise ReleaseToolchainError(
                 "release toolchain source commit does not match expected source commit"
