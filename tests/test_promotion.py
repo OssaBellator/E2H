@@ -53,9 +53,7 @@ CANDIDATE_SHA = "2" * 64
 
 
 def dataset() -> DSPyDatasetDocument:
-    examples = [
-        {"id": "train", "inputs": {"task": "train"}, "outputs": {"answer": "ok"}}
-    ]
+    examples = [{"id": "train", "inputs": {"task": "train"}, "outputs": {"answer": "ok"}}]
     for role in ("validation", "sealed"):
         for index in range(6):
             examples.append(
@@ -245,9 +243,7 @@ def test_compare_rejects_bad_commitments_membership_and_signature() -> None:
         compare_variant_predictions("bad", split, source, baseline, candidate)
 
     baseline = predictions(split)
-    baseline.predictions.append(
-        baseline.predictions[0].model_copy(update={"example_id": "train"})
-    )
+    baseline.predictions.append(baseline.predictions[0].model_copy(update={"example_id": "train"}))
     with pytest.raises(PromotionError, match="unexpected examples"):
         compare_variant_predictions("bad", split, source, baseline, candidate)
 
