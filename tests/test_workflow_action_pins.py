@@ -16,6 +16,7 @@ REVIEWED_ACTION_PINS = {
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "astral-sh/setup-uv": "c771a70e6277c0a99b617c7a806ffedaca235ff9",
+    "github/codeql-action": "6a90bf1f5426d0c367cad0b2000f3b721bab3122",
     "pypa/gh-action-pypi-publish": "dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
 }
 
@@ -83,4 +84,6 @@ def test_workflows_do_not_use_mutable_action_refs_in_raw_yaml() -> None:
         assert "uses: actions/download-artifact@v" not in text
         assert "uses: actions/attest@v" not in text
         assert "uses: astral-sh/setup-uv@v" not in text
+        assert "uses: github/codeql-action/init@v" not in text
+        assert "uses: github/codeql-action/analyze@v" not in text
         assert "uses: pypa/gh-action-pypi-publish@v" not in text
