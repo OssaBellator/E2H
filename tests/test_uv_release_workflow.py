@@ -3,14 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import tomllib
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT = ROOT / "pyproject.toml"
 WORKFLOWS = [
     ROOT / ".github" / "workflows" / "release-integrity.yml",
     ROOT / ".github" / "workflows" / "publish-pypi.yml",
 ]
 UV_VERSION = "0.12.2"
+HATCHLING_VERSION = "1.31.0"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -29,6 +32,14 @@ def _steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
         assert isinstance(value, list)
         steps.extend(step for step in value if isinstance(step, dict))
     return steps
+
+
+def test_project_pins_uv_and_release_build_backend_constraint() -> None:
+    with PYPROJECT.open("rb") as handle:
+        project = tomllib.load(handle)
+    uv = project["tool"]["uv"]
+    assert uv["required-version"] == f"=={UV_VERSION}"
+    assert uv["build-constraint-dependencies"] == [f"hatchling=={HATCHLING_VERSION}"]
 
 
 def test_release_builds_pin_uv_frontend_version() -> None:
