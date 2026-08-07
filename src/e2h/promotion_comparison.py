@@ -126,12 +126,12 @@ def compare_variant_predictions(
     neither_correct = 0
     for example_id in example_ids:
         expected = _canonical_json_bytes(examples[example_id].outputs)
-        baseline_correct = _canonical_json_bytes(
-            baseline_predictions[example_id].outputs
-        ) == expected
-        candidate_correct = _canonical_json_bytes(
-            candidate_predictions[example_id].outputs
-        ) == expected
+        baseline_correct = (
+            _canonical_json_bytes(baseline_predictions[example_id].outputs) == expected
+        )
+        candidate_correct = (
+            _canonical_json_bytes(candidate_predictions[example_id].outputs) == expected
+        )
         if baseline_correct and candidate_correct:
             both_correct += 1
         elif baseline_correct:
