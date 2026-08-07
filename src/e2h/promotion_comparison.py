@@ -11,11 +11,11 @@ from e2h.partitions import (
 )
 from e2h.promotion_models import (
     _ID_RE,
-    _canonical_json_bytes,
     PairedEvaluationReport,
     PromotionError,
     VariantPrediction,
     VariantPredictionDocument,
+    _canonical_json_bytes,
 )
 
 
