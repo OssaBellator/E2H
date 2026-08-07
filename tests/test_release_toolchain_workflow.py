@@ -38,6 +38,9 @@ def test_reusable_build_binds_manifest_to_reviewed_toolchain_context() -> None:
     assert '--source-commit "$GITHUB_SHA"' in command
     assert f"--runner-generation {EXPECTED_RUNNER}" in command
     assert '--source-date-epoch "$SOURCE_DATE_EPOCH"' in command
+    assert "e2h release verify-toolchain" in command
+    assert "release-manifest.json source-b" in command
+    assert '--expected-source-commit "$GITHUB_SHA"' in command
 
 
 def test_both_release_callers_use_same_local_build_with_expected_tag_policy() -> None:
@@ -62,8 +65,12 @@ def test_toolchain_evidence_stays_inside_checksum_bound_bundle() -> None:
     runs = "\n".join(str(step.get("run", "")) for step in steps)
     assert "release-manifest.json" in runs
     assert "release-inspection.json" in runs
+    assert "release-toolchain-verification.json" in runs
     assert "sha256sum dist/*.tar.gz dist/*.whl" in runs
-    assert "release-manifest.json release-verification.json release-inspection.json" in runs
+    assert "release-manifest.json" in runs
+    assert "release-verification.json" in runs
+    assert "release-toolchain-verification.json" in runs
+    assert "release-inspection.json" in runs
 
     upload = next(
         step for step in steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")
