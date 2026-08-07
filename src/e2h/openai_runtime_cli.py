@@ -22,7 +22,10 @@ from e2h.privacy import RedactionPolicy, RedactionPolicyError, load_redaction_po
 from e2h.trace import write_json_atomic, write_traces_jsonl
 from e2h.variants import VariantError, load_variant_document
 
-runtime_app = typer.Typer(no_args_is_help=True, help="Run live provider adapters with E2H provenance.")
+runtime_app = typer.Typer(
+    no_args_is_help=True,
+    help="Run live provider adapters with E2H provenance.",
+)
 console = Console()
 error_console = Console(stderr=True)
 
