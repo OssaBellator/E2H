@@ -52,3 +52,15 @@ jobs:
             --aliases on \
             --desc off \
             --progress-spinner off
+
+      - name: Audit exact isolated build dependency set
+        run: |
+          uv run --locked --no-dev --group audit pip-audit \
+            --requirement build-constraints.txt \
+            --no-deps \
+            --disable-pip \
+            --require-hashes \
+            --vulnerability-service pypi \
+            --aliases on \
+            --desc off \
+            --progress-spinner off
