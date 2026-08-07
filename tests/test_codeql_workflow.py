@@ -37,12 +37,12 @@ def test_codeql_permissions_are_scan_only() -> None:
     assert workflow["permissions"] == {
         "actions": "read",
         "contents": "read",
-        "packages": "read",
         "security-events": "write",
     }
     lowered = raw.lower()
     assert "id-token:" not in lowered
     assert "contents: write" not in lowered
+    assert "packages:" not in lowered
     assert "workflow_dispatch" not in lowered
     assert "pull_request_target" not in lowered
 
