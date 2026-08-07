@@ -18,6 +18,7 @@ from e2h.release import (
     seal_release_artifacts,
     verify_release_artifacts,
 )
+from e2h.release_bundle import ReleaseBundleError, verify_release_bundle
 from e2h.release_toolchain import (
     ReleaseToolchainError,
     collect_release_toolchain_evidence,
@@ -140,6 +141,47 @@ def verify_release(
         f"[green]Verified[/green] {verification.project} {verification.version}: "
         f"{verification.artifact_count} artifacts, "
         f"manifest_sha256={verification.manifest_sha256}"
+    )
+
+
+@release_app.command("verify-bundle")
+def verify_bundle(
+    directory: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
+    expected_source_commit: Annotated[
+        str | None,
+        typer.Option(
+            "--expected-source-commit",
+            help="Require the bundle's recorded source commit to match this full SHA.",
+        ),
+    ] = None,
+    json_stdout: Annotated[
+        bool,
+        typer.Option("--json", help="Write complete bundle verification proof as JSON."),
+    ] = False,
+) -> None:
+    """Verify checksums, distributions, source snapshot, SBOM, and evidence reports."""
+    try:
+        verification = verify_release_bundle(
+            directory,
+            expected_source_commit=expected_source_commit,
+        )
+    except ReleaseBundleError as exc:
+        error_console.print(f"[red]Release bundle verification failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    rendered = verification.model_dump_json(indent=2) + "\n"
+    if json_stdout:
+        typer.echo(rendered, nl=False)
+        return
+    commit_status = (
+        "expected source commit matched"
+        if verification.source_commit_verified
+        else "source commit recorded only"
+    )
+    console.print(
+        f"[green]Verified[/green] release bundle for "
+        f"{verification.project} {verification.version}: "
+        f"{verification.artifact_count} distributions, "
+        f"{verification.checksum_count} checksum-bound assets, {commit_status}"
     )
 
 

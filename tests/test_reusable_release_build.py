@@ -74,6 +74,7 @@ def test_tag_validation_is_conditional_but_build_proof_is_unconditional() -> Non
         "Seal and verify release artifacts",
         "Package deterministic source snapshot twice",
         "Stage checksum-bound release bundle",
+        "Verify staged release bundle",
         "Upload verified release bundle",
     }
     selected = [step for step in steps if step.get("name") in required_steps]
@@ -99,7 +100,7 @@ def test_reusable_release_build_never_reresolves_reviewed_project_graph() -> Non
         for line in run.splitlines()
         if line.strip().startswith("PYTHONPATH=src .venv/bin/python -m e2h ")
     ]
-    assert len(cli_lines) == 10
+    assert len(cli_lines) == 11
 
     sbom = next(
         step for step in steps if step.get("name") == "Export and canonicalize runtime SBOM twice"
@@ -142,6 +143,27 @@ def test_reusable_release_build_packages_verified_source_snapshot_twice() -> Non
     assert 'source["snapshot_id"] == source_tree' in run
     assert "mv source-a.e2hsnap e2h-source.e2hsnap" in run
     assert "rm source-b.e2hsnap" in run
+
+
+def test_reusable_release_build_self_verifies_finalized_bundle_before_upload() -> None:
+    workflow, _ = _workflow()
+    steps = workflow["jobs"]["build"]["steps"]
+    names = [step.get("name") for step in steps]
+    verify_index = names.index("Verify staged release bundle")
+    upload_index = names.index("Upload verified release bundle")
+    assert verify_index < upload_index
+
+    verify = steps[verify_index]
+    run = str(verify["run"])
+    assert "e2h release verify-bundle" in run
+    assert "release \\" in run
+    assert '--expected-source-commit "$GITHUB_SHA"' in run
+    assert "> release-bundle-verification.json" in run
+    assert 'proof["verified"] is True' in run
+    assert 'proof["source_commit_verified"] is True' in run
+    assert 'proof["artifact_count"] == 2' in run
+    assert 'proof["checksum_count"] == 9' in run
+    assert 'len(proof["source_tree_sha256"]) == 64' in run
 
 
 def test_reusable_bundle_name_is_caller_controlled_but_contents_are_fixed() -> None:
