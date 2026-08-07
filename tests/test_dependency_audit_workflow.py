@@ -69,7 +69,9 @@ def test_dependency_audit_uses_reviewed_bootstrap_actions() -> None:
 
 def test_dependency_audit_never_reresolves_target_graphs() -> None:
     _, raw = _workflow()
-    assert "uv sync --locked --no-default-groups --group audit" in raw
+    assert (
+        "uv sync --locked --no-default-groups --group audit --no-install-project" in raw
+    )
     assert "uv export \\" in raw
     assert "--format requirements.txt" in raw
     assert "--locked \\" in raw
