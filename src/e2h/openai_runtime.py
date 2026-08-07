@@ -206,11 +206,7 @@ def _context_items(context: ContextVariant) -> list[LiteralContextItem]:
             if selected:
                 kept[item.id] = selected
                 budget -= len(selected)
-        rendered = [
-            (index, item, kept[item.id])
-            for index, item, _ in rendered
-            if item.id in kept
-        ]
+        rendered = [(index, item, kept[item.id]) for index, item, _ in rendered if item.id in kept]
 
     if context.ordering == "priority":
         rendered.sort(key=lambda entry: (-entry[1].priority, entry[0]))
