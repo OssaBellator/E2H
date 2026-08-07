@@ -19,7 +19,7 @@ uv run mypy src
 uv run pytest
 ```
 
-The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, and release integrity. A pull request is not ready to merge while any relevant permanent suite is failing.
+The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, and CodeQL. A pull request is not ready to merge while any relevant permanent suite is failing.
 
 ## Contribution shape
 
@@ -49,7 +49,7 @@ Regenerate them using the corresponding E2H or `uv` command, then review the res
 
 ## Tests for security-sensitive changes
 
-Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, or release workflows require explicit adversarial tests.
+Changes to execution, path handling, archive processing, redaction, permissions, protocol boundaries, capture clients, sandbox configuration, release workflows, or code-scanning configuration require explicit adversarial tests.
 
 Useful rejection cases include:
 
@@ -58,7 +58,7 @@ Useful rejection cases include:
 - residual secrets/PII and unsafe review/report output;
 - stale or mismatched content digests and provenance identities;
 - credential-bearing jobs executing repository-controlled code;
-- mutable third-party action references in supply-chain workflows;
+- mutable third-party action references in supply-chain or security workflows;
 - missing/extra release artifacts and tampered handoffs.
 
 See [`SECURITY.md`](SECURITY.md) for vulnerability reporting. Do not put active exploit details or sensitive evidence into a public pull request merely to demonstrate a security problem.
@@ -86,7 +86,13 @@ External GitHub Actions remain pinned to full immutable commit SHAs in every per
 4. updates the reviewed-pin map in the policy test;
 5. runs all relevant permanent suites.
 
-`actions/setup-node` is temporarily excluded from automated action updates because E2H currently pins a reviewed post-v7.0.0 security-fix commit that is not a tagged release. Re-enable automated updates for it only after a reviewed tagged release contains that fix.
+`actions/setup-node` and `github/codeql-action` are temporarily excluded from automated action updates because E2H pins reviewed post-release security-fix commits that are not tagged releases. Re-enable automated updates for either action only after a reviewed tagged release contains the corresponding fix.
+
+## Code scanning
+
+CodeQL scans both Python and JavaScript/TypeScript on pull requests, pushes to `main`, and a weekly schedule. The workflow is intentionally analysis-only: it has read permissions plus `security-events: write`, receives no OIDC token, and contains no project-controlled `run:` steps.
+
+Changes to the CodeQL language matrix, permissions, triggers, or action SHA must update `tests/test_codeql_workflow.py` and the reviewed action-pin map. A successful CodeQL workflow means analysis completed and results were uploaded; it does not by itself mean that the repository has zero security alerts.
 
 ## Supply-chain workflow changes
 
