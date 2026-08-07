@@ -30,6 +30,7 @@ jobs:
       - name: Require byte-identical builds
         run: |
           uv run python - <<'PY'
+          import gzip
           import hashlib
           from pathlib import Path
 
@@ -43,7 +44,20 @@ jobs:
           first = digests("dist-a")
           second = digests("dist-b")
           assert len(first) == 2, first
-          assert first == second, (first, second)
+          if first != second:
+              sdist_a = next(Path("dist-a").glob("*.tar.gz"))
+              sdist_b = next(Path("dist-b").glob("*.tar.gz"))
+              raw_a = sdist_a.read_bytes()
+              raw_b = sdist_b.read_bytes()
+              payload_a = gzip.decompress(raw_a)
+              payload_b = gzip.decompress(raw_b)
+              diagnostics = {
+                  "sdist_a_gzip_mtime": int.from_bytes(raw_a[4:8], "little"),
+                  "sdist_b_gzip_mtime": int.from_bytes(raw_b[4:8], "little"),
+                  "sdist_a_tar_sha256": hashlib.sha256(payload_a).hexdigest(),
+                  "sdist_b_tar_sha256": hashlib.sha256(payload_b).hexdigest(),
+              }
+              raise AssertionError((first, second, diagnostics))
           PY
       - name: Seal first build and verify second build
         run: |
