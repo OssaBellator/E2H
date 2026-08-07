@@ -364,9 +364,7 @@ def build_agent_card(
                     "return replay evidence."
                 ),
                 tags=["verification", "replay", "capsule"],
-                examples=[
-                    '{"schema_version":"0.1","operation":"replay","capsule":"capsule.yaml"}'
-                ],
+                examples=['{"schema_version":"0.1","operation":"replay","capsule":"capsule.yaml"}'],
                 input_modes=["application/json"],
                 output_modes=["application/json"],
             )
