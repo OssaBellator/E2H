@@ -8,6 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
+BUILD_CONSTRAINTS = ROOT / "build-constraints.txt"
 WORKFLOWS = [
     ROOT / ".github" / "workflows" / "release-integrity.yml",
     ROOT / ".github" / "workflows" / "publish-pypi.yml",
@@ -34,12 +35,14 @@ def _steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
-def test_project_pins_uv_and_release_build_backend_constraint() -> None:
+def test_project_pins_uv_frontend_version() -> None:
     with PYPROJECT.open("rb") as handle:
         project = tomllib.load(handle)
-    uv = project["tool"]["uv"]
-    assert uv["required-version"] == f"=={UV_VERSION}"
-    assert uv["build-constraint-dependencies"] == [f"hatchling=={HATCHLING_VERSION}"]
+    assert project["tool"]["uv"]["required-version"] == f"=={UV_VERSION}"
+
+
+def test_release_build_backend_has_separate_exact_constraint() -> None:
+    assert BUILD_CONSTRAINTS.read_text(encoding="utf-8") == f"hatchling=={HATCHLING_VERSION}\n"
 
 
 def test_release_builds_pin_uv_frontend_version() -> None:
@@ -59,3 +62,10 @@ def test_release_builds_require_committed_uv_lock() -> None:
         syncs = [run for run in runs if run.strip().startswith("uv sync")]
         assert syncs == ["uv sync --locked --extra dev"], path
         assert "uv sync --extra dev" not in path.read_text(encoding="utf-8")
+
+
+def test_release_builds_apply_exact_backend_constraint() -> None:
+    expected = "uv build --build-constraint build-constraints.txt"
+    for path in WORKFLOWS:
+        runs = "\n".join(str(step.get("run", "")) for step in _steps(_load(path)))
+        assert runs.count(expected) == 2, path
