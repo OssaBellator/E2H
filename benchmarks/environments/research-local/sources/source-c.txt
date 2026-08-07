@@ -1,0 +1,3 @@
+Source ID: source-c
+
+Project Cedar published a maintenance update on 2026-04-11. The note describes documentation and packaging changes but does not state a general-availability date for either Project Alder or Project Birch.
