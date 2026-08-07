@@ -40,18 +40,20 @@ Pull requests carrying `skip-changelog` are omitted. The catch-all category ensu
 
 E2H does not scan the development virtual environment for its release SBOM. Instead, `uv export --format cyclonedx1.5` exports the project's locked runtime dependency graph directly from `uv.lock`.
 
-Both clean source copies used for reproducible-build verification export the SBOM independently. CI requires the two CycloneDX JSON documents to be byte-identical and verifies that common development-only tools such as pytest, mypy, pytest-cov, and Ruff are absent.
+CycloneDX exports may carry optional per-generation identity metadata. In the current `uv` exporter, each raw document receives a fresh `serialNumber` UUID and `metadata.timestamp`, so raw exporter bytes are not used as the reproducibility invariant.
 
-The verified SBOM is published as `e2h-sbom.cdx.json` alongside the wheel, sdist, release manifest, release verification proof, and checksum file.
+Both clean source copies used for reproducible-build verification export the locked SBOM independently. E2H then validates the CycloneDX 1.5 structure, removes only `serialNumber` and `metadata.timestamp`, preserves component, dependency, and tool metadata, and emits canonical JSON. CI requires those two canonical documents to be byte-identical and verifies that common development-only tools such as pytest, mypy, pytest-cov, and Ruff are absent.
+
+The canonical SBOM is published as `e2h-sbom.cdx.json` alongside the wheel, sdist, release manifest, release verification proof, and checksum file.
 
 ## SBOM attestation
 
 Before release staging, `actions/attest` creates two independent statements for the exact wheel and sdist:
 
 - SLSA build provenance;
-- a CycloneDX SBOM attestation whose predicate is `e2h-sbom.cdx.json`.
+- a CycloneDX SBOM attestation whose predicate is the canonical `e2h-sbom.cdx.json`.
 
-The SBOM file itself is also checksum-bound into the release bundle and becomes an immutable GitHub Release asset.
+The canonical SBOM file itself is also checksum-bound into the release bundle and becomes an immutable GitHub Release asset.
 
 Consumers can verify GitHub artifact attestations with `gh attestation verify`. SBOM attestations require the CycloneDX predicate type when querying them explicitly.
 
@@ -76,6 +78,7 @@ The resulting release has several complementary checks:
 
 - `uv.lock` binds the dependency resolution used to create the runtime SBOM;
 - clean double-build verification demonstrates deterministic wheel/sdist bytes;
+- E2H SBOM canonicalization removes generation-instance metadata while retaining the locked dependency graph;
 - the E2H release manifest binds artifact filenames, sizes, digests, and embedded package identity;
 - SLSA provenance binds distribution digests to the authenticated GitHub build workflow;
 - the CycloneDX SBOM attestation binds the dependency inventory to those distribution digests;
