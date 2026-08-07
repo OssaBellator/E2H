@@ -21,7 +21,7 @@ uv run mypy src
 uv run pytest
 ```
 
-The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, locked runtime dependency auditing, and CodeQL. A pull request is not ready to merge while any relevant permanent suite is failing.
+The repository additionally runs dedicated CI for provider ingestion, privacy-policy behavior, the experiment store, capture clients, release integrity, locked runtime/build dependency auditing, and CodeQL. A pull request is not ready to merge while any relevant permanent suite is failing.
 
 ## Contribution shape
 
@@ -42,12 +42,13 @@ Do not hand-edit generated identities merely to make a test pass.
 Examples include:
 
 - `uv.lock`;
+- `build-constraints.txt`;
 - benchmark environment locks;
 - snapshot/release digests;
 - partition/public dataset identities;
 - release manifests and canonical SBOM output.
 
-Regenerate them using the corresponding E2H or `uv` command, then review the resulting diff. A generated digest changing unexpectedly is evidence to investigate, not formatting noise.
+Regenerate them using the corresponding E2H or `uv` command, then review the resulting diff. A generated digest or build constraint changing unexpectedly is evidence to investigate, not formatting noise.
 
 ## Tests for security-sensitive changes
 
@@ -83,7 +84,20 @@ Python dependency pull requests must preserve the locked workflow. If a dependen
 
 The `uv` binary itself is separately pinned by the root `uv.toml`; changing that pin is a toolchain change, not an ordinary dependency refresh. Review the uv changelog for the target release and require the full permanent suite set to pass before merging a toolchain update.
 
-The PEP 517 build backend is another separately reviewed toolchain input. `uv build` creates an isolated build environment and resolves `[build-system].requires` independently of the project `uv.lock`, so E2H pins Hatchling to one exact version in `pyproject.toml`. Keep build isolation enabled; update the Hatchling pin deliberately after reviewing the target release, then require release-integrity CI to reproduce both wheel and sdist bytes before merging.
+The PEP 517 build backend is another separately reviewed toolchain input. `uv build` creates an isolated build environment and resolves `[build-system].requires` independently of the project `uv.lock`, so E2H pins Hatchling to one exact version in `pyproject.toml` and pins its resolved Python 3.13 build graph with hashes in `build-constraints.txt`. Both release build paths must use `--build-constraint build-constraints.txt --require-hashes`; keep build isolation enabled.
+
+When the Hatchling pin changes, regenerate the build constraints using the pinned repository uv and release Python versions:
+
+```bash
+printf 'hatchling==<reviewed-version>\n' \
+  | uv pip compile - \
+      --python-version 3.13.14 \
+      --generate-hashes \
+      --no-header \
+      --output-file build-constraints.txt
+```
+
+Review every version and hash in the generated file rather than accepting it mechanically. Then require the locked dependency audit and release-integrity CI to pass before merging.
 
 Release construction also uses one exact Python maintenance release in both release-integrity CI and the tag-only publication build. Keep that release interpreter pin synchronized across those workflows. The ordinary compatibility matrix intentionally stays on minor selectors (`3.11`, `3.12`, `3.13`) so supported Python lines continue exercising their newest available patch updates; do not globally replace those compatibility selectors with the release-construction patch pin.
 
@@ -99,13 +113,13 @@ External GitHub Actions remain pinned to full immutable commit SHAs in every per
 
 ## Locked dependency auditing
 
-`.github/workflows/dependency-audit.yml` audits the exact production dependency resolution used by E2H rather than asking a scanner to solve dependencies independently. The workflow exports `uv.lock` to a runtime-only hashed requirements document with `--locked --no-dev --no-emit-local`, then runs the separately locked `pip-audit` tool with `--no-deps --disable-pip --require-hashes`.
+`.github/workflows/dependency-audit.yml` audits both reviewed dependency surfaces without asking the scanner to solve dependencies independently. For runtime packages, the workflow exports `uv.lock` to a runtime-only hashed requirements document with `--locked --no-dev --no-emit-local`. For the isolated build toolchain, it audits the already generated `build-constraints.txt`. Both passes run the separately locked `pip-audit` tool with `--no-deps --disable-pip --require-hashes`.
 
 The audit tool belongs to the `audit` dependency group rather than project runtime or `dev` optional metadata. Changes to the scanner version must update `uv.lock` and `tests/test_dependency_audit_workflow.py`.
 
-Do not suppress dependency-audit failures with `continue-on-error`, `|| true`, broad vulnerability ignores, or automatic `--fix`. A vulnerability finding should be handled as a normal dependency change: review the advisory and exposure, update the dependency constraint/lock when an appropriate fixed version exists, and rerun release-integrity plus dependency-audit CI.
+Do not suppress dependency-audit failures with `continue-on-error`, `|| true`, broad vulnerability ignores, or automatic `--fix`. A vulnerability finding should be handled as a normal dependency/toolchain change: review the advisory and exposure, update the appropriate project or build constraint when an acceptable fixed version exists, regenerate the corresponding lock/constraints, and rerun release-integrity plus dependency-audit CI.
 
-A green dependency audit means the locked runtime packages had no vulnerabilities known to the configured advisory service at scan time. It does not prove that dependencies are free of undisclosed vulnerabilities, malicious behavior, or application-specific misuse.
+A green dependency audit means the reviewed runtime and isolated-build packages had no vulnerabilities known to the configured advisory service at scan time. It does not prove that dependencies are free of undisclosed vulnerabilities, malicious behavior, or application-specific misuse.
 
 ## Code scanning
 
@@ -117,7 +131,7 @@ Changes to the CodeQL language matrix, permissions, triggers, or action SHA must
 
 The tag-only publication workflow must not be exercised from a pull request by creating a real release tag. Normal CI validates release policy, reproducible builds, manifests, canonical SBOMs, and workflow action pins without publishing externally.
 
-Supply-chain workflow changes must preserve job-scoped permissions, immutable action pins, checksum-bound artifact handoffs, and the separation between repository-controlled build code and OIDC-bearing publication/attestation jobs.
+Supply-chain workflow changes must preserve job-scoped permissions, immutable action pins, checksum-bound artifact handoffs, hashed isolated build constraints, and the separation between repository-controlled build code and OIDC-bearing publication/attestation jobs.
 
 ## Documentation
 
