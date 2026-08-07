@@ -45,9 +45,7 @@ def rollback_triggered(
     if window_seconds < 1:
         raise PromotionError("rollback observed window must be positive")
     if window_seconds != trigger.window_seconds:
-        raise PromotionError(
-            "rollback observation window does not match the declared trigger"
-        )
+        raise PromotionError("rollback observation window does not match the declared trigger")
     if observed_samples < trigger.min_samples:
         return False
     return _ROLLBACK_OPERATORS[trigger.operator](observed_value, trigger.threshold)
