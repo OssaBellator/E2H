@@ -404,4 +404,4 @@ __all__ = [
     "verify_variant_document",
     "working_directory_failure",
 ]
-__version__ = "0.18.0"
+__version__ = "0.24.0"

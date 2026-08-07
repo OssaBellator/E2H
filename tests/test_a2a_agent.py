@@ -366,3 +366,8 @@ def test_response_limit_returns_bounded_error(tmp_path: Path) -> None:
         result = response.json()["result"]["message"]["parts"][0]["data"]
         assert result["ok"] is False
         assert "response limit" in result["error"]
+
+
+def test_public_url_rejects_embedded_credentials() -> None:
+    with pytest.raises(A2AAgentError, match="credentials"):
+        _normalized_public_url("https://user:secret@example.com")

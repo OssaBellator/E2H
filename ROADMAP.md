@@ -50,5 +50,5 @@
 ## Milestone 5 — Community benchmark
 
 - [x] Sanitized real-world failure patterns.
-- Long-horizon constraint retention and correction tasks.
-- Reproducible coding, research, and browser environments.
+- [x] Long-horizon constraint retention and correction tasks.
+- [x] Reproducible coding, research, and browser environments.

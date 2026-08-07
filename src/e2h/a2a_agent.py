@@ -139,6 +139,8 @@ def _normalized_public_url(value: str) -> str:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise A2AAgentError("public URL must use http or https and include a host")
+    if parsed.username is not None or parsed.password is not None:
+        raise A2AAgentError("public URL must not contain credentials")
     if parsed.query or parsed.fragment:
         raise A2AAgentError("public URL must not include a query or fragment")
     path = parsed.path.rstrip("/")

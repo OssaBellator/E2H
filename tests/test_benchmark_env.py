@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
+from e2h.benchmark_cli import benchmark_app
 from e2h.benchmark_env import (
     BenchmarkEnvironmentError,
     BenchmarkEnvironmentKind,
@@ -216,24 +217,13 @@ def test_coding_environment_checker_accepts_valid_candidate(tmp_path: Path) -> N
         destination=environment,
     )
     (environment / "src" / "task.py").write_text(
-        """def normalize_identifier(value: str) -> str:\n"
-        "    value = value.strip()\n"
-        "    pieces = []\n"
-        "    separator = False\n"
-        "    for char in value:\n"
-        "        if char in ' \\t\\n\\r\\v\\f_-':\n"
-        "            separator = True\n"
-        "            continue\n"
-        "        if separator and pieces:\n"
-        "            pieces.append('-')\n"
-        "        separator = False\n"
-        "        if 'A' <= char <= 'Z':\n"
-        "            char = chr(ord(char) + 32)\n"
-        "        pieces.append(char)\n"
-        "    result = ''.join(pieces).strip('-')\n"
+        "import re\n"
+        "\n"
+        "def normalize_identifier(value: str) -> str:\n"
+        "    result = re.sub(r'[\\s_-]+', '-', value.strip()).strip('-').lower()\n"
         "    if not result:\n"
         "        raise ValueError('normalized identifier is empty')\n"
-        "    return result\n""",
+        "    return result\n",
         encoding="utf-8",
     )
     result = _run_checker(environment)
@@ -330,3 +320,24 @@ def test_cli_seal_verify_materialize_and_schema(tmp_path: Path) -> None:
         schema = runner.invoke(environments_app, ["schema", "--kind", kind])
         assert schema.exit_code == 0
         assert json.loads(schema.stdout)["type"] == "object"
+
+
+def test_environment_loader_rejects_duplicate_mapping_keys(tmp_path: Path) -> None:
+    source = tmp_path / "duplicate.json"
+    source.write_text('{"schema_version":"0.1","id":"one","id":"two"}', encoding="utf-8")
+    with pytest.raises(BenchmarkEnvironmentError, match="duplicate object key"):
+        load_benchmark_environment_suite(source)
+
+
+def test_environment_lock_requires_suite_order() -> None:
+    suite = load_benchmark_environment_suite(SUITE_PATH)
+    lock = seal_benchmark_environment_suite(suite, root=ROOT)
+    reordered = lock.model_copy(update={"environments": list(reversed(lock.environments))})
+    with pytest.raises(BenchmarkEnvironmentError, match="in order"):
+        verify_benchmark_environment_suite(suite, reordered, root=ROOT)
+
+
+def test_public_benchmark_cli_exposes_environment_commands() -> None:
+    result = runner.invoke(benchmark_app, ["environments", "schema", "--kind", "suite"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["type"] == "object"

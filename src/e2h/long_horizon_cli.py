@@ -151,13 +151,15 @@ def write_long_horizon_schema(
     output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
 ) -> None:
     """Print or write one long-horizon artifact JSON Schema."""
-    models = {
-        LongHorizonSchemaKind.CORPUS: LongHorizonCorpus,
-        LongHorizonSchemaKind.PUBLIC: PublicLongHorizonCorpus,
-        LongHorizonSchemaKind.PREDICTIONS: LongHorizonPredictionDocument,
-        LongHorizonSchemaKind.REPORT: LongHorizonEvaluationReport,
-    }
-    rendered = json.dumps(models[kind].model_json_schema(), indent=2, sort_keys=True) + "\n"
+    if kind is LongHorizonSchemaKind.CORPUS:
+        schema = LongHorizonCorpus.model_json_schema()
+    elif kind is LongHorizonSchemaKind.PUBLIC:
+        schema = PublicLongHorizonCorpus.model_json_schema()
+    elif kind is LongHorizonSchemaKind.PREDICTIONS:
+        schema = LongHorizonPredictionDocument.model_json_schema()
+    else:
+        schema = LongHorizonEvaluationReport.model_json_schema()
+    rendered = json.dumps(schema, indent=2, sort_keys=True) + "\n"
     if output is None:
         typer.echo(rendered, nl=False)
         return

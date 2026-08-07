@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import stat
 from dataclasses import dataclass
@@ -12,8 +11,9 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from e2h.document import load_mapping_document
 
 _MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
 _MAX_ENVIRONMENT_BYTES = 64 * 1024 * 1024
@@ -75,33 +75,9 @@ def _resolve_relative(root: Path, relative: str, noun: str) -> Path:
 
 def _read_mapping(path: Path, *, noun: str) -> dict[str, Any]:
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise BenchmarkEnvironmentError(f"unable to read {noun}: {exc}") from exc
-    if len(raw) > _MAX_DOCUMENT_BYTES:
-        raise BenchmarkEnvironmentError(f"{noun} exceeds {_MAX_DOCUMENT_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BenchmarkEnvironmentError(f"{noun} must be UTF-8") from exc
-    try:
-        if path.suffix.lower() == ".json":
-            payload = json.loads(text, parse_constant=_reject_json_constant)
-        elif path.suffix.lower() in {".yaml", ".yml"}:
-            payload = yaml.safe_load(text)
-        else:
-            raise BenchmarkEnvironmentError(f"{noun} must use .json, .yaml, or .yml")
-    except BenchmarkEnvironmentError:
-        raise
-    except (json.JSONDecodeError, ValueError, yaml.YAMLError) as exc:
-        raise BenchmarkEnvironmentError(f"invalid {noun}: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise BenchmarkEnvironmentError(f"{noun} root must be an object")
-    return payload
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
+        return load_mapping_document(path, noun=noun, max_bytes=_MAX_DOCUMENT_BYTES)
+    except ValueError as exc:
+        raise BenchmarkEnvironmentError(str(exc)) from exc
 
 
 class BenchmarkEnvironmentKind(StrEnum):
@@ -272,9 +248,12 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
         if not path.is_file():
             raise BenchmarkEnvironmentError(f"environment contains non-regular file: {relative}")
         try:
-            size = path.stat().st_size
+            before = path.stat()
         except OSError as exc:
-            raise BenchmarkEnvironmentError(f"unable to stat environment file {relative}: {exc}") from exc
+            raise BenchmarkEnvironmentError(
+                f"unable to stat environment file {relative}: {exc}"
+            ) from exc
+        size = before.st_size
         total_bytes += size
         if len(files) >= _MAX_FILES:
             raise BenchmarkEnvironmentError(f"environment exceeds {_MAX_FILES} files")
@@ -288,8 +267,20 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                     digest.update(chunk)
         except OSError as exc:
-            raise BenchmarkEnvironmentError(f"unable to hash environment file {relative}: {exc}") from exc
-        mode = path.stat().st_mode
+            raise BenchmarkEnvironmentError(
+                f"unable to hash environment file {relative}: {exc}"
+            ) from exc
+        try:
+            after = path.stat()
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to restat environment file {relative}: {exc}"
+            ) from exc
+        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if identity_before != identity_after:
+            raise BenchmarkEnvironmentError(f"environment file changed while hashing: {relative}")
+        mode = after.st_mode
         files.append(
             BenchmarkEnvironmentFile(
                 path=relative,
@@ -349,8 +340,11 @@ def verify_benchmark_environment_suite(
         raise BenchmarkEnvironmentError("environment lock suite_sha256 does not match suite")
     locked = {entry.id: entry for entry in lock.environments}
     expected_ids = [environment.id for environment in suite.environments]
-    if set(locked) != set(expected_ids):
-        raise BenchmarkEnvironmentError("environment lock entries do not match suite environments")
+    locked_ids = [entry.id for entry in lock.environments]
+    if locked_ids != expected_ids:
+        raise BenchmarkEnvironmentError(
+            "environment lock entries must match suite environments in order"
+        )
 
     resolved_root = _safe_root(root)
     environment_sha256: dict[str, str] = {}
@@ -406,9 +400,11 @@ def materialize_benchmark_environment(
     if resolved_destination.exists():
         raise BenchmarkEnvironmentError("environment materialization destination already exists")
     try:
-        shutil.copytree(source, resolved_destination, symlinks=False, copy_function=shutil.copy2)
+        shutil.copytree(source, resolved_destination, symlinks=True, copy_function=shutil.copy2)
     except OSError as exc:
-        raise BenchmarkEnvironmentError(f"unable to materialize benchmark environment: {exc}") from exc
+        raise BenchmarkEnvironmentError(
+            f"unable to materialize benchmark environment: {exc}"
+        ) from exc
     locked = {entry.id: entry for entry in lock.environments}[environment_id]
     scanned = _scan_environment(resolved_destination)
     if scanned.source_sha256 != locked.source_sha256 or scanned.files != locked.files:

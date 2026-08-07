@@ -180,3 +180,10 @@ def test_capture_cli_schema_contains_client_and_observations() -> None:
     schema = json.loads(result.stdout)
     assert "client" in schema["properties"]
     assert "observations" in schema["properties"]
+
+
+def test_capture_loader_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    source = tmp_path / "duplicate.json"
+    source.write_text('{"schema_version":"0.1","schema_version":"0.1"}', encoding="utf-8")
+    with pytest.raises(CaptureError, match="duplicate object key"):
+        load_capture_document(source)
