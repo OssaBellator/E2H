@@ -26,8 +26,7 @@ def _write_toolchain_root(tmp_path: Path) -> Path:
     root.mkdir()
     (root / "uv.toml").write_text('required-version = "==0.12.2"\n', encoding="utf-8")
     (root / "pyproject.toml").write_text(
-        '[build-system]\nrequires = ["hatchling==1.31.0"]\n'
-        'build-backend = "hatchling.build"\n',
+        '[build-system]\nrequires = ["hatchling==1.31.0"]\nbuild-backend = "hatchling.build"\n',
         encoding="utf-8",
     )
     (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
