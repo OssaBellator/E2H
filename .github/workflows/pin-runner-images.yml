@@ -1,0 +1,29 @@
+name: Normalize runner image labels
+
+on:
+  push:
+    branches: [agent/pin-runner-image]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/pin-runner-image
+      - name: Replace moving Ubuntu alias
+        run: |
+          set -euo pipefail
+          grep -RIl --include='*.yml' --include='*.yaml' 'runs-on: ubuntu-latest' .github/workflows \
+            | xargs -r sed -i 's/runs-on: ubuntu-latest/runs-on: ubuntu-24.04/g'
+          if git diff --quiet -- .github/workflows; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows
+          git commit -m "Pin GitHub-hosted runners to Ubuntu 24.04"
+          git push origin HEAD:agent/pin-runner-image
