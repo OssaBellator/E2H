@@ -139,7 +139,7 @@ def test_reusable_release_build_requires_tag_main_reproducibility_and_runtime_sb
     assert "git archive HEAD | tar -x -C source-a" in build_runs
     assert "git archive HEAD | tar -x -C source-b" in build_runs
     assert "assert first == second" in build_runs
-    assert "uv export --locked --format cyclonedx1.5" in build_runs
+    assert "uv export --locked --no-default-groups --format cyclonedx1.5" in build_runs
     assert "e2h release canonicalize-sbom sbom-a.raw.json" in build_runs
     assert "e2h release canonicalize-sbom sbom-b.raw.json" in build_runs
     assert "assert sbom_a == sbom_b" in build_runs
