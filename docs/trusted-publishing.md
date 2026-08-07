@@ -46,9 +46,9 @@ The workflow rejects tags that do not match `vMAJOR.MINOR.PATCH`, versions that 
 
 The tag workflow does not publish the first build it happens to produce. It creates two independent clean source copies with `git archive`, builds each with the fixed release epoch, and requires the wheel and sdist to be byte-identical.
 
-Each clean source copy also exports a CycloneDX 1.5 runtime SBOM directly from the locked `uv` resolution. The two SBOM files must be byte-identical, identify E2H, and exclude common development-only tools before one is admitted to the release bundle.
+Each clean source copy also exports a CycloneDX 1.5 runtime SBOM directly from the locked `uv` resolution. The raw exporter documents contain optional per-generation identity metadata: a fresh `serialNumber` UUID and `metadata.timestamp`. E2H therefore validates each raw document, removes only those generation-instance fields, preserves component/dependency/tool metadata, and emits canonical JSON. The two canonical SBOMs must be byte-identical, identify E2H, and exclude common development-only tools before one is admitted to the release bundle.
 
-E2H's release-integrity commands seal build A and verify build B. The verified distributions, CycloneDX SBOM, manifest, verification proof, and a SHA-256 checksum file are uploaded together as one short-lived GitHub Actions artifact.
+E2H's release-integrity commands seal build A and verify build B. The verified distributions, canonical CycloneDX SBOM, manifest, verification proof, and a SHA-256 checksum file are uploaded together as one short-lived GitHub Actions artifact.
 
 Every downstream job downloads that bundle and verifies the checksum file before doing anything with it. OIDC-bearing jobs never check out the repository and never execute E2H or other project code.
 
@@ -66,7 +66,7 @@ See `docs/immutable-releases.md` for the complete release-asset and SBOM trust m
 
 ## Attestations
 
-The `attest` job creates both GitHub SLSA provenance and a CycloneDX SBOM attestation for the exact wheel and sdist using `actions/attest`.
+The `attest` job creates both GitHub SLSA provenance and a CycloneDX SBOM attestation for the exact wheel and sdist using `actions/attest`. The SBOM predicate is the canonical `e2h-sbom.cdx.json` produced from the locked dependency graph.
 
 The PyPA publishing action is also configured with PEP 740 attestations enabled. PyPI therefore receives publication attestations in addition to GitHub provenance and SBOM records.
 
@@ -74,7 +74,7 @@ These records answer related but different questions:
 
 - the E2H release manifest proves byte identity and embedded package identity;
 - reproducible-build verification proves two clean builds from the tagged source produced the same bytes;
-- the runtime SBOM describes the locked production dependency graph;
+- the canonical runtime SBOM describes the locked production dependency graph without generation-instance UUID/time fields;
 - GitHub provenance binds the released artifact digests to the authenticated GitHub workflow invocation;
 - the SBOM attestation binds the dependency inventory to those artifact digests;
 - the PyPI publish attestation binds the uploaded distributions to the configured Trusted Publisher;
