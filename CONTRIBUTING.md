@@ -133,6 +133,8 @@ The tag-only publication workflow must not be exercised from a pull request by c
 
 `.github/workflows/reusable-release-build.yml` is the single executable release-construction contract. `release-integrity.yml` calls it with tag validation disabled, while `publish-pypi.yml` calls the same local workflow with tag/version/main-ancestry validation enabled. Do not duplicate build, SBOM, sealing, or checksum logic back into either caller.
 
+Production release evidence binds both dedicated toolchain-file hashes and a deterministic identity of the complete archived source tree. The reusable build must seal from one clean `git archive HEAD` copy and verify against a second independent copy with `source_tree_verified: true`. Do not replace that full-tree check with a working-tree hash or a subset of source files. The tree identity uses the same bounded, symlink-rejecting canonical snapshot semantics documented in `docs/release-toolchain-evidence.md`.
+
 Supply-chain workflow changes must preserve job-scoped permissions, immutable action pins, checksum-bound artifact handoffs, hashed isolated build constraints, and the separation between the read-only repository-code build workflow and OIDC-bearing publication/attestation jobs. The reusable build must not request OIDC, write repository contents, consume secrets, or select a deployment environment.
 
 ## Documentation
