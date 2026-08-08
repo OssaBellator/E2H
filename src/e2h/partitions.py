@@ -207,14 +207,46 @@ class SealedEvaluationReport(StrictModel):
         return self
 
 
-def dspy_dataset_sha256(dataset: DSPyDatasetDocument) -> str:
-    """Return the private canonical identity of the complete labelled dataset."""
+def _revalidate_partition_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    if type(value) is not model_type:
+        raise ValueError(f"{noun} must be {model_type.__name__}, got {type(value).__name__}")
+    payload = value.model_dump(mode="python", warnings="none")
+    return model_type.model_validate(payload)
+
+
+def _validated_partition_digest_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    try:
+        return _revalidate_partition_model(value, model_type, noun=noun)
+    except ValueError as exc:
+        raise DatasetPartitionError(f"invalid {noun}: {exc}") from exc
+
+
+def _dspy_dataset_sha256_validated(dataset: DSPyDatasetDocument) -> str:
     payload = dataset.model_dump(mode="json")
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
-def dspy_dataset_public_sha256(dataset: DSPyDatasetDocument) -> str:
-    """Return a label- and metadata-free identity suitable for optimizer artifacts."""
+def dspy_dataset_sha256(dataset: DSPyDatasetDocument) -> str:
+    """Return the private canonical identity of the complete labelled dataset."""
+    dataset = _validated_partition_digest_model(
+        dataset,
+        DSPyDatasetDocument,
+        noun="DSPy dataset",
+    )
+    return _dspy_dataset_sha256_validated(dataset)
+
+
+def _dspy_dataset_public_sha256_validated(dataset: DSPyDatasetDocument) -> str:
     first = dataset.examples[0]
     payload = {
         "schema_version": dataset.schema_version,
@@ -232,14 +264,32 @@ def dspy_dataset_public_sha256(dataset: DSPyDatasetDocument) -> str:
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
-def dataset_partition_sha256(document: DatasetPartitionDocument) -> str:
-    """Return the private canonical identity of one complete partition manifest."""
+def dspy_dataset_public_sha256(dataset: DSPyDatasetDocument) -> str:
+    """Return a label- and metadata-free identity suitable for optimizer artifacts."""
+    dataset = _validated_partition_digest_model(
+        dataset,
+        DSPyDatasetDocument,
+        noun="DSPy dataset",
+    )
+    return _dspy_dataset_public_sha256_validated(dataset)
+
+
+def _dataset_partition_sha256_validated(document: DatasetPartitionDocument) -> str:
     payload = document.model_dump(mode="json")
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
-def dataset_partition_public_sha256(document: DatasetPartitionDocument) -> str:
-    """Return a public identity that excludes private dataset and metadata digests."""
+def dataset_partition_sha256(document: DatasetPartitionDocument) -> str:
+    """Return the private canonical identity of one complete partition manifest."""
+    document = _validated_partition_digest_model(
+        document,
+        DatasetPartitionDocument,
+        noun="dataset partition manifest",
+    )
+    return _dataset_partition_sha256_validated(document)
+
+
+def _dataset_partition_public_sha256_validated(document: DatasetPartitionDocument) -> str:
     payload = {
         "schema_version": document.schema_version,
         "id": document.id,
@@ -251,16 +301,14 @@ def dataset_partition_public_sha256(document: DatasetPartitionDocument) -> str:
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
-def _revalidate_partition_model(
-    value: BaseModel,
-    model_type: type[_InputModelT],
-    *,
-    noun: str,
-) -> _InputModelT:
-    if type(value) is not model_type:
-        raise ValueError(f"{noun} must be {model_type.__name__}, got {type(value).__name__}")
-    payload = value.model_dump(mode="python", warnings="none")
-    return model_type.model_validate(payload)
+def dataset_partition_public_sha256(document: DatasetPartitionDocument) -> str:
+    """Return a public identity that excludes private dataset and metadata digests."""
+    document = _validated_partition_digest_model(
+        document,
+        DatasetPartitionDocument,
+        noun="dataset partition manifest",
+    )
+    return _dataset_partition_public_sha256_validated(document)
 
 
 def _validated_inputs(
@@ -287,10 +335,10 @@ def _verify_validated_partitions(
     document: DatasetPartitionDocument,
     dataset: DSPyDatasetDocument,
 ) -> DatasetPartitionVerification:
-    digest = dspy_dataset_sha256(dataset)
+    digest = _dspy_dataset_sha256_validated(dataset)
     if document.dataset_sha256 != digest:
         raise DatasetPartitionError("partition dataset digest does not match the supplied dataset")
-    public_digest = dspy_dataset_public_sha256(dataset)
+    public_digest = _dspy_dataset_public_sha256_validated(dataset)
     if document.public_dataset_sha256 != public_digest:
         raise DatasetPartitionError(
             "partition public dataset digest does not match the supplied dataset"
@@ -317,8 +365,8 @@ def _verify_validated_partitions(
 
     return DatasetPartitionVerification(
         partition_id=document.id,
-        partition_sha256=dataset_partition_sha256(document),
-        public_partition_sha256=dataset_partition_public_sha256(document),
+        partition_sha256=_dataset_partition_sha256_validated(document),
+        public_partition_sha256=_dataset_partition_public_sha256_validated(document),
         dataset_id=dataset.id,
         dataset_sha256=digest,
         public_dataset_sha256=public_digest,
