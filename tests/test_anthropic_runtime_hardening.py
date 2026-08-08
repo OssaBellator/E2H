@@ -296,6 +296,7 @@ def _tool_variant(*, selection: str = "none") -> ToolVariant:
         "tools": [
             {
                 "id": "lookup",
+                "description": "Look up one value.",
                 "input_schema": {"type": "object"},
             }
         ],
