@@ -19,8 +19,63 @@ from e2h.ingest import EvidenceIngestError
 from e2h.loader import CapsuleLoadError, load_capsule
 from e2h.openai_runtime_cli import console, error_console, runtime_app
 from e2h.privacy import RedactionPolicy, RedactionPolicyError, load_redaction_policy
+from e2h.runtime_plan import RuntimePlanError, load_runtime_request_plan
 from e2h.trace import write_json_atomic, write_traces_jsonl
 from e2h.variants import VariantError, load_variant_document
+
+
+@runtime_app.command("plan")
+def plan_runtime_request_command(
+    provider: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Runtime provider: openai-responses, anthropic-messages, "
+                "or gemini-generate-content."
+            )
+        ),
+    ],
+    capsule: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    variant: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    invocation: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", dir_okay=False, help="Write the request plan as JSON."),
+    ] = None,
+    json_stdout: Annotated[
+        bool, typer.Option("--json", help="Write the request plan as JSON.")
+    ] = False,
+) -> None:
+    """Materialize one provider request without credentials or network I/O."""
+    try:
+        plan = load_runtime_request_plan(provider, capsule, variant, invocation)
+    except RuntimePlanError as exc:
+        error_console.print(f"[red]Unable to plan runtime request:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    rendered = plan.model_dump_json(indent=2) + "\n"
+    if output is not None:
+        write_json_atomic(output, rendered)
+
+    if json_stdout:
+        typer.echo(rendered, nl=False)
+        return
+
+    table = Table(title=f"E2H runtime plan: {plan.request.invocation_id}")
+    table.add_column("Provider")
+    table.add_column("Model")
+    table.add_column("Route")
+    table.add_column("Request digest")
+    table.add_row(
+        plan.provider.value,
+        plan.request.model,
+        plan.request.route_target_id,
+        plan.request.request_sha256,
+    )
+    console.print(table)
+    console.print(f"Request digest: {plan.request.request_sha256}")
+    if output is not None:
+        console.print(f"Wrote request plan to {output}")
 
 
 @runtime_app.command("anthropic-messages")
