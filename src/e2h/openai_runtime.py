@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from e2h.document import load_mapping_document
 from e2h.models import TaskCapsule
 from e2h.openai_responses import OpenAIResponseRecord, OpenAIResponsesDocument
+from e2h.runtime_user_agent import runtime_user_agent
 from e2h.variants import (
     ContextVariant,
     HarnessVariantDocument,
@@ -474,7 +475,7 @@ def run_openai_responses(
         {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "e2h-openai-runtime/0.18",
+            "User-Agent": runtime_user_agent("openai"),
         },
         invocation.timeout_seconds,
     )
