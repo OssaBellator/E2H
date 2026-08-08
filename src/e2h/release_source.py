@@ -74,7 +74,9 @@ def _list_source_directory(
         try:
             current = path.stat(follow_symlinks=False)
         except OSError as exc:
-            raise ReleaseSourceError(f"unable to restat source directory {relative}: {exc}") from exc
+            raise ReleaseSourceError(
+                f"unable to restat source directory {relative}: {exc}"
+            ) from exc
         _resolve_under_root(root, path, relative)
         if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
             current
