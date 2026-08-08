@@ -7,6 +7,16 @@ from e2h.anthropic_messages import (
     import_anthropic_messages_document,
     ingest_anthropic_messages_file,
 )
+from e2h.anthropic_runtime import (
+    AnthropicHTTPResult,
+    AnthropicMessagesInvocation,
+    AnthropicMessagesRequest,
+    AnthropicMessagesRuntimeResult,
+    AnthropicRuntimeError,
+    build_anthropic_messages_request,
+    load_anthropic_messages_invocation,
+    run_anthropic_messages,
+)
 from e2h.compiler import (
     CapsuleProposal,
     CompilerSpec,
@@ -39,6 +49,16 @@ from e2h.gemini_generate_content import (
     GeminiGenerateContentRecord,
     import_gemini_generate_content_document,
     ingest_gemini_generate_content_file,
+)
+from e2h.gemini_runtime import (
+    GeminiGenerateContentInvocation,
+    GeminiGenerateContentRequest,
+    GeminiGenerateContentRuntimeResult,
+    GeminiHTTPResult,
+    GeminiRuntimeError,
+    build_gemini_generate_content_request,
+    load_gemini_generate_content_invocation,
+    run_gemini_generate_content,
 )
 from e2h.genome import (
     GenomeApplication,
@@ -209,9 +229,14 @@ from e2h.variants import (
 )
 
 __all__ = [
+    "AnthropicHTTPResult",
     "AnthropicInputMessage",
     "AnthropicMessageRecord",
     "AnthropicMessagesDocument",
+    "AnthropicMessagesInvocation",
+    "AnthropicMessagesRequest",
+    "AnthropicMessagesRuntimeResult",
+    "AnthropicRuntimeError",
     "ArtifactKind",
     "ArtifactOracle",
     "CapsuleProposal",
@@ -237,7 +262,12 @@ __all__ = [
     "FileOracle",
     "GeminiContentRecord",
     "GeminiGenerateContentDocument",
+    "GeminiGenerateContentInvocation",
     "GeminiGenerateContentRecord",
+    "GeminiGenerateContentRequest",
+    "GeminiGenerateContentRuntimeResult",
+    "GeminiHTTPResult",
+    "GeminiRuntimeError",
     "GenomeApplication",
     "GenomeError",
     "HarnessGenome",
@@ -317,6 +347,8 @@ __all__ = [
     "apply_genome",
     "apply_optimizer_candidate",
     "apply_redaction_policy",
+    "build_anthropic_messages_request",
+    "build_gemini_generate_content_request",
     "build_openai_responses_request",
     "capsule_sha256",
     "compare_variant_predictions",
@@ -348,8 +380,10 @@ __all__ = [
     "ingest_transcript_file",
     "initialize_store",
     "launch_failure",
+    "load_anthropic_messages_invocation",
     "load_dataset_partitions",
     "load_dspy_dataset",
+    "load_gemini_generate_content_invocation",
     "load_genome",
     "load_genome_application",
     "load_openai_responses_invocation",
@@ -383,8 +417,10 @@ __all__ = [
     "review_proposal",
     "rollback_plan_sha256",
     "rollback_triggered",
+    "run_anthropic_messages",
     "run_capsule",
     "run_experiment",
+    "run_gemini_generate_content",
     "run_openai_responses",
     "sandbox_failure",
     "skipped_failure",
@@ -404,4 +440,4 @@ __all__ = [
     "verify_variant_document",
     "working_directory_failure",
 ]
-__version__ = "0.24.0"
+__version__ = "0.27.0"
