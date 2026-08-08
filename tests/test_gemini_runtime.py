@@ -315,6 +315,7 @@ def test_runtime_rejects_workflow_references_and_unfaithful_placement() -> None:
             "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
         }
     )
+    workflow = HarnessVariantDocument.model_validate(workflow.model_dump(mode="json"))
     with pytest.raises(GeminiRuntimeError, match="does not execute workflow DAGs"):
         build_gemini_generate_content_request(workflow, capsule(), invocation())
 
@@ -331,6 +332,7 @@ def test_runtime_rejects_workflow_references_and_unfaithful_placement() -> None:
             }
         )
     ]
+    referenced = HarnessVariantDocument.model_validate(referenced.model_dump(mode="json"))
     with pytest.raises(GeminiRuntimeError, match="does not dereference"):
         build_gemini_generate_content_request(referenced, capsule(), invocation())
 
