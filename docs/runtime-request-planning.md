@@ -14,10 +14,12 @@ This is useful when reviewing a harness variant before execution, comparing prov
 
 The planner delegates directly to the existing provider request builders. It does not maintain a second request format or recompute a different provider digest.
 
+The planner's public types and functions are exported from both `e2h` and `e2h.runtime_plan`. Package-root imports are convenient for callers that already use E2H's public runtime APIs, while the submodule remains available for explicit namespacing.
+
 ## Planning loaded objects
 
 ```python
-from e2h.runtime_plan import RuntimeProvider, plan_runtime_request
+from e2h import RuntimeProvider, plan_runtime_request
 
 plan = plan_runtime_request(
     RuntimeProvider.OPENAI_RESPONSES,
@@ -44,7 +46,7 @@ The `RuntimeRequestPlan.request_sha256` property is only a convenience view of t
 ```python
 from pathlib import Path
 
-from e2h.runtime_plan import RuntimeProvider, load_runtime_request_plan
+from e2h import RuntimeProvider, load_runtime_request_plan
 
 plan = load_runtime_request_plan(
     RuntimeProvider.ANTHROPIC_MESSAGES,
