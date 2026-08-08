@@ -11,6 +11,7 @@ import stat
 import tempfile
 import zipfile
 from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -214,14 +215,72 @@ def _resolve_selected(root: Path, value: str) -> Path:
     pure = PurePosixPath(value)
     if pure.is_absolute() or ".." in pure.parts:
         raise SnapshotError(f"include path must be a safe relative path: {value}")
-    candidate = (root / Path(*pure.parts)).resolve()
+    candidate = root / Path(*pure.parts)
     try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise SnapshotError(f"include path escapes snapshot root: {value}") from exc
-    if not candidate.exists() and not candidate.is_symlink():
-        raise SnapshotError(f"include path does not exist: {value}")
+        candidate.stat(follow_symlinks=False)
+    except FileNotFoundError as exc:
+        raise SnapshotError(f"include path does not exist: {value}") from exc
+    except OSError as exc:
+        raise SnapshotError(f"unable to stat include path {value}: {exc}") from exc
     return candidate
+
+
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _resolve_under_root(root: Path, path: Path, relative: str) -> Path:
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise SnapshotError(f"unable to resolve {relative}: {exc}") from exc
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise SnapshotError(f"path escapes snapshot root: {relative}") from exc
+    return resolved
+
+
+def _list_directory(
+    root: Path,
+    path: Path,
+    relative: str,
+    expected: os.stat_result,
+) -> list[Path]:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open directory {relative}: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise SnapshotError(f"snapshot entry is no longer a directory: {relative}")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise SnapshotError(f"directory changed while opening: {relative}")
+        try:
+            names = (
+                sorted(os.listdir(descriptor))
+                if os.listdir in os.supports_fd
+                else sorted(os.listdir(path))
+            )
+        except OSError as exc:
+            raise SnapshotError(f"unable to list {relative}: {exc}") from exc
+        after = os.fstat(descriptor)
+        try:
+            current = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to restat directory {relative}: {exc}") from exc
+        _resolve_under_root(root, path, relative)
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+        ):
+            raise SnapshotError(f"directory changed while listing: {relative}")
+        return [path / name for name in names]
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
 
 
 def _iter_selected(
@@ -231,35 +290,39 @@ def _iter_selected(
     ignored_paths: set[Path],
 ) -> Iterable[tuple[str, Path]]:
     selected: dict[str, Path] = {}
+    ignored_relatives = {
+        path.relative_to(root).as_posix() for path in ignored_paths if path.is_relative_to(root)
+    }
     for include in includes:
         candidate = _resolve_selected(root, include)
         if candidate == root:
-            roots = sorted(root.iterdir(), key=lambda item: item.name)
+            try:
+                root_info = root.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise SnapshotError(f"unable to stat snapshot root: {exc}") from exc
+            if not stat.S_ISDIR(root_info.st_mode):
+                raise SnapshotError("snapshot root changed during traversal")
+            roots = _list_directory(root, root, ".", root_info)
         else:
             roots = [candidate]
         stack = list(reversed(roots))
         while stack:
             current = stack.pop()
-            resolved = current.resolve()
-            if resolved in ignored_paths:
-                continue
             relative = _relative(root, current)
-            if _matches_exclude(relative, excludes):
+            if relative in ignored_relatives or _matches_exclude(relative, excludes):
                 continue
-            if current.is_symlink():
-                raise SnapshotError(f"symbolic links are not supported: {relative}")
+            _resolve_under_root(root, current, relative)
             try:
-                mode = current.stat(follow_symlinks=False).st_mode
+                entry = current.stat(follow_symlinks=False)
             except OSError as exc:
                 raise SnapshotError(f"unable to stat {relative}: {exc}") from exc
-            if stat.S_ISDIR(mode):
+            if stat.S_ISLNK(entry.st_mode):
+                raise SnapshotError(f"symbolic links are not supported: {relative}")
+            if stat.S_ISDIR(entry.st_mode):
                 selected[relative] = current
-                try:
-                    children = sorted(current.iterdir(), key=lambda item: item.name)
-                except OSError as exc:
-                    raise SnapshotError(f"unable to list {relative}: {exc}") from exc
+                children = _list_directory(root, current, relative, entry)
                 stack.extend(reversed(children))
-            elif stat.S_ISREG(mode):
+            elif stat.S_ISREG(entry.st_mode):
                 selected[relative] = current
             else:
                 raise SnapshotError(f"unsupported filesystem entry: {relative}")
@@ -267,20 +330,49 @@ def _iter_selected(
         yield relative, selected[relative]
 
 
-def _read_file(path: Path, relative: str, limits: SnapshotLimits) -> bytes:
-    try:
-        size = path.stat(follow_symlinks=False).st_size
-    except OSError as exc:
-        raise SnapshotError(f"unable to stat {relative}: {exc}") from exc
-    if size > limits.max_file_bytes:
+def _read_file(
+    root: Path,
+    path: Path,
+    relative: str,
+    limits: SnapshotLimits,
+    expected: os.stat_result,
+) -> bytes:
+    _resolve_under_root(root, path, relative)
+    if expected.st_size > limits.max_file_bytes:
         raise SnapshotError(f"file exceeds max_file_bytes: {relative}")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        data = path.read_bytes()
+        descriptor = os.open(path, flags)
     except OSError as exc:
-        raise SnapshotError(f"unable to read {relative}: {exc}") from exc
-    if len(data) != size:
-        raise SnapshotError(f"file changed while snapshotting: {relative}")
-    return data
+        raise SnapshotError(f"unable to open {relative}: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SnapshotError(f"snapshot entry is no longer a regular file: {relative}")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise SnapshotError(f"file changed while opening: {relative}")
+        data = bytearray()
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while chunk := handle.read(1024 * 1024):
+                data.extend(chunk)
+                if len(data) > limits.max_file_bytes:
+                    raise SnapshotError(f"file exceeds max_file_bytes: {relative}")
+        after = os.fstat(descriptor)
+        try:
+            current = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to restat {relative}: {exc}") from exc
+        _resolve_under_root(root, path, relative)
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(data) != opened.st_size
+        ):
+            raise SnapshotError(f"file changed while snapshotting: {relative}")
+        return bytes(data)
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
 
 
 def _zip_info(name: str, *, executable: bool = False) -> zipfile.ZipInfo:
@@ -315,16 +407,24 @@ def create_snapshot(
     for relative, path in _iter_selected(root, includes, tuple(excludes), ignored):
         if len(entries) >= limits.max_entries:
             raise SnapshotError("snapshot exceeds max_entries")
-        mode = path.stat(follow_symlinks=False).st_mode
-        if stat.S_ISDIR(mode):
+        _resolve_under_root(root, path, relative)
+        try:
+            entry = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to stat {relative}: {exc}") from exc
+        if stat.S_ISLNK(entry.st_mode):
+            raise SnapshotError(f"symbolic links are not supported: {relative}")
+        if stat.S_ISDIR(entry.st_mode):
             entries.append(SnapshotEntry(path=relative, kind="directory"))
             continue
-        data = _read_file(path, relative, limits)
+        if not stat.S_ISREG(entry.st_mode):
+            raise SnapshotError(f"unsupported filesystem entry: {relative}")
+        data = _read_file(root, path, relative, limits, entry)
         total_bytes += len(data)
         if total_bytes > limits.max_total_bytes:
             raise SnapshotError("snapshot exceeds max_total_bytes")
         digest = hashlib.sha256(data).hexdigest()
-        executable = bool(mode & stat.S_IXUSR)
+        executable = bool(entry.st_mode & stat.S_IXUSR)
         entries.append(
             SnapshotEntry(
                 path=relative,
