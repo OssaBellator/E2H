@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 
 import e2h
-from e2h import anthropic_runtime, gemini_runtime, runtime_plan
+from e2h import anthropic_runtime, gemini_runtime, openai_runtime, runtime_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,6 +19,18 @@ ANTHROPIC_RUNTIME_EXPORTS = {
     "load_anthropic_messages_invocation": anthropic_runtime.load_anthropic_messages_invocation,
     "run_anthropic_messages": anthropic_runtime.run_anthropic_messages,
 }
+
+OPENAI_RUNTIME_EXPORTS = {
+    "OpenAIHTTPResult": openai_runtime.OpenAIHTTPResult,
+    "OpenAIResponsesInvocation": openai_runtime.OpenAIResponsesInvocation,
+    "OpenAIResponsesRequest": openai_runtime.OpenAIResponsesRequest,
+    "OpenAIResponsesRuntimeResult": openai_runtime.OpenAIResponsesRuntimeResult,
+    "OpenAIRuntimeError": openai_runtime.OpenAIRuntimeError,
+    "build_openai_responses_request": openai_runtime.build_openai_responses_request,
+    "load_openai_responses_invocation": openai_runtime.load_openai_responses_invocation,
+    "run_openai_responses": openai_runtime.run_openai_responses,
+}
+
 
 GEMINI_RUNTIME_EXPORTS = {
     "GeminiGenerateContentInvocation": gemini_runtime.GeminiGenerateContentInvocation,
@@ -46,6 +58,7 @@ RUNTIME_PLAN_EXPORTS = {
 
 def test_runtime_exports_are_available_from_package_root() -> None:
     expected = {
+        **OPENAI_RUNTIME_EXPORTS,
         **ANTHROPIC_RUNTIME_EXPORTS,
         **GEMINI_RUNTIME_EXPORTS,
         **RUNTIME_PLAN_EXPORTS,
@@ -53,6 +66,12 @@ def test_runtime_exports_are_available_from_package_root() -> None:
     for name, value in expected.items():
         assert name in e2h.__all__
         assert getattr(e2h, name) is value
+
+
+def test_package_all_exports_are_unique_and_resolvable() -> None:
+    assert len(e2h.__all__) == len(set(e2h.__all__))
+    for name in e2h.__all__:
+        assert hasattr(e2h, name), name
 
 
 def test_package_version_matches_project_metadata() -> None:
