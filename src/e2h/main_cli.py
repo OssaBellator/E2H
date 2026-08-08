@@ -3,8 +3,8 @@
 from e2h.benchmark_cli import benchmark_app
 from e2h.capture_cli import capture_app
 from e2h.cli import app as app
-from e2h.genome_cli import genome_app
 from e2h.gemini_runtime_cli import runtime_app
+from e2h.genome_cli import genome_app
 from e2h.optimizer_cli import optimizer_app
 from e2h.partition_cli import partition_app
 from e2h.promotion_cli import promotion_app
