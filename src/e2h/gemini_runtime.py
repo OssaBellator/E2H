@@ -457,7 +457,10 @@ def _tool_policy_violations(
     if unknown:
         violations.append(f"provider called undeclared tools: {', '.join(unknown)}")
     if len(calls) > tools.max_calls:
-        violations.append(f"provider returned {len(calls)} function calls; max_calls is {tools.max_calls}")
+        count = len(calls)
+        violations.append(
+            f"provider returned {count} function calls; max_calls is {tools.max_calls}"
+        )
     if not tools.parallel_calls and len(calls) > 1:
         violations.append("provider returned parallel function calls despite parallel_calls=false")
     if tools.selection == "none" and calls:
