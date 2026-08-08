@@ -226,6 +226,22 @@ def test_comparison_rejects_model_subclasses(kind: str) -> None:
         compare_variant_predictions("boundary", *cast(tuple[Any, Any, Any, Any], tuple(args)))
 
 
+def test_comparison_rejects_canonical_invalid_prediction_outputs() -> None:
+    source = dataset()
+    split = manifest(source)
+    baseline = predictions(split)
+    baseline.predictions[0].outputs = {"answer": {"not-json"}}
+
+    with pytest.raises(PromotionError, match="invalid promotion comparison inputs"):
+        compare_variant_predictions(
+            "boundary",
+            split,
+            source,
+            baseline,
+            predictions(split, candidate=True),
+        )
+
+
 def test_evaluation_rejects_model_subclasses_and_plain_wrong_types() -> None:
     with pytest.raises(PromotionError, match="promotion policy must be PromotionGatePolicy"):
         evaluate_promotion(_as_subclass(policy(), _PolicySubclass), proposal())
@@ -233,6 +249,14 @@ def test_evaluation_rejects_model_subclasses_and_plain_wrong_types() -> None:
         evaluate_promotion(policy(), _as_subclass(proposal(), _ProposalSubclass))
     with pytest.raises(PromotionError, match="promotion policy must be PromotionGatePolicy"):
         evaluate_promotion(cast(Any, object()), proposal())
+
+
+def test_evaluation_rejects_canonical_invalid_policy_metadata() -> None:
+    gate = policy()
+    gate.metadata = {"not_json": {"value"}}
+
+    with pytest.raises(PromotionError, match="invalid promotion inputs"):
+        evaluate_promotion(gate, proposal())
 
 
 def test_evaluation_normalizes_warning_prone_post_validation_assignment() -> None:
