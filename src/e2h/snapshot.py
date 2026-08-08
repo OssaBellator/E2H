@@ -508,8 +508,20 @@ def create_snapshot(
     root = root.resolve()
     if not root.is_dir():
         raise SnapshotError(f"snapshot root is not a directory: {root}")
-    output = output.resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output = output.parent.resolve(strict=True) / output.name
+        try:
+            output_info = output.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISLNK(output_info.st_mode) or not stat.S_ISREG(output_info.st_mode):
+                raise SnapshotError("snapshot output must be a regular file")
+    except SnapshotError:
+        raise
+    except OSError as exc:
+        raise SnapshotError(f"unable to prepare snapshot output: {exc}") from exc
     ignored = {output}
     entries: list[SnapshotEntry] = []
     blobs: dict[str, bytes] = {}
