@@ -653,7 +653,7 @@ def restore_snapshot(
         except OSError as exc:
             raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
     destination.parent.mkdir(parents=True, exist_ok=True)
-    staging: Path | None = Path(
+    staging = Path(
         tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
     ).resolve()
     try:
@@ -689,7 +689,7 @@ def restore_snapshot(
     except (OSError, zipfile.BadZipFile) as exc:
         raise SnapshotError(f"unable to restore snapshot: {exc}") from exc
     finally:
-        if staging is not None and staging.exists():
+        if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
     return manifest
 
