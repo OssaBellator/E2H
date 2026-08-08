@@ -212,6 +212,10 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
 
 
+def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_mode)
+
+
 def _validated_snapshot_core(core: SnapshotCore) -> SnapshotCore:
     if type(core) is not SnapshotCore:
         raise SnapshotError(
@@ -276,9 +280,9 @@ def _snapshot_write_parent_must_be_stable(
         current = path.parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise SnapshotError(f"unable to restat {noun} parent: {exc}") from exc
-    if _stat_identity(after) != _stat_identity(opened) or _stat_identity(current) != _stat_identity(
-        opened
-    ):
+    if _directory_identity(after) != _directory_identity(opened) or _directory_identity(
+        current
+    ) != _directory_identity(opened):
         raise SnapshotError(f"{noun} parent changed while writing")
 
 
