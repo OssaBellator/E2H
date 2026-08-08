@@ -9,7 +9,7 @@ import stat
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -28,6 +28,27 @@ class BenchmarkEnvironmentError(ValueError):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
+
+
+def _revalidate_benchmark_environment_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    """Return a detached benchmark-environment model after enforcing its concrete type."""
+    if type(value) is not model_type:
+        raise BenchmarkEnvironmentError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise BenchmarkEnvironmentError(f"invalid {noun}: {exc}") from exc
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -298,12 +319,36 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
     )
 
 
+def _validated_benchmark_environment_suite(
+    suite: BenchmarkEnvironmentSuite,
+) -> BenchmarkEnvironmentSuite:
+    return _revalidate_benchmark_environment_model(
+        suite,
+        BenchmarkEnvironmentSuite,
+        noun="benchmark environment suite",
+    )
+
+
+def _validated_benchmark_environment_inputs(
+    suite: BenchmarkEnvironmentSuite,
+    lock: BenchmarkEnvironmentSuiteLock,
+) -> tuple[BenchmarkEnvironmentSuite, BenchmarkEnvironmentSuiteLock]:
+    validated_suite = _validated_benchmark_environment_suite(suite)
+    validated_lock = _revalidate_benchmark_environment_model(
+        lock,
+        BenchmarkEnvironmentSuiteLock,
+        noun="benchmark environment lock",
+    )
+    return validated_suite, validated_lock
+
+
 def seal_benchmark_environment_suite(
     suite: BenchmarkEnvironmentSuite,
     *,
     root: Path,
 ) -> BenchmarkEnvironmentSuiteLock:
     """Generate a deterministic lock from all source trees under the declared root."""
+    suite = _validated_benchmark_environment_suite(suite)
     resolved_root = _safe_root(root)
     entries: list[BenchmarkEnvironmentLockEntry] = []
     for environment in suite.environments:
@@ -326,13 +371,12 @@ def seal_benchmark_environment_suite(
     )
 
 
-def verify_benchmark_environment_suite(
+def _verify_benchmark_environment_suite_validated(
     suite: BenchmarkEnvironmentSuite,
     lock: BenchmarkEnvironmentSuiteLock,
     *,
     root: Path,
 ) -> BenchmarkEnvironmentVerification:
-    """Verify that the suite spec and every source tree exactly match the lock."""
     if lock.suite_id != suite.id:
         raise BenchmarkEnvironmentError("environment lock suite_id does not match suite")
     expected_suite_sha256 = benchmark_environment_suite_sha256(suite)
@@ -380,6 +424,17 @@ def verify_benchmark_environment_suite(
     )
 
 
+def verify_benchmark_environment_suite(
+    suite: BenchmarkEnvironmentSuite,
+    lock: BenchmarkEnvironmentSuiteLock,
+    *,
+    root: Path,
+) -> BenchmarkEnvironmentVerification:
+    """Verify that the suite spec and every source tree exactly match the lock."""
+    suite, lock = _validated_benchmark_environment_inputs(suite, lock)
+    return _verify_benchmark_environment_suite_validated(suite, lock, root=root)
+
+
 def materialize_benchmark_environment(
     suite: BenchmarkEnvironmentSuite,
     lock: BenchmarkEnvironmentSuiteLock,
@@ -389,7 +444,8 @@ def materialize_benchmark_environment(
     destination: Path,
 ) -> BenchmarkEnvironmentVerification:
     """Copy one verified environment tree to a new empty destination and re-verify bytes."""
-    verification = verify_benchmark_environment_suite(suite, lock, root=root)
+    suite, lock = _validated_benchmark_environment_inputs(suite, lock)
+    verification = _verify_benchmark_environment_suite_validated(suite, lock, root=root)
     by_id = {environment.id: environment for environment in suite.environments}
     environment = by_id.get(environment_id)
     if environment is None:
