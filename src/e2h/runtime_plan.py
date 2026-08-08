@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -109,7 +108,8 @@ def _invocation_for_provider(
     }
     if not isinstance(invocation, expected[provider]):
         raise RuntimePlanError(
-            f"invocation type {type(invocation).__name__} does not match provider {provider.value!r}"
+            f"invocation type {type(invocation).__name__} does not match provider "
+            f"{provider.value!r}"
         )
     return invocation
 
