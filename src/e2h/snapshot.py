@@ -643,7 +643,19 @@ def restore_snapshot(
 ) -> SnapshotManifest:
     """Verify and atomically restore a snapshot into a new or empty directory."""
     limits = revalidate_snapshot_limits(limits)
-    staging: Path | None = None
+    destination = destination.resolve()
+    if destination.exists() and not destination.is_dir():
+        raise SnapshotError("restore destination exists and is not a directory")
+    if destination.exists():
+        try:
+            if any(destination.iterdir()):
+                raise SnapshotError("restore destination must be empty")
+        except OSError as exc:
+            raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging: Path | None = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
+    ).resolve()
     try:
         with _open_snapshot_archive_file(archive_path) as handle:
             try:
@@ -652,21 +664,6 @@ def restore_snapshot(
                 raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
             with archive:
                 manifest = _verify_snapshot_archive(archive, limits)
-                destination = destination.resolve()
-                if destination.exists() and not destination.is_dir():
-                    raise SnapshotError("restore destination exists and is not a directory")
-                if destination.exists():
-                    try:
-                        if any(destination.iterdir()):
-                            raise SnapshotError("restore destination must be empty")
-                    except OSError as exc:
-                        raise SnapshotError(
-                            f"unable to inspect restore destination: {exc}"
-                        ) from exc
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                staging = Path(
-                    tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
-                ).resolve()
                 for entry in manifest.core.entries:
                     target = (staging / Path(*PurePosixPath(entry.path).parts)).resolve()
                     try:
@@ -684,7 +681,6 @@ def restore_snapshot(
                     data = _read_member(archive, info, limits.max_file_bytes)
                     target.write_bytes(data)
                     target.chmod(0o755 if entry.executable else 0o644)
-        assert staging is not None
         if destination.exists():
             destination.rmdir()
         os.replace(staging, destination)
