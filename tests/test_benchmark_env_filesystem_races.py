@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import e2h.benchmark_env as benchmark_env
 from e2h.benchmark_env import (
     BenchmarkEnvironmentError,
     BenchmarkEnvironmentKind,
@@ -171,3 +172,64 @@ def test_materialize_rejects_dangling_destination_symlink(tmp_path: Path) -> Non
 
     assert destination.is_symlink()
     assert not outside.exists()
+
+
+@pytest.mark.skipif(
+    not benchmark_env._MATERIALIZATION_DIR_FD_SUPPORTED,
+    reason="requires descriptor-relative benchmark materialization support",
+)
+def test_materialize_rejects_destination_parent_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    source = root / "coding"
+    source.mkdir(parents=True)
+    (source / "check.py").write_text("print('inside')\n", encoding="utf-8")
+    suite = _suite()
+    lock = seal_benchmark_environment_suite(suite, root=root)
+
+    destination_parent = tmp_path / "destination-parent"
+    destination_parent.mkdir()
+    destination = destination_parent / "materialized"
+    moved = tmp_path / "original-destination-parent"
+    outside = tmp_path / "outside-destination-parent"
+    outside.mkdir()
+
+    original_mkdir = os.mkdir
+    swapped = False
+
+    def swapping_mkdir(
+        path: Any,
+        mode: int = 0o777,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal swapped
+        if (
+            Path(path).name == destination.name
+            and kwargs.get("dir_fd") is not None
+            and not swapped
+        ):
+            swapped = True
+            destination_parent.rename(moved)
+            destination_parent.symlink_to(outside, target_is_directory=True)
+        original_mkdir(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", swapping_mkdir)
+
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="environment materialization destination parent changed while writing",
+    ):
+        materialize_benchmark_environment(
+            suite,
+            lock,
+            "coding",
+            root=root,
+            destination=destination,
+        )
+
+    assert swapped is True
+    assert list(outside.iterdir()) == []
+    assert not (moved / destination.name).exists()
