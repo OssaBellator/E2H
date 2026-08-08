@@ -154,9 +154,7 @@ def test_revalidation_rejects_document_subclasses() -> None:
 
     with pytest.raises(
         OpenAIRuntimeError,
-        match=(
-            r"invalid variant document: expected HarnessVariantDocument, got _DocumentSubclass"
-        ),
+        match=(r"invalid variant document: expected HarnessVariantDocument, got _DocumentSubclass"),
     ):
         revalidate_runtime_inputs(
             subclassed,
