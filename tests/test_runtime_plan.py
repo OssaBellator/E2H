@@ -240,7 +240,6 @@ def test_plan_normalizes_provider_build_failures() -> None:
 
 
 def test_runtime_request_plan_rejects_provider_request_type_mismatch() -> None:
-    openai_case = CASES[0]
     anthropic_case = CASES[1]
     anthropic_plan = plan_runtime_request(
         RuntimeProvider.ANTHROPIC_MESSAGES,
