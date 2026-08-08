@@ -175,8 +175,14 @@ class FailurePatternCorpus(StrictModel):
 def _validated_failure_pattern_corpus(
     corpus: FailurePatternCorpus,
 ) -> FailurePatternCorpus:
+    if type(corpus) is not FailurePatternCorpus:
+        raise BenchmarkError(
+            "invalid benchmark corpus: expected FailurePatternCorpus, "
+            f"got {type(corpus).__name__}"
+        )
     try:
-        return FailurePatternCorpus.model_validate(corpus.model_dump(mode="json"))
+        payload = corpus.model_dump(mode="python", warnings="none")
+        return FailurePatternCorpus.model_validate(payload)
     except ValueError as exc:
         raise BenchmarkError(f"invalid benchmark corpus: {exc}") from exc
 
