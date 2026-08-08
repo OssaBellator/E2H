@@ -62,6 +62,7 @@ class StrictModel(BaseModel):
 
 
 _ModelT = TypeVar("_ModelT", bound=StrictModel)
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -76,6 +77,23 @@ def _canonical_json_bytes(value: Any) -> bytes:
     except (TypeError, ValueError) as exc:
         raise ValueError("value must contain canonical JSON data") from exc
     return rendered.encode("utf-8")
+
+
+def _revalidate_optimizer_input(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    if type(value) is not model_type:
+        raise OptimizerAdapterError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise OptimizerAdapterError(f"invalid {noun}: {exc}") from exc
 
 
 def _validate_metadata(value: dict[str, Any], *, noun: str) -> dict[str, Any]:
@@ -291,12 +309,12 @@ def optimizer_candidate_sha256(document: OptimizerCandidateDocument) -> str:
     return hashlib.sha256(_canonical_json_bytes(document.model_dump(mode="json"))).hexdigest()
 
 
-def verify_optimizer_adapter(
+def _verify_optimizer_adapter_validated(
     adapter: OptimizerAdapterDocument,
     capsule: TaskCapsule,
     variant_document: HarnessVariantDocument,
 ) -> OptimizerAdapterVerification:
-    """Verify exact identities and prompt component bindings without execution."""
+    """Verify one already-normalized optimizer input set."""
     verification = verify_variant_document(variant_document, capsule)
     if adapter.base_capsule_sha256 != verification.base_capsule_sha256:
         raise OptimizerAdapterError(
@@ -326,6 +344,30 @@ def verify_optimizer_adapter(
     )
 
 
+def verify_optimizer_adapter(
+    adapter: OptimizerAdapterDocument,
+    capsule: TaskCapsule,
+    variant_document: HarnessVariantDocument,
+) -> OptimizerAdapterVerification:
+    """Verify exact identities and prompt component bindings without execution."""
+    adapter = _revalidate_optimizer_input(
+        adapter,
+        OptimizerAdapterDocument,
+        noun="optimizer adapter",
+    )
+    capsule = _revalidate_optimizer_input(
+        capsule,
+        TaskCapsule,
+        noun="task capsule",
+    )
+    variant_document = _revalidate_optimizer_input(
+        variant_document,
+        HarnessVariantDocument,
+        noun="variant document",
+    )
+    return _verify_optimizer_adapter_validated(adapter, capsule, variant_document)
+
+
 def apply_optimizer_candidate(
     adapter: OptimizerAdapterDocument,
     candidate: OptimizerCandidateDocument,
@@ -333,7 +375,27 @@ def apply_optimizer_candidate(
     variant_document: HarnessVariantDocument,
 ) -> HarnessVariantDocument:
     """Apply declared prompt replacements after complete digest verification."""
-    verification = verify_optimizer_adapter(adapter, capsule, variant_document)
+    adapter = _revalidate_optimizer_input(
+        adapter,
+        OptimizerAdapterDocument,
+        noun="optimizer adapter",
+    )
+    candidate = _revalidate_optimizer_input(
+        candidate,
+        OptimizerCandidateDocument,
+        noun="optimizer candidate",
+    )
+    capsule = _revalidate_optimizer_input(
+        capsule,
+        TaskCapsule,
+        noun="task capsule",
+    )
+    variant_document = _revalidate_optimizer_input(
+        variant_document,
+        HarnessVariantDocument,
+        noun="variant document",
+    )
+    verification = _verify_optimizer_adapter_validated(adapter, capsule, variant_document)
     if candidate.optimizer is not adapter.optimizer:
         raise OptimizerAdapterError("candidate optimizer does not match adapter optimizer")
     if candidate.adapter_sha256 != verification.adapter_sha256:
