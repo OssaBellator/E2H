@@ -17,6 +17,7 @@ from e2h.promotion_models import (
     VariantPredictionDocument,
     _canonical_json_bytes,
 )
+from e2h.promotion_validation import revalidate_promotion_model
 
 
 def _validated_prediction_inputs(
@@ -32,10 +33,26 @@ def _validated_prediction_inputs(
 ]:
     try:
         return (
-            DatasetPartitionDocument.model_validate(manifest.model_dump(mode="json")),
-            DSPyDatasetDocument.model_validate(dataset.model_dump(mode="json")),
-            VariantPredictionDocument.model_validate(baseline.model_dump(mode="json")),
-            VariantPredictionDocument.model_validate(candidate.model_dump(mode="json")),
+            revalidate_promotion_model(
+                manifest,
+                DatasetPartitionDocument,
+                noun="dataset partition manifest",
+            ),
+            revalidate_promotion_model(
+                dataset,
+                DSPyDatasetDocument,
+                noun="DSPy dataset",
+            ),
+            revalidate_promotion_model(
+                baseline,
+                VariantPredictionDocument,
+                noun="baseline predictions",
+            ),
+            revalidate_promotion_model(
+                candidate,
+                VariantPredictionDocument,
+                noun="candidate predictions",
+            ),
         )
     except ValueError as exc:
         raise PromotionError(f"invalid promotion comparison inputs: {exc}") from exc
