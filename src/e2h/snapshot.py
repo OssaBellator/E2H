@@ -131,6 +131,13 @@ class SnapshotCore(StrictModel):
                 if parent_kind == "file":
                     raise ValueError(f"file entry cannot contain child paths: {parent}")
                 parent = parent.parent
+        digest_sizes: dict[str, int] = {}
+        for entry in self.entries:
+            if entry.kind != "file" or entry.sha256 is None:
+                continue
+            previous_size = digest_sizes.setdefault(entry.sha256, entry.size_bytes)
+            if previous_size != entry.size_bytes:
+                raise ValueError("file entries sharing sha256 must declare the same size_bytes")
         file_bytes = sum(entry.size_bytes for entry in self.entries if entry.kind == "file")
         if file_bytes != self.total_bytes:
             raise ValueError("total_bytes does not match file entries")
