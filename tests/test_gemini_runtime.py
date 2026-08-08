@@ -26,7 +26,9 @@ from e2h.variants import (
     HarnessVariant,
     HarnessVariantDocument,
     PromptMessage,
+    ReferencedContextItem,
     ToolVariant,
+    WorkflowVariant,
 )
 
 
@@ -307,34 +309,30 @@ def test_runtime_rejects_workflow_references_and_unfaithful_placement() -> None:
     base = document()
 
     workflow = base.model_copy(deep=True)
-    workflow.variant.workflow = {
-        "id": "workflow",
-        "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
-    }
+    workflow.variant.workflow = WorkflowVariant.model_validate(
+        {
+            "id": "workflow",
+            "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
+        }
+    )
     with pytest.raises(GeminiRuntimeError, match="does not execute workflow DAGs"):
-        build_gemini_generate_content_request(
-            HarnessVariantDocument.model_validate(workflow.model_dump(mode="json")),
-            capsule(),
-            invocation(),
-        )
+        build_gemini_generate_content_request(workflow, capsule(), invocation())
 
     referenced = base.model_copy(deep=True)
     assert referenced.variant.context is not None
     referenced.variant.context.items = [
-        {
-            "id": "artifact",
-            "kind": "artifact",
-            "sha256": "1" * 64,
-            "locator": "cas://artifact/one",
-            "max_chars": 16,
-        }
+        ReferencedContextItem.model_validate(
+            {
+                "id": "artifact",
+                "kind": "artifact",
+                "sha256": "1" * 64,
+                "locator": "cas://artifact/one",
+                "max_chars": 16,
+            }
+        )
     ]
     with pytest.raises(GeminiRuntimeError, match="does not dereference"):
-        build_gemini_generate_content_request(
-            HarnessVariantDocument.model_validate(referenced.model_dump(mode="json")),
-            capsule(),
-            invocation(),
-        )
+        build_gemini_generate_content_request(referenced, capsule(), invocation())
 
     after = base.model_copy(deep=True)
     assert after.variant.context is not None
