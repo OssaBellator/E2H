@@ -52,10 +52,7 @@ class _Bundle(_Dumpable):
 
 
 def _input_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
-    paths = tuple(
-        tmp_path / name
-        for name in ("capsule.json", "variant.json", "invocation.json")
-    )
+    paths = tuple(tmp_path / name for name in ("capsule.json", "variant.json", "invocation.json"))
     for path in paths:
         path.write_text("{}\n", encoding="utf-8")
     return paths
