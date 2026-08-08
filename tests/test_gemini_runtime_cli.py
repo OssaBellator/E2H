@@ -8,8 +8,8 @@ import pytest
 from typer.testing import CliRunner
 
 import e2h.gemini_runtime_cli as runtime_cli
-from e2h.ingest import EvidenceIngestError
 from e2h.gemini_runtime_cli import runtime_app
+from e2h.ingest import EvidenceIngestError
 
 runner = CliRunner()
 
