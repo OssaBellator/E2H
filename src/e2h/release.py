@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
 import re
+import stat
 import tarfile
 import zipfile
+from contextlib import suppress
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from enum import StrEnum
@@ -134,20 +138,149 @@ def _artifact_kind(filename: str) -> ReleaseArtifactKind:
     raise ReleaseIntegrityError(f"unsupported release artifact: {filename}")
 
 
-def _read_regular_artifact(path: Path) -> bytes:
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _open_release_directory(directory: Path) -> tuple[int, os.stat_result]:
     try:
-        if path.is_symlink() or not path.is_file():
+        expected = directory.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to read release directory: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        raise ReleaseIntegrityError("release directory must be a real directory")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to open release directory: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise ReleaseIntegrityError("release directory is no longer a directory")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise ReleaseIntegrityError("release directory changed while opening")
+        return descriptor, opened
+    except Exception:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _stat_release_entry(directory_descriptor: int, path: Path) -> os.stat_result:
+    try:
+        if os.stat in os.supports_dir_fd:
+            return os.stat(
+                path.name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        return path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to stat release artifact {path.name}: {exc}") from exc
+
+
+def _release_directory_must_be_stable(
+    directory: Path,
+    descriptor: int,
+    opened: os.stat_result,
+) -> None:
+    try:
+        after = os.fstat(descriptor)
+        current = directory.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to restat release directory: {exc}") from exc
+    if _stat_identity(after) != _stat_identity(opened) or _stat_identity(current) != _stat_identity(
+        opened
+    ):
+        raise ReleaseIntegrityError("release directory changed during sealing")
+
+
+def _distribution_entries(
+    directory: Path,
+    descriptor: int,
+    opened: os.stat_result,
+) -> list[tuple[Path, os.stat_result]]:
+    try:
+        names = (
+            sorted(os.listdir(descriptor))
+            if os.listdir in os.supports_fd
+            else sorted(os.listdir(directory))
+        )
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to read release directory: {exc}") from exc
+    _release_directory_must_be_stable(directory, descriptor, opened)
+    if not names:
+        raise ReleaseIntegrityError("release directory is empty")
+    if len(names) > _MAX_ARTIFACTS:
+        raise ReleaseIntegrityError(f"release directory exceeds {_MAX_ARTIFACTS} entries")
+    entries: list[tuple[Path, os.stat_result]] = []
+    for name in names:
+        path = directory / name
+        entry = _stat_release_entry(descriptor, path)
+        if stat.S_ISLNK(entry.st_mode) or not stat.S_ISREG(entry.st_mode):
+            raise ReleaseIntegrityError(
+                f"release directory may contain only regular distribution files: {name}"
+            )
+        _artifact_kind(name)
+        entries.append((path, entry))
+    _release_directory_must_be_stable(directory, descriptor, opened)
+    return entries
+
+
+def _read_regular_artifact(
+    directory_descriptor: int,
+    path: Path,
+    expected: os.stat_result,
+) -> bytes:
+    if expected.st_size <= 0:
+        raise ReleaseIntegrityError(f"release artifact must not be empty: {path.name}")
+    if expected.st_size > _MAX_ARTIFACT_BYTES:
+        raise ReleaseIntegrityError(
+            f"release artifact exceeds {_MAX_ARTIFACT_BYTES} bytes: {path.name}"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        if os.open in os.supports_dir_fd:
+            descriptor = os.open(path.name, flags, dir_fd=directory_descriptor)
+        else:
+            descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to open release artifact {path.name}: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
             raise ReleaseIntegrityError(f"release artifact must be a regular file: {path.name}")
-        size = path.stat().st_size
-        if size <= 0:
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise ReleaseIntegrityError(f"release artifact changed while opening: {path.name}")
+        if opened.st_size <= 0:
             raise ReleaseIntegrityError(f"release artifact must not be empty: {path.name}")
-        if size > _MAX_ARTIFACT_BYTES:
+        if opened.st_size > _MAX_ARTIFACT_BYTES:
             raise ReleaseIntegrityError(
                 f"release artifact exceeds {_MAX_ARTIFACT_BYTES} bytes: {path.name}"
             )
-        return path.read_bytes()
+        data = bytearray()
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while chunk := handle.read(1024 * 1024):
+                data.extend(chunk)
+                if len(data) > _MAX_ARTIFACT_BYTES:
+                    raise ReleaseIntegrityError(
+                        f"release artifact exceeds {_MAX_ARTIFACT_BYTES} bytes: {path.name}"
+                    )
+        after = os.fstat(descriptor)
+        current = _stat_release_entry(directory_descriptor, path)
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(data) != opened.st_size
+        ):
+            raise ReleaseIntegrityError(f"release artifact changed while reading: {path.name}")
+        return bytes(data)
     except OSError as exc:
         raise ReleaseIntegrityError(f"unable to read release artifact {path.name}: {exc}") from exc
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
 
 
 def _parse_core_metadata(raw: bytes, *, noun: str) -> _PackageIdentity:
@@ -163,9 +296,9 @@ def _parse_core_metadata(raw: bytes, *, noun: str) -> _PackageIdentity:
     return _PackageIdentity(name=name.strip(), version=version.strip())
 
 
-def _wheel_identity(path: Path) -> _PackageIdentity:
+def _wheel_identity(raw: bytes, *, filename: str) -> _PackageIdentity:
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             metadata_names = [
                 name
                 for name in archive.namelist()
@@ -176,15 +309,15 @@ def _wheel_identity(path: Path) -> _PackageIdentity:
             info = archive.getinfo(metadata_names[0])
             if info.file_size > _MAX_METADATA_BYTES:
                 raise ReleaseIntegrityError(f"wheel metadata exceeds {_MAX_METADATA_BYTES} bytes")
-            raw = archive.read(info)
+            metadata = archive.read(info)
     except (OSError, zipfile.BadZipFile, KeyError) as exc:
-        raise ReleaseIntegrityError(f"invalid wheel archive {path.name}: {exc}") from exc
-    return _parse_core_metadata(raw, noun="wheel")
+        raise ReleaseIntegrityError(f"invalid wheel archive {filename}: {exc}") from exc
+    return _parse_core_metadata(metadata, noun="wheel")
 
 
-def _sdist_identity(path: Path) -> _PackageIdentity:
+def _sdist_identity(raw: bytes, *, filename: str) -> _PackageIdentity:
     try:
-        with tarfile.open(path, mode="r:gz") as archive:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive:
             members = [
                 member
                 for member in archive.getmembers()
@@ -200,20 +333,28 @@ def _sdist_identity(path: Path) -> _PackageIdentity:
             extracted = archive.extractfile(member)
             if extracted is None:
                 raise ReleaseIntegrityError("unable to read sdist PKG-INFO")
-            raw = extracted.read(_MAX_METADATA_BYTES + 1)
+            metadata = extracted.read(_MAX_METADATA_BYTES + 1)
     except (OSError, tarfile.TarError) as exc:
-        raise ReleaseIntegrityError(f"invalid sdist archive {path.name}: {exc}") from exc
-    return _parse_core_metadata(raw, noun="sdist")
+        raise ReleaseIntegrityError(f"invalid sdist archive {filename}: {exc}") from exc
+    return _parse_core_metadata(metadata, noun="sdist")
 
 
-def _artifact_from_path(path: Path) -> ReleaseArtifact:
+def _artifact_from_entry(
+    directory_descriptor: int,
+    path: Path,
+    expected: os.stat_result,
+) -> ReleaseArtifact:
     if _FILENAME_RE.fullmatch(path.name) is None:
         raise ReleaseIntegrityError(
             f"release artifact filename must be a portable basename: {path.name}"
         )
     kind = _artifact_kind(path.name)
-    raw = _read_regular_artifact(path)
-    identity = _wheel_identity(path) if kind is ReleaseArtifactKind.WHEEL else _sdist_identity(path)
+    raw = _read_regular_artifact(directory_descriptor, path, expected)
+    identity = (
+        _wheel_identity(raw, filename=path.name)
+        if kind is ReleaseArtifactKind.WHEEL
+        else _sdist_identity(raw, filename=path.name)
+    )
     return ReleaseArtifact(
         filename=path.name,
         kind=kind,
@@ -224,26 +365,6 @@ def _artifact_from_path(path: Path) -> ReleaseArtifact:
     )
 
 
-def _distribution_paths(directory: Path) -> list[Path]:
-    try:
-        if directory.is_symlink() or not directory.is_dir():
-            raise ReleaseIntegrityError("release directory must be a real directory")
-        entries = sorted(directory.iterdir(), key=lambda path: path.name)
-    except OSError as exc:
-        raise ReleaseIntegrityError(f"unable to read release directory: {exc}") from exc
-    if not entries:
-        raise ReleaseIntegrityError("release directory is empty")
-    if len(entries) > _MAX_ARTIFACTS:
-        raise ReleaseIntegrityError(f"release directory exceeds {_MAX_ARTIFACTS} entries")
-    for entry in entries:
-        if entry.is_symlink() or not entry.is_file():
-            raise ReleaseIntegrityError(
-                f"release directory may contain only regular distribution files: {entry.name}"
-            )
-        _artifact_kind(entry.name)
-    return entries
-
-
 def seal_release_artifacts(
     directory: Path,
     *,
@@ -252,7 +373,16 @@ def seal_release_artifacts(
     metadata: dict[str, Any] | None = None,
 ) -> ReleaseManifest:
     """Seal one exact wheel/sdist directory into a deterministic manifest."""
-    artifacts = [_artifact_from_path(path) for path in _distribution_paths(directory)]
+    directory_descriptor, opened_directory = _open_release_directory(directory)
+    try:
+        entries = _distribution_entries(directory, directory_descriptor, opened_directory)
+        artifacts = [
+            _artifact_from_entry(directory_descriptor, path, expected) for path, expected in entries
+        ]
+        _release_directory_must_be_stable(directory, directory_descriptor, opened_directory)
+    finally:
+        with suppress(OSError):
+            os.close(directory_descriptor)
     project = artifacts[0].package_name
     version = artifacts[0].package_version
     if expected_project is not None and _normalize_project_name(project) != _normalize_project_name(
