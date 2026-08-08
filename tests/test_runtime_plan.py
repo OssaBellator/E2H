@@ -271,6 +271,27 @@ def test_runtime_request_plan_rejects_unknown_schema_version() -> None:
         RuntimeRequestPlan.model_validate(payload)
 
 
+def test_load_runtime_request_plan_normalizes_invocation_errors(tmp_path: Path) -> None:
+    openai_case = CASES[0]
+    capsule_path = tmp_path / "capsule.json"
+    variant_path = tmp_path / "variant.json"
+    invocation_path = tmp_path / "invocation.json"
+    capsule_path.write_text(capsule().model_dump_json(indent=2) + "\n", encoding="utf-8")
+    variant_path.write_text(
+        document(openai_case).model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+    invocation_path.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(RuntimePlanError, match="unable to load openai-responses invocation"):
+        load_runtime_request_plan(
+            RuntimeProvider.OPENAI_RESPONSES,
+            capsule_path,
+            variant_path,
+            invocation_path,
+        )
+
+
 def test_load_runtime_request_plan_normalizes_document_errors(tmp_path: Path) -> None:
     bad_capsule = tmp_path / "capsule.json"
     variant = tmp_path / "variant.json"
