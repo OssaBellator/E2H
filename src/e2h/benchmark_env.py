@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import stat
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -316,10 +317,8 @@ def _hash_environment_file(
             f"unable to hash environment file {relative}: {exc}"
         ) from exc
     finally:
-        try:
+        with suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
 
 
 def _scan_environment(source: Path) -> _ScannedEnvironment:
