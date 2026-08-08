@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
 import re
+import stat
 import tomllib
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +27,8 @@ _EXACT_HATCHLING_RE = re.compile(
     r"^hatchling==(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:[A-Za-z0-9._+-]*)?)$"
 )
 _SOURCE_COMMIT_RE = re.compile(_COMMIT_PATTERN)
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 
 
 class ReleaseToolchainError(ValueError):
@@ -76,20 +81,116 @@ class _ReleaseToolchainSourceInputs(BaseModel):
     source_tree_sha256: str | None = Field(default=None, pattern=_SHA256_PATTERN)
 
 
-def _read_regular_file(path: Path) -> bytes:
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _open_toolchain_root(root: Path) -> tuple[Path, int, os.stat_result]:
     try:
-        if path.is_symlink() or not path.is_file():
+        expected = root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseToolchainError(f"unable to inspect toolchain root: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        raise ReleaseToolchainError("toolchain root must be a real directory")
+    try:
+        resolved = root.resolve(strict=True)
+        current = resolved.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseToolchainError(f"unable to inspect toolchain root: {exc}") from exc
+    if _stat_identity(current) != _stat_identity(expected):
+        raise ReleaseToolchainError("toolchain root changed while resolving")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(resolved, flags)
+    except OSError as exc:
+        raise ReleaseToolchainError(f"unable to open toolchain root: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise ReleaseToolchainError("toolchain root is no longer a directory")
+        if _stat_identity(opened) != _stat_identity(current):
+            raise ReleaseToolchainError("toolchain root changed while opening")
+        return resolved, descriptor, opened
+    except Exception:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _toolchain_root_must_be_stable(
+    root: Path,
+    descriptor: int,
+    opened: os.stat_result,
+) -> None:
+    try:
+        after = os.fstat(descriptor)
+        current = root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseToolchainError(f"unable to restat toolchain root: {exc}") from exc
+    if _stat_identity(after) != _stat_identity(opened) or _stat_identity(current) != _stat_identity(
+        opened
+    ):
+        raise ReleaseToolchainError("toolchain root changed while reading inputs")
+
+
+def _stat_toolchain_input(root_descriptor: int, path: Path) -> os.stat_result:
+    try:
+        if _STAT_SUPPORTS_DIR_FD:
+            return os.stat(
+                path.name,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+        return path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseToolchainError(f"unable to stat toolchain input {path.name}: {exc}") from exc
+
+
+def _read_regular_file(root_descriptor: int, path: Path) -> bytes:
+    expected = _stat_toolchain_input(root_descriptor, path)
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+        raise ReleaseToolchainError(f"toolchain input must be a regular file: {path.name}")
+    if expected.st_size <= 0:
+        raise ReleaseToolchainError(f"toolchain input must not be empty: {path.name}")
+    if expected.st_size > _MAX_INPUT_BYTES:
+        raise ReleaseToolchainError(
+            f"toolchain input exceeds {_MAX_INPUT_BYTES} bytes: {path.name}"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = (
+            os.open(path.name, flags, dir_fd=root_descriptor)
+            if _OPEN_SUPPORTS_DIR_FD
+            else os.open(path, flags)
+        )
+    except OSError as exc:
+        raise ReleaseToolchainError(f"unable to read toolchain input {path.name}: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
             raise ReleaseToolchainError(f"toolchain input must be a regular file: {path.name}")
-        size = path.stat().st_size
-        if size <= 0:
-            raise ReleaseToolchainError(f"toolchain input must not be empty: {path.name}")
-        if size > _MAX_INPUT_BYTES:
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise ReleaseToolchainError(f"toolchain input changed while opening: {path.name}")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(_MAX_INPUT_BYTES + 1)
+        after = os.fstat(descriptor)
+        current = _stat_toolchain_input(root_descriptor, path)
+        if len(raw) > _MAX_INPUT_BYTES:
             raise ReleaseToolchainError(
                 f"toolchain input exceeds {_MAX_INPUT_BYTES} bytes: {path.name}"
             )
-        return path.read_bytes()
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(raw) != opened.st_size
+        ):
+            raise ReleaseToolchainError(f"toolchain input changed while reading: {path.name}")
+        return raw
     except OSError as exc:
         raise ReleaseToolchainError(f"unable to read toolchain input {path.name}: {exc}") from exc
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
 
 
 def _parse_toml(raw: bytes, *, noun: str) -> dict[str, object]:
@@ -145,34 +246,40 @@ def _collect_release_toolchain_source_inputs(
     *,
     include_source_tree: bool,
 ) -> _ReleaseToolchainSourceInputs:
+    root, root_descriptor, root_info = _open_toolchain_root(root)
+    input_names = ("uv.toml", "pyproject.toml", "uv.lock", "build-constraints.txt")
     try:
-        if root.is_symlink() or not root.is_dir():
-            raise ReleaseToolchainError("toolchain root must be a real directory")
-    except OSError as exc:
-        raise ReleaseToolchainError(f"unable to inspect toolchain root: {exc}") from exc
+        inputs = {name: _read_regular_file(root_descriptor, root / name) for name in input_names}
+        _toolchain_root_must_be_stable(root, root_descriptor, root_info)
+        uv_config = _parse_toml(inputs["uv.toml"], noun="uv.toml")
+        pyproject = _parse_toml(inputs["pyproject.toml"], noun="pyproject.toml")
+        uv_version = _uv_required_version(uv_config)
+        hatchling_version = _hatchling_version(pyproject)
+        constrained_hatchling = _constraints_hatchling_version(inputs["build-constraints.txt"])
+        if constrained_hatchling != hatchling_version:
+            raise ReleaseToolchainError(
+                "build-constraints.txt Hatchling version must match pyproject.toml"
+            )
 
-    inputs = {
-        "uv.toml": _read_regular_file(root / "uv.toml"),
-        "pyproject.toml": _read_regular_file(root / "pyproject.toml"),
-        "uv.lock": _read_regular_file(root / "uv.lock"),
-        "build-constraints.txt": _read_regular_file(root / "build-constraints.txt"),
-    }
-    uv_config = _parse_toml(inputs["uv.toml"], noun="uv.toml")
-    pyproject = _parse_toml(inputs["pyproject.toml"], noun="pyproject.toml")
-    uv_version = _uv_required_version(uv_config)
-    hatchling_version = _hatchling_version(pyproject)
-    constrained_hatchling = _constraints_hatchling_version(inputs["build-constraints.txt"])
-    if constrained_hatchling != hatchling_version:
-        raise ReleaseToolchainError(
-            "build-constraints.txt Hatchling version must match pyproject.toml"
-        )
-
-    tree_digest: str | None = None
-    if include_source_tree:
-        try:
-            tree_digest = source_tree_sha256(root)
-        except ReleaseSourceError as exc:
-            raise ReleaseToolchainError(f"unable to identify release source tree: {exc}") from exc
+        tree_digest: str | None = None
+        if include_source_tree:
+            try:
+                tree_digest = source_tree_sha256(root)
+            except ReleaseSourceError as exc:
+                raise ReleaseToolchainError(
+                    f"unable to identify release source tree: {exc}"
+                ) from exc
+            repeated = {
+                name: _read_regular_file(root_descriptor, root / name) for name in input_names
+            }
+            if repeated != inputs:
+                raise ReleaseToolchainError(
+                    "toolchain inputs changed while identifying release source tree"
+                )
+        _toolchain_root_must_be_stable(root, root_descriptor, root_info)
+    finally:
+        with suppress(OSError):
+            os.close(root_descriptor)
 
     return _ReleaseToolchainSourceInputs(
         uv_required_version=uv_version,
