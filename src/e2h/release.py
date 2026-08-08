@@ -287,8 +287,13 @@ def verify_release_artifacts(
     directory: Path,
 ) -> ReleaseVerification:
     """Verify that a directory exactly matches one sealed release manifest."""
+    if type(manifest) is not ReleaseManifest:
+        raise ReleaseIntegrityError(
+            f"invalid release manifest: expected ReleaseManifest, got {type(manifest).__name__}"
+        )
     try:
-        validated = ReleaseManifest.model_validate(manifest.model_dump(mode="json"))
+        payload = manifest.model_dump(mode="python", warnings="none")
+        validated = ReleaseManifest.model_validate(payload)
     except ValueError as exc:
         raise ReleaseIntegrityError(f"invalid release manifest: {exc}") from exc
     actual = seal_release_artifacts(
