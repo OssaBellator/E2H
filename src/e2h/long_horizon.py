@@ -217,8 +217,13 @@ class LongHorizonCorpus(StrictModel):
 
 
 def _validated_long_horizon_corpus(corpus: LongHorizonCorpus) -> LongHorizonCorpus:
+    if type(corpus) is not LongHorizonCorpus:
+        raise LongHorizonError(
+            f"invalid long-horizon corpus: expected LongHorizonCorpus, got {type(corpus).__name__}"
+        )
     try:
-        return LongHorizonCorpus.model_validate(corpus.model_dump(mode="json"))
+        payload = corpus.model_dump(mode="python", warnings="none")
+        return LongHorizonCorpus.model_validate(payload)
     except ValueError as exc:
         raise LongHorizonError(f"invalid long-horizon corpus: {exc}") from exc
 
@@ -287,8 +292,14 @@ class LongHorizonPredictionDocument(StrictModel):
 def _validated_long_horizon_predictions(
     predictions: LongHorizonPredictionDocument,
 ) -> LongHorizonPredictionDocument:
+    if type(predictions) is not LongHorizonPredictionDocument:
+        raise LongHorizonError(
+            "invalid long-horizon predictions: expected LongHorizonPredictionDocument, "
+            f"got {type(predictions).__name__}"
+        )
     try:
-        return LongHorizonPredictionDocument.model_validate(predictions.model_dump(mode="json"))
+        payload = predictions.model_dump(mode="python", warnings="none")
+        return LongHorizonPredictionDocument.model_validate(payload)
     except ValueError as exc:
         raise LongHorizonError(f"invalid long-horizon predictions: {exc}") from exc
 
