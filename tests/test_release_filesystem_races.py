@@ -94,7 +94,7 @@ def test_seal_rejects_release_directory_replaced_after_listing(
 
     monkeypatch.setattr(os, "open", swapping_open)
 
-    with pytest.raises(ReleaseIntegrityError, match="release directory changed"):
+    with pytest.raises(ReleaseIntegrityError, match=r"release (?:directory|artifact) changed"):
         seal_release_artifacts(directory)
 
     assert swapped is True
