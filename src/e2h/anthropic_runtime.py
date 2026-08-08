@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h._version import VERSION
 from e2h.anthropic_messages import (
     AnthropicInputMessage,
     AnthropicMessageRecord,
@@ -36,6 +37,7 @@ from e2h.variants import (
 )
 
 _MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+_USER_AGENT = f"e2h-anthropic-runtime/{VERSION}"
 _ANTHROPIC_VERSION: Literal["2023-06-01"] = "2023-06-01"
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
@@ -523,7 +525,7 @@ def run_anthropic_messages(
             "anthropic-version": _ANTHROPIC_VERSION,
             "content-type": "application/json",
             "accept": "application/json",
-            "user-agent": "e2h-anthropic-runtime/0.28",
+            "user-agent": _USER_AGENT,
         },
         invocation.timeout_seconds,
     )

@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 import e2h.gemini_runtime as runtime
+from e2h._version import VERSION
 from e2h.gemini_runtime import (
     GeminiGenerateContentInvocation,
     GeminiGenerateContentRequest,
@@ -442,7 +443,7 @@ def test_run_archives_response_context_and_never_serializes_key() -> None:
         "x-goog-api-key": "test-secret",
         "content-type": "application/json",
         "accept": "application/json",
-        "user-agent": "e2h-gemini-runtime/0.27",
+        "user-agent": f"e2h-gemini-runtime/{VERSION}",
     }
     record = result.archive.records[0]
     assert record.request_id == "request_123"

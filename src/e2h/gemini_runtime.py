@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h._version import VERSION
 from e2h.document import load_mapping_document
 from e2h.gemini_generate_content import (
     GeminiContentRecord,
@@ -37,6 +38,7 @@ from e2h.variants import (
 )
 
 _API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
+_USER_AGENT = f"e2h-gemini-runtime/{VERSION}"
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 _MAX_ERROR_BYTES = 65_536
@@ -562,7 +564,7 @@ def run_gemini_generate_content(
             "x-goog-api-key": api_key,
             "content-type": "application/json",
             "accept": "application/json",
-            "user-agent": "e2h-gemini-runtime/0.27",
+            "user-agent": _USER_AGENT,
         },
         invocation.timeout_seconds,
     )

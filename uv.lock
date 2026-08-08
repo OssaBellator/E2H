@@ -577,7 +577,7 @@ wheels = [
 
 [[package]]
 name = "e2h"
-version = "0.27.0"
+version = "0.28.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk", extra = ["http-server"] },

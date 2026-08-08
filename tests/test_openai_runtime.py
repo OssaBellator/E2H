@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from e2h._version import VERSION
 from e2h.genome import capsule_sha256
 from e2h.models import TaskCapsule
 from e2h.openai_runtime import (
@@ -232,6 +233,11 @@ def test_run_archives_observable_request_and_response_without_key_leakage() -> N
     assert result.accepted
     assert result.provider_request_id == "req_123"
     assert captured["endpoint"] == "https://api.openai.com/v1/responses"
+    assert captured["headers"] == {
+        "Authorization": "Bearer test-secret",
+        "Content-Type": "application/json",
+        "User-Agent": f"e2h-openai-runtime/{VERSION}",
+    }
     assert result.archive.responses[0].request_id == "req_123"
     assert result.archive.responses[0].input_items[2]["id"] == "runtime-001.input.2"
     assert result.archive.responses[0].input_items[2]["content"] == [

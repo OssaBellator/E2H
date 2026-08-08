@@ -1,5 +1,6 @@
 """Evidence-to-Harness core package."""
 
+from e2h._version import VERSION
 from e2h.anthropic_messages import (
     AnthropicInputMessage,
     AnthropicMessageRecord,
@@ -456,4 +457,4 @@ __all__ = [
     "verify_variant_document",
     "working_directory_failure",
 ]
-__version__ = "0.27.0"
+__version__ = VERSION
