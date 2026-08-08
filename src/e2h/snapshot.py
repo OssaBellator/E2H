@@ -550,17 +550,30 @@ def create_snapshot(
     manifest_bytes = _canonical_json(manifest.model_dump(mode="json")) + b"\n"
     if len(manifest_bytes) > MAX_MANIFEST_BYTES:
         raise SnapshotError("snapshot manifest is too large")
-    temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
+    descriptor: int | None = None
+    temporary: Path | None = None
     try:
-        with zipfile.ZipFile(temporary, "w") as archive:
-            archive.writestr(_zip_info(MANIFEST_NAME), manifest_bytes)
-            for digest in sorted(blobs):
-                archive.writestr(_zip_info(f"{BLOB_PREFIX}{digest}"), blobs[digest])
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            dir=output.parent,
+        )
+        temporary = Path(temporary_name)
+        with os.fdopen(descriptor, "w+b") as handle:
+            descriptor = None
+            with zipfile.ZipFile(handle, "w") as archive:
+                archive.writestr(_zip_info(MANIFEST_NAME), manifest_bytes)
+                for digest in sorted(blobs):
+                    archive.writestr(_zip_info(f"{BLOB_PREFIX}{digest}"), blobs[digest])
         os.replace(temporary, output)
     except (OSError, zipfile.BadZipFile) as exc:
         raise SnapshotError(f"unable to write snapshot archive: {exc}") from exc
     finally:
-        temporary.unlink(missing_ok=True)
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return manifest
 
 
