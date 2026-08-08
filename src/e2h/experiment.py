@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from statistics import fmean
 from time import monotonic
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -17,6 +17,7 @@ from e2h.trace import Trace, trace_from_run_result
 from e2h.variants import HarnessVariant, variant_sha256
 
 _MAX_TRACE_ID_LENGTH = 256
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
 
 
 def _validate_relative_path(value: str) -> str:
@@ -39,6 +40,10 @@ def _matrix_run_id(experiment_id: str, variant_id: str, repetition: int) -> str:
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ExperimentError(RuntimeError):
+    """Raised when an experiment cannot be safely scheduled."""
 
 
 class ExperimentSpec(StrictModel):
@@ -114,6 +119,24 @@ class ExperimentExecution(StrictModel):
     traces: list[Trace]
 
 
+def _revalidate_experiment_input(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    """Return a detached input snapshot after enforcing one concrete model type."""
+    if type(value) is not model_type:
+        raise ExperimentError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise ExperimentError(f"invalid {noun}: {exc}") from exc
+
+
 def resolve_under_root(root: Path, relative: str) -> Path:
     """Resolve a declared path and reject filesystem or symlink escape."""
     root_path = root.resolve()
@@ -166,6 +189,8 @@ def run_experiment(
     container_runtime: str | None = None,
 ) -> ExperimentExecution:
     """Execute every variant and repetition in deterministic declaration order."""
+    spec = _revalidate_experiment_input(spec, ExperimentSpec, noun="experiment spec")
+    capsule = _revalidate_experiment_input(capsule, TaskCapsule, noun="task capsule")
     started_at = datetime.now(UTC)
     started_clock = monotonic()
     runs: list[ExperimentRun] = []
