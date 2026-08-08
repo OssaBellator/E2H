@@ -99,8 +99,8 @@ jobs:
               for entry in distribution.entry_points
               if entry.group == "console_scripts"
           }
-          bin_dir = Path(sys.executable).resolve().parent
-          venv_dir = bin_dir.parent
+          bin_dir = Path(sys.executable).parent
+          venv_dir = Path(sys.prefix).resolve()
 
           with tempfile.TemporaryDirectory() as working_directory:
               os.chdir(working_directory)
