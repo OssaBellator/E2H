@@ -12,6 +12,7 @@ from e2h.benchmark_env import (
     BenchmarkEnvironmentSpec,
     BenchmarkEnvironmentSuite,
     BenchmarkNetworkPolicy,
+    materialize_benchmark_environment,
     seal_benchmark_environment_suite,
 )
 
@@ -44,7 +45,7 @@ def test_seal_rejects_file_swapped_to_symlink_during_open(
     victim = source / "check.py"
     victim.write_text("print('inside')\n", encoding="utf-8")
     outside = tmp_path / "outside.py"
-    outside.write_text("print('outside-secret')\n", encoding="utf-8")
+    outside.write_text("print('outside')\n", encoding="utf-8")
 
     original_open = os.open
     swapped = False
@@ -63,3 +64,82 @@ def test_seal_rejects_file_swapped_to_symlink_during_open(
         seal_benchmark_environment_suite(_suite(), root=root)
 
     assert swapped is True
+
+
+def test_seal_rejects_directory_swapped_to_outside_symlink_during_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    nested = root / "coding" / "nested"
+    nested.mkdir(parents=True)
+    inside = nested / "inside.txt"
+    inside.write_text("inside\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "other.txt").write_text("outside\n", encoding="utf-8")
+
+    original_open = os.open
+    swapped = False
+
+    def swapping_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        nonlocal swapped
+        if Path(path) == nested and not swapped:
+            swapped = True
+            inside.unlink()
+            nested.rmdir()
+            nested.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swapping_open)
+
+    with pytest.raises(BenchmarkEnvironmentError, match="environment directory"):
+        seal_benchmark_environment_suite(_suite(), root=root)
+
+    assert swapped is True
+
+
+def test_materialize_rejects_directory_replaced_after_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    nested = root / "coding" / "nested"
+    nested.mkdir(parents=True)
+    inside = nested / "inside.txt"
+    inside.write_text("inside\n", encoding="utf-8")
+    alternate = tmp_path / "alternate"
+    alternate.mkdir()
+    (alternate / "other.txt").write_text("alternate\n", encoding="utf-8")
+    suite = _suite()
+    lock = seal_benchmark_environment_suite(suite, root=root)
+    destination = tmp_path / "materialized"
+
+    original_open = os.open
+    nested_opens = 0
+    replaced = False
+
+    def replacing_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        nonlocal nested_opens, replaced
+        if Path(path) == nested:
+            nested_opens += 1
+            if nested_opens == 2 and not replaced:
+                replaced = True
+                inside.unlink()
+                nested.rmdir()
+                nested.symlink_to(alternate, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", replacing_open)
+
+    with pytest.raises(BenchmarkEnvironmentError, match="environment directory"):
+        materialize_benchmark_environment(
+            suite,
+            lock,
+            "coding",
+            root=root,
+            destination=destination,
+        )
+
+    assert replaced is True
+    assert not destination.exists()
