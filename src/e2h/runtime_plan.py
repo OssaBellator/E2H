@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -66,7 +67,7 @@ class RuntimeRequestPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "0.1"
+    schema_version: Literal["0.1"] = "0.1"
     provider: RuntimeProvider
     request: RuntimeRequest
 
