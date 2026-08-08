@@ -6,6 +6,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import stat
 import tempfile
@@ -42,6 +43,20 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_LISTDIR_SUPPORTS_FD = os.listdir in os.supports_fd
+_MKDIR_SUPPORTS_DIR_FD = os.mkdir in os.supports_dir_fd
+_REPLACE_SUPPORTS_DIR_FD = os.replace in os.supports_dir_fd
+_RMDIR_SUPPORTS_DIR_FD = os.rmdir in os.supports_dir_fd
+_UNLINK_SUPPORTS_DIR_FD = os.unlink in os.supports_dir_fd
+_WRITE_DIR_FD_SUPPORTED = (
+    _OPEN_SUPPORTS_DIR_FD
+    and _STAT_SUPPORTS_DIR_FD
+    and _LISTDIR_SUPPORTS_FD
+    and _MKDIR_SUPPORTS_DIR_FD
+    and _REPLACE_SUPPORTS_DIR_FD
+    and _RMDIR_SUPPORTS_DIR_FD
+    and _UNLINK_SUPPORTS_DIR_FD
+)
 
 
 class SnapshotError(ValueError):
@@ -216,6 +231,276 @@ def _snapshot_id_validated(core: SnapshotCore) -> str:
 
 def snapshot_id(core: SnapshotCore) -> str:
     return _snapshot_id_validated(_validated_snapshot_core(core))
+
+
+def _open_snapshot_write_parent(
+    path: Path,
+    *,
+    noun: str,
+) -> tuple[Path, int, os.stat_result]:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        parent = path.parent.resolve(strict=True)
+        expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SnapshotError(f"unable to prepare {noun}: {exc}") from exc
+    if not stat.S_ISDIR(expected.st_mode):
+        raise SnapshotError(f"{noun} parent must be a directory")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(parent, flags)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open {noun} parent: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise SnapshotError(f"{noun} parent is no longer a directory")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise SnapshotError(f"{noun} parent changed while opening")
+        return parent / path.name, descriptor, opened
+    except Exception:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _snapshot_write_parent_must_be_stable(
+    path: Path,
+    descriptor: int,
+    opened: os.stat_result,
+    *,
+    noun: str,
+) -> None:
+    try:
+        after = os.fstat(descriptor)
+        current = path.parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SnapshotError(f"unable to restat {noun} parent: {exc}") from exc
+    if _stat_identity(after) != _stat_identity(opened) or _stat_identity(current) != _stat_identity(
+        opened
+    ):
+        raise SnapshotError(f"{noun} parent changed while writing")
+
+
+def _stat_snapshot_write_entry(parent_descriptor: int, path: Path) -> os.stat_result:
+    if _STAT_SUPPORTS_DIR_FD:
+        return os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False)
+    return path.stat(follow_symlinks=False)
+
+
+def _directory_entry_is_empty(
+    parent_descriptor: int,
+    path: Path,
+    expected: os.stat_result,
+    *,
+    noun: str,
+) -> bool:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = (
+            os.open(path.name, flags, dir_fd=parent_descriptor)
+            if _OPEN_SUPPORTS_DIR_FD
+            else os.open(path, flags)
+        )
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise SnapshotError(f"{noun} changed while opening")
+        names = os.listdir(descriptor) if _LISTDIR_SUPPORTS_FD else os.listdir(path)
+        after = os.fstat(descriptor)
+        current = _stat_snapshot_write_entry(parent_descriptor, path)
+        if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
+            current
+        ) != _stat_identity(opened):
+            raise SnapshotError(f"{noun} changed while inspecting")
+        return not names
+    except OSError as exc:
+        raise SnapshotError(f"unable to inspect {noun}: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def _restore_destination_is_empty(parent_descriptor: int, destination: Path) -> bool:
+    try:
+        expected = _stat_snapshot_write_entry(parent_descriptor, destination)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode):
+        raise SnapshotError("restore destination must not be a symbolic link")
+    if not stat.S_ISDIR(expected.st_mode):
+        raise SnapshotError("restore destination exists and is not a directory")
+    if not _directory_entry_is_empty(
+        parent_descriptor,
+        destination,
+        expected,
+        noun="restore destination",
+    ):
+        raise SnapshotError("restore destination must be empty")
+    return True
+
+
+def _create_snapshot_temporary_file(
+    parent_descriptor: int,
+    output: Path,
+) -> tuple[int, str, Path]:
+    if not _WRITE_DIR_FD_SUPPORTED:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            dir=output.parent,
+        )
+        temporary = Path(temporary_name)
+        return descriptor, temporary.name, temporary
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for _ in range(128):
+        name = f".{output.name}.{secrets.token_hex(16)}.tmp"
+        try:
+            descriptor = os.open(name, flags, 0o600, dir_fd=parent_descriptor)
+        except FileExistsError:
+            continue
+        return descriptor, name, output.parent / name
+    raise SnapshotError("unable to allocate a unique snapshot temporary file")
+
+
+def _create_restore_staging_directory(
+    parent_descriptor: int,
+    destination: Path,
+) -> tuple[str, Path]:
+    if not _WRITE_DIR_FD_SUPPORTED:
+        staging = Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
+        ).resolve()
+        return staging.name, staging
+    for _ in range(128):
+        name = f".{destination.name}.restore-{secrets.token_hex(16)}"
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_descriptor)
+        except FileExistsError:
+            continue
+        return name, destination.parent / name
+    raise SnapshotError("unable to allocate a unique restore staging directory")
+
+
+def _open_bound_child_directory(
+    parent_descriptor: int,
+    name: str,
+    expected: os.stat_result,
+    *,
+    noun: str,
+) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open {noun}: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise SnapshotError(f"{noun} changed while opening")
+        return descriptor
+    except Exception:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _open_restore_directory(root_descriptor: int, parts: tuple[str, ...]) -> int:
+    current = os.dup(root_descriptor)
+    try:
+        for part in parts:
+            try:
+                expected = os.stat(part, dir_fd=current, follow_symlinks=False)
+            except FileNotFoundError:
+                os.mkdir(part, 0o777, dir_fd=current)
+                expected = os.stat(part, dir_fd=current, follow_symlinks=False)
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+                raise SnapshotError(f"restore path component must be a directory: {part}")
+            child = _open_bound_child_directory(
+                current,
+                part,
+                expected,
+                noun=f"restore directory {part}",
+            )
+            os.close(current)
+            current = child
+        return current
+    except Exception:
+        with suppress(OSError):
+            os.close(current)
+        raise
+
+
+def _write_restore_file_at(
+    staging_descriptor: int,
+    parts: tuple[str, ...],
+    data: bytes,
+    *,
+    executable: bool,
+) -> None:
+    parent_descriptor = _open_restore_directory(staging_descriptor, parts[:-1])
+    descriptor: int | None = None
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(parts[-1], flags, 0o600, dir_fd=parent_descriptor)
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SnapshotError("restore target is not a regular file")
+        with os.fdopen(descriptor, "wb", closefd=False) as handle:
+            handle.write(data)
+        after = os.fstat(descriptor)
+        if not stat.S_ISREG(after.st_mode) or after.st_size != len(data):
+            raise SnapshotError("restore target changed while writing")
+        os.fchmod(descriptor, 0o755 if executable else 0o644)
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+
+
+def _remove_restore_tree_at(parent_descriptor: int, name: str, path: Path) -> None:
+    if not _WRITE_DIR_FD_SUPPORTED:
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    try:
+        expected = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except OSError:
+        return
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        with suppress(OSError):
+            os.unlink(name, dir_fd=parent_descriptor)
+        return
+    descriptor: int | None = None
+    try:
+        descriptor = _open_bound_child_directory(
+            parent_descriptor,
+            name,
+            expected,
+            noun="restore staging directory",
+        )
+        for child_name in os.listdir(descriptor):
+            try:
+                child = os.stat(child_name, dir_fd=descriptor, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(child.st_mode) and not stat.S_ISLNK(child.st_mode):
+                _remove_restore_tree_at(descriptor, child_name, path / child_name)
+            else:
+                with suppress(OSError):
+                    os.unlink(child_name, dir_fd=descriptor)
+    except SnapshotError:
+        return
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+    with suppress(OSError):
+        os.rmdir(name, dir_fd=parent_descriptor)
 
 
 @contextmanager
@@ -515,85 +800,112 @@ def create_snapshot(
     root = root.resolve()
     if not root.is_dir():
         raise SnapshotError(f"snapshot root is not a directory: {root}")
+    output, parent_descriptor, parent_info = _open_snapshot_write_parent(
+        output,
+        noun="snapshot output",
+    )
+    temporary_descriptor: int | None = None
+    temporary_name: str | None = None
+    temporary_path: Path | None = None
     try:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output = output.parent.resolve(strict=True) / output.name
         try:
-            output_info = output.stat(follow_symlinks=False)
+            output_info = _stat_snapshot_write_entry(parent_descriptor, output)
         except FileNotFoundError:
             pass
+        except OSError as exc:
+            raise SnapshotError(f"unable to inspect snapshot output: {exc}") from exc
         else:
             if stat.S_ISLNK(output_info.st_mode) or not stat.S_ISREG(output_info.st_mode):
                 raise SnapshotError("snapshot output must be a regular file")
-    except SnapshotError:
-        raise
-    except OSError as exc:
-        raise SnapshotError(f"unable to prepare snapshot output: {exc}") from exc
-    ignored = {output}
-    entries: list[SnapshotEntry] = []
-    blobs: dict[str, bytes] = {}
-    total_bytes = 0
-    for relative, path in _iter_selected(root, includes, tuple(excludes), ignored):
-        if len(entries) >= limits.max_entries:
-            raise SnapshotError("snapshot exceeds max_entries")
-        _resolve_under_root(root, path, relative)
-        try:
-            entry = path.stat(follow_symlinks=False)
-        except OSError as exc:
-            raise SnapshotError(f"unable to stat {relative}: {exc}") from exc
-        if stat.S_ISLNK(entry.st_mode):
-            raise SnapshotError(f"symbolic links are not supported: {relative}")
-        if stat.S_ISDIR(entry.st_mode):
-            entries.append(SnapshotEntry(path=relative, kind="directory"))
-            continue
-        if not stat.S_ISREG(entry.st_mode):
-            raise SnapshotError(f"unsupported filesystem entry: {relative}")
-        data = _read_file(root, path, relative, limits, entry)
-        total_bytes += len(data)
-        if total_bytes > limits.max_total_bytes:
-            raise SnapshotError("snapshot exceeds max_total_bytes")
-        digest = hashlib.sha256(data).hexdigest()
-        executable = bool(entry.st_mode & stat.S_IXUSR)
-        entries.append(
-            SnapshotEntry(
-                path=relative,
-                kind="file",
-                sha256=digest,
-                size_bytes=len(data),
-                executable=executable,
+        ignored = {output}
+        entries: list[SnapshotEntry] = []
+        blobs: dict[str, bytes] = {}
+        total_bytes = 0
+        for relative, path in _iter_selected(root, includes, tuple(excludes), ignored):
+            if len(entries) >= limits.max_entries:
+                raise SnapshotError("snapshot exceeds max_entries")
+            _resolve_under_root(root, path, relative)
+            try:
+                entry = path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise SnapshotError(f"unable to stat {relative}: {exc}") from exc
+            if stat.S_ISLNK(entry.st_mode):
+                raise SnapshotError(f"symbolic links are not supported: {relative}")
+            if stat.S_ISDIR(entry.st_mode):
+                entries.append(SnapshotEntry(path=relative, kind="directory"))
+                continue
+            if not stat.S_ISREG(entry.st_mode):
+                raise SnapshotError(f"unsupported filesystem entry: {relative}")
+            data = _read_file(root, path, relative, limits, entry)
+            total_bytes += len(data)
+            if total_bytes > limits.max_total_bytes:
+                raise SnapshotError("snapshot exceeds max_total_bytes")
+            digest = hashlib.sha256(data).hexdigest()
+            executable = bool(entry.st_mode & stat.S_IXUSR)
+            entries.append(
+                SnapshotEntry(
+                    path=relative,
+                    kind="file",
+                    sha256=digest,
+                    size_bytes=len(data),
+                    executable=executable,
+                )
             )
+            blobs.setdefault(digest, data)
+        core = SnapshotCore(entries=entries, total_bytes=total_bytes, metadata=metadata or {})
+        manifest = SnapshotManifest(snapshot_id=_snapshot_id_validated(core), core=core)
+        manifest_bytes = _canonical_json(manifest.model_dump(mode="json")) + b"\n"
+        if len(manifest_bytes) > MAX_MANIFEST_BYTES:
+            raise SnapshotError("snapshot manifest is too large")
+        _snapshot_write_parent_must_be_stable(
+            output,
+            parent_descriptor,
+            parent_info,
+            noun="snapshot output",
         )
-        blobs.setdefault(digest, data)
-    core = SnapshotCore(entries=entries, total_bytes=total_bytes, metadata=metadata or {})
-    manifest = SnapshotManifest(snapshot_id=_snapshot_id_validated(core), core=core)
-    manifest_bytes = _canonical_json(manifest.model_dump(mode="json")) + b"\n"
-    if len(manifest_bytes) > MAX_MANIFEST_BYTES:
-        raise SnapshotError("snapshot manifest is too large")
-    descriptor: int | None = None
-    temporary: Path | None = None
-    try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{output.name}.",
-            suffix=".tmp",
-            dir=output.parent,
-        )
-        temporary = Path(temporary_name)
-        with os.fdopen(descriptor, "w+b") as handle:
-            descriptor = None
-            with zipfile.ZipFile(handle, "w") as archive:
-                archive.writestr(_zip_info(MANIFEST_NAME), manifest_bytes)
-                for digest in sorted(blobs):
-                    archive.writestr(_zip_info(f"{BLOB_PREFIX}{digest}"), blobs[digest])
-        os.replace(temporary, output)
-    except (OSError, zipfile.BadZipFile) as exc:
-        raise SnapshotError(f"unable to write snapshot archive: {exc}") from exc
+        try:
+            temporary_descriptor, temporary_name, temporary_path = _create_snapshot_temporary_file(
+                parent_descriptor,
+                output,
+            )
+            with os.fdopen(temporary_descriptor, "w+b") as handle:
+                temporary_descriptor = None
+                with zipfile.ZipFile(handle, "w") as archive:
+                    archive.writestr(_zip_info(MANIFEST_NAME), manifest_bytes)
+                    for digest in sorted(blobs):
+                        archive.writestr(_zip_info(f"{BLOB_PREFIX}{digest}"), blobs[digest])
+            _snapshot_write_parent_must_be_stable(
+                output,
+                parent_descriptor,
+                parent_info,
+                noun="snapshot output",
+            )
+            if _WRITE_DIR_FD_SUPPORTED:
+                os.replace(
+                    temporary_name,
+                    output.name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                )
+            else:
+                os.replace(temporary_path, output)
+            temporary_name = None
+            temporary_path = None
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise SnapshotError(f"unable to write snapshot archive: {exc}") from exc
+        return manifest
     finally:
-        if descriptor is not None:
+        if temporary_descriptor is not None:
             with suppress(OSError):
-                os.close(descriptor)
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return manifest
+                os.close(temporary_descriptor)
+        if temporary_name is not None:
+            if _WRITE_DIR_FD_SUPPORTED:
+                with suppress(OSError):
+                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+            elif temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+        with suppress(OSError):
+            os.close(parent_descriptor)
 
 
 def _safe_member_name(name: str) -> str:
@@ -691,65 +1003,126 @@ def restore_snapshot(
 ) -> SnapshotManifest:
     """Verify and atomically restore a snapshot into a new or empty directory."""
     limits = revalidate_snapshot_limits(limits)
+    destination, parent_descriptor, parent_info = _open_snapshot_write_parent(
+        destination,
+        noun="restore destination",
+    )
+    staging_name: str | None = None
+    staging_path: Path | None = None
+    staging_descriptor: int | None = None
     try:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination = destination.parent.resolve(strict=True) / destination.name
+        _restore_destination_is_empty(parent_descriptor, destination)
+        _snapshot_write_parent_must_be_stable(
+            destination,
+            parent_descriptor,
+            parent_info,
+            noun="restore destination",
+        )
+        staging_name, staging_path = _create_restore_staging_directory(
+            parent_descriptor,
+            destination,
+        )
+        if _WRITE_DIR_FD_SUPPORTED:
+            staging_expected = _stat_snapshot_write_entry(parent_descriptor, staging_path)
+            staging_descriptor = _open_bound_child_directory(
+                parent_descriptor,
+                staging_name,
+                staging_expected,
+                noun="restore staging directory",
+            )
         try:
-            destination_info = destination.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            pass
+            with _open_snapshot_archive_file(archive_path) as handle:
+                try:
+                    archive = zipfile.ZipFile(handle, "r")
+                except (OSError, zipfile.BadZipFile) as exc:
+                    raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+                with archive:
+                    manifest = _verify_snapshot_archive(archive, limits)
+                    for entry in manifest.core.entries:
+                        parts = tuple(PurePosixPath(entry.path).parts)
+                        if _WRITE_DIR_FD_SUPPORTED:
+                            assert staging_descriptor is not None
+                            if entry.kind == "directory":
+                                directory_descriptor = _open_restore_directory(
+                                    staging_descriptor,
+                                    parts,
+                                )
+                                with suppress(OSError):
+                                    os.close(directory_descriptor)
+                                continue
+                            assert entry.sha256 is not None
+                            info = archive.getinfo(f"{BLOB_PREFIX}{entry.sha256}")
+                            data = _read_member(archive, info, limits.max_file_bytes)
+                            _write_restore_file_at(
+                                staging_descriptor,
+                                parts,
+                                data,
+                                executable=entry.executable,
+                            )
+                            continue
+                        assert staging_path is not None
+                        target = (staging_path / Path(*parts)).resolve()
+                        try:
+                            target.relative_to(staging_path)
+                        except ValueError as exc:
+                            raise SnapshotError(
+                                f"restore path escapes staging root: {entry.path}"
+                            ) from exc
+                        if entry.kind == "directory":
+                            target.mkdir(parents=True, exist_ok=True)
+                            continue
+                        assert entry.sha256 is not None
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        info = archive.getinfo(f"{BLOB_PREFIX}{entry.sha256}")
+                        data = _read_member(archive, info, limits.max_file_bytes)
+                        target.write_bytes(data)
+                        target.chmod(0o755 if entry.executable else 0o644)
+        finally:
+            if staging_descriptor is not None:
+                with suppress(OSError):
+                    os.close(staging_descriptor)
+                staging_descriptor = None
+        _snapshot_write_parent_must_be_stable(
+            destination,
+            parent_descriptor,
+            parent_info,
+            noun="restore destination",
+        )
+        destination_exists = _restore_destination_is_empty(parent_descriptor, destination)
+        _snapshot_write_parent_must_be_stable(
+            destination,
+            parent_descriptor,
+            parent_info,
+            noun="restore destination",
+        )
+        if destination_exists:
+            if _WRITE_DIR_FD_SUPPORTED:
+                os.rmdir(destination.name, dir_fd=parent_descriptor)
+            else:
+                destination.rmdir()
+        if _WRITE_DIR_FD_SUPPORTED:
+            os.replace(
+                staging_name,
+                destination.name,
+                src_dir_fd=parent_descriptor,
+                dst_dir_fd=parent_descriptor,
+            )
         else:
-            if stat.S_ISLNK(destination_info.st_mode):
-                raise SnapshotError("restore destination must not be a symbolic link")
-            if not stat.S_ISDIR(destination_info.st_mode):
-                raise SnapshotError("restore destination exists and is not a directory")
-            try:
-                if any(destination.iterdir()):
-                    raise SnapshotError("restore destination must be empty")
-            except OSError as exc:
-                raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
-    except SnapshotError:
-        raise
-    except OSError as exc:
-        raise SnapshotError(f"unable to prepare restore destination: {exc}") from exc
-    staging = Path(
-        tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
-    ).resolve()
-    try:
-        with _open_snapshot_archive_file(archive_path) as handle:
-            try:
-                archive = zipfile.ZipFile(handle, "r")
-            except (OSError, zipfile.BadZipFile) as exc:
-                raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
-            with archive:
-                manifest = _verify_snapshot_archive(archive, limits)
-                for entry in manifest.core.entries:
-                    target = (staging / Path(*PurePosixPath(entry.path).parts)).resolve()
-                    try:
-                        target.relative_to(staging)
-                    except ValueError as exc:
-                        raise SnapshotError(
-                            f"restore path escapes staging root: {entry.path}"
-                        ) from exc
-                    if entry.kind == "directory":
-                        target.mkdir(parents=True, exist_ok=True)
-                        continue
-                    assert entry.sha256 is not None
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    info = archive.getinfo(f"{BLOB_PREFIX}{entry.sha256}")
-                    data = _read_member(archive, info, limits.max_file_bytes)
-                    target.write_bytes(data)
-                    target.chmod(0o755 if entry.executable else 0o644)
-        if destination.exists():
-            destination.rmdir()
-        os.replace(staging, destination)
+            os.replace(staging_path, destination)
+        staging_name = None
+        staging_path = None
     except SnapshotError:
         raise
     except (OSError, zipfile.BadZipFile) as exc:
         raise SnapshotError(f"unable to restore snapshot: {exc}") from exc
     finally:
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
+        if staging_descriptor is not None:
+            with suppress(OSError):
+                os.close(staging_descriptor)
+        if staging_name is not None and staging_path is not None:
+            _remove_restore_tree_at(parent_descriptor, staging_name, staging_path)
+        with suppress(OSError):
+            os.close(parent_descriptor)
     return manifest
 
 
