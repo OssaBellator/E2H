@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import e2h.benchmark_env as benchmark_env
 from e2h.benchmark_env import (
     BenchmarkEnvironmentError,
     BenchmarkEnvironmentKind,
@@ -33,6 +34,16 @@ def _suite() -> BenchmarkEnvironmentSuite:
             )
         ],
     )
+
+
+def _locked_source(tmp_path: Path) -> tuple[Path, Path, BenchmarkEnvironmentSuite, Any]:
+    root = tmp_path / "root"
+    source = root / "coding"
+    source.mkdir(parents=True)
+    (source / "check.py").write_text("print('inside')\n", encoding="utf-8")
+    suite = _suite()
+    lock = seal_benchmark_environment_suite(suite, root=root)
+    return root, source, suite, lock
 
 
 def test_seal_rejects_file_swapped_to_symlink_during_open(
@@ -99,10 +110,19 @@ def test_seal_rejects_directory_swapped_to_outside_symlink_during_listing(
     assert swapped is True
 
 
+@pytest.mark.parametrize("descriptor_enabled", [False, True])
 def test_materialize_rejects_directory_replaced_after_verification(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    descriptor_enabled: bool,
 ) -> None:
+    if descriptor_enabled and not benchmark_env._MATERIALIZATION_DIR_FD_SUPPORTED:
+        pytest.skip("requires descriptor-relative benchmark materialization support")
+    monkeypatch.setattr(
+        benchmark_env,
+        "_MATERIALIZATION_DIR_FD_SUPPORTED",
+        descriptor_enabled,
+    )
     root = tmp_path / "root"
     nested = root / "coding" / "nested"
     nested.mkdir(parents=True)
@@ -145,13 +165,20 @@ def test_materialize_rejects_directory_replaced_after_verification(
     assert not destination.exists()
 
 
-def test_materialize_rejects_dangling_destination_symlink(tmp_path: Path) -> None:
-    root = tmp_path / "root"
-    source = root / "coding"
-    source.mkdir(parents=True)
-    (source / "check.py").write_text("print('inside')\n", encoding="utf-8")
-    suite = _suite()
-    lock = seal_benchmark_environment_suite(suite, root=root)
+@pytest.mark.parametrize("descriptor_enabled", [False, True])
+def test_materialize_rejects_dangling_destination_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    descriptor_enabled: bool,
+) -> None:
+    if descriptor_enabled and not benchmark_env._MATERIALIZATION_DIR_FD_SUPPORTED:
+        pytest.skip("requires descriptor-relative benchmark materialization support")
+    monkeypatch.setattr(
+        benchmark_env,
+        "_MATERIALIZATION_DIR_FD_SUPPORTED",
+        descriptor_enabled,
+    )
+    root, _, suite, lock = _locked_source(tmp_path)
 
     outside = tmp_path / "outside-materialized"
     destination = tmp_path / "materialized"
@@ -171,3 +198,137 @@ def test_materialize_rejects_dangling_destination_symlink(tmp_path: Path) -> Non
 
     assert destination.is_symlink()
     assert not outside.exists()
+
+
+def test_materialize_fallback_preserves_nested_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(benchmark_env, "_MATERIALIZATION_DIR_FD_SUPPORTED", False)
+    root = tmp_path / "root"
+    source = root / "coding"
+    nested = source / "nested"
+    nested.mkdir(parents=True)
+    (source / "check.py").write_text("print('inside')\n", encoding="utf-8")
+    (nested / "value.txt").write_text("nested\n", encoding="utf-8")
+    suite = _suite()
+    lock = seal_benchmark_environment_suite(suite, root=root)
+    destination = tmp_path / "materialized"
+
+    verification = materialize_benchmark_environment(
+        suite,
+        lock,
+        "coding",
+        root=root,
+        destination=destination,
+    )
+
+    assert verification.verified is True
+    assert (destination / "check.py").read_text(encoding="utf-8") == "print('inside')\n"
+    assert (destination / "nested" / "value.txt").read_text(encoding="utf-8") == "nested\n"
+
+
+@pytest.mark.parametrize("descriptor_enabled", [False, True])
+def test_copy_environment_tree_cleans_lock_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    descriptor_enabled: bool,
+) -> None:
+    if descriptor_enabled and not benchmark_env._MATERIALIZATION_DIR_FD_SUPPORTED:
+        pytest.skip("requires descriptor-relative benchmark materialization support")
+    monkeypatch.setattr(
+        benchmark_env,
+        "_MATERIALIZATION_DIR_FD_SUPPORTED",
+        descriptor_enabled,
+    )
+    _, source, _, lock = _locked_source(tmp_path)
+    expected = lock.environments[0].model_copy(deep=True)
+    expected.source_sha256 = "0" * 64
+    destination = tmp_path / "materialized"
+
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="materialized environment does not match locked source",
+    ):
+        benchmark_env._copy_environment_tree(
+            source,
+            destination,
+            expected=expected,
+        )
+
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("descriptor_enabled", [False, True])
+def test_copy_environment_tree_cleans_empty_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    descriptor_enabled: bool,
+) -> None:
+    if descriptor_enabled and not benchmark_env._MATERIALIZATION_DIR_FD_SUPPORTED:
+        pytest.skip("requires descriptor-relative benchmark materialization support")
+    monkeypatch.setattr(
+        benchmark_env,
+        "_MATERIALIZATION_DIR_FD_SUPPORTED",
+        descriptor_enabled,
+    )
+    source = tmp_path / "empty-source"
+    source.mkdir()
+    destination = tmp_path / "materialized"
+
+    with pytest.raises(BenchmarkEnvironmentError, match="environment source_dir contains no files"):
+        benchmark_env._copy_environment_tree(source, destination)
+
+    assert not destination.exists()
+
+
+@pytest.mark.skipif(
+    not benchmark_env._MATERIALIZATION_DIR_FD_SUPPORTED,
+    reason="requires descriptor-relative benchmark materialization support",
+)
+def test_materialize_rejects_destination_parent_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _, suite, lock = _locked_source(tmp_path)
+
+    destination_parent = tmp_path / "destination-parent"
+    destination_parent.mkdir()
+    destination = destination_parent / "materialized"
+    moved = tmp_path / "original-destination-parent"
+    outside = tmp_path / "outside-destination-parent"
+    outside.mkdir()
+
+    original_mkdir = os.mkdir
+    swapped = False
+
+    def swapping_mkdir(
+        path: Any,
+        mode: int = 0o777,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal swapped
+        if Path(path).name == destination.name and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            destination_parent.rename(moved)
+            destination_parent.symlink_to(outside, target_is_directory=True)
+        original_mkdir(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", swapping_mkdir)
+
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="environment materialization destination parent changed while writing",
+    ):
+        materialize_benchmark_environment(
+            suite,
+            lock,
+            "coding",
+            root=root,
+            destination=destination,
+        )
+
+    assert swapped is True
+    assert list(outside.iterdir()) == []
+    assert not (moved / destination.name).exists()

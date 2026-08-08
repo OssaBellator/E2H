@@ -197,10 +197,10 @@ def test_materialize_uses_detached_suite_and_lock_snapshots(
     destination = tmp_path / "materialized"
     original_copy = benchmark_env._copy_environment_tree
 
-    def mutating_copy(source: Path, target: Path) -> None:
+    def mutating_copy(source: Path, target: Path, **kwargs: Any) -> Any:
         suite.environments[0].source_dir = "../caller-mutated"
         lock.environments[0].source_sha256 = "0" * 64
-        original_copy(source, target)
+        return original_copy(source, target, **kwargs)
 
     monkeypatch.setattr(benchmark_env, "_copy_environment_tree", mutating_copy)
 
