@@ -16,6 +16,25 @@ The planner delegates directly to the existing provider request builders. It doe
 
 The planner's public types and functions are exported from both `e2h` and `e2h.runtime_plan`. Package-root imports are convenient for callers that already use E2H's public runtime APIs, while the submodule remains available for explicit namespacing.
 
+## Command line
+
+The installed CLI exposes the same file-backed planner without provider credentials:
+
+```bash
+e2h runtime plan openai-responses \
+  capsule.yaml variant.yaml invocation.yaml --json
+
+e2h runtime plan anthropic-messages \
+  capsule.yaml variant.yaml invocation.yaml --output anthropic-plan.json
+
+e2h runtime plan gemini-generate-content \
+  capsule.yaml variant.yaml invocation.yaml --output gemini-plan.json
+```
+
+`--json` writes the complete `RuntimeRequestPlan` to stdout. `--output PATH` atomically writes the same JSON document to disk, and the two options may be used together. Without `--json`, E2H prints a compact provider/model/route/digest summary.
+
+The command does not inspect `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`.
+
 ## Planning loaded objects
 
 ```python
