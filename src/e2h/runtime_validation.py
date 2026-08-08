@@ -23,11 +23,6 @@ def revalidate_runtime_inputs(
     invocation_noun: str,
 ) -> tuple[HarnessVariantDocument, TaskCapsule, InvocationT]:
     """Return fully revalidated copies of one object-backed runtime input set."""
-    if not isinstance(invocation, invocation_type):
-        raise error_type(
-            f"invalid {invocation_noun}: expected {invocation_type.__name__}, "
-            f"got {type(invocation).__name__}"
-        )
 
     def revalidate_model(
         value: BaseModel,
@@ -35,6 +30,10 @@ def revalidate_runtime_inputs(
         *,
         noun: str,
     ) -> ModelT:
+        if not isinstance(value, model_type):
+            raise error_type(
+                f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+            )
         try:
             payload = value.model_dump(mode="json", warnings="none")
             return model_type.model_validate(payload)
