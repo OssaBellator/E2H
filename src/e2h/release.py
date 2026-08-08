@@ -25,6 +25,8 @@ _MAX_METADATA_BYTES = 1024 * 1024
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,254}$")
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 
 
 class ReleaseIntegrityError(ValueError):
@@ -461,16 +463,98 @@ def verify_release_artifacts(
     )
 
 
+def _read_release_manifest_bytes(path: Path) -> bytes:
+    try:
+        parent = path.parent.resolve(strict=True)
+        parent_expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
+    if not stat.S_ISDIR(parent_expected.st_mode):
+        raise ReleaseIntegrityError("release manifest parent must be a directory")
+    directory_flags = (
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        parent_descriptor = os.open(parent, directory_flags)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
+    descriptor: int | None = None
+    try:
+        parent_opened = os.fstat(parent_descriptor)
+        if _stat_identity(parent_opened) != _stat_identity(parent_expected):
+            raise ReleaseIntegrityError("release manifest parent changed while opening")
+        try:
+            expected = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _STAT_SUPPORTS_DIR_FD
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+        except OSError as exc:
+            raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
+        if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+            raise ReleaseIntegrityError("release manifest must be a regular file")
+        if expected.st_size > _MAX_MANIFEST_BYTES:
+            raise ReleaseIntegrityError(f"release manifest exceeds {_MAX_MANIFEST_BYTES} bytes")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = (
+                os.open(path.name, flags, dir_fd=parent_descriptor)
+                if _OPEN_SUPPORTS_DIR_FD
+                else os.open(parent / path.name, flags)
+            )
+        except OSError as exc:
+            raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ReleaseIntegrityError("release manifest must be a regular file")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise ReleaseIntegrityError("release manifest changed while opening")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(_MAX_MANIFEST_BYTES + 1)
+        after = os.fstat(descriptor)
+        current = (
+            os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if _STAT_SUPPORTS_DIR_FD
+            else (parent / path.name).stat(follow_symlinks=False)
+        )
+        parent_after = os.fstat(parent_descriptor)
+        parent_current = parent.stat(follow_symlinks=False)
+        if len(raw) > _MAX_MANIFEST_BYTES:
+            raise ReleaseIntegrityError(f"release manifest exceeds {_MAX_MANIFEST_BYTES} bytes")
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(raw) != opened.st_size
+        ):
+            raise ReleaseIntegrityError("release manifest changed while reading")
+        if _stat_identity(parent_after) != _stat_identity(parent_opened) or _stat_identity(
+            parent_current
+        ) != _stat_identity(parent_opened):
+            raise ReleaseIntegrityError("release manifest parent changed while reading")
+        return raw
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+
+
 def load_release_manifest(path: Path) -> ReleaseManifest:
     """Load a bounded strict JSON release manifest."""
     if path.suffix.lower() != ".json":
         raise ReleaseIntegrityError("release manifest must use .json")
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
-    if len(raw) > _MAX_MANIFEST_BYTES:
-        raise ReleaseIntegrityError(f"release manifest exceeds {_MAX_MANIFEST_BYTES} bytes")
+    raw = _read_release_manifest_bytes(path)
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
