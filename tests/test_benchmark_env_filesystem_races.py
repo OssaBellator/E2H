@@ -63,3 +63,36 @@ def test_seal_rejects_file_swapped_to_symlink_during_open(
         seal_benchmark_environment_suite(_suite(), root=root)
 
     assert swapped is True
+
+
+def test_seal_rejects_directory_swapped_to_outside_symlink_during_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    nested = root / "coding" / "nested"
+    nested.mkdir(parents=True)
+    inside = nested / "inside.txt"
+    inside.write_text("inside\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside-secret\n", encoding="utf-8")
+
+    original_open = os.open
+    swapped = False
+
+    def swapping_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        nonlocal swapped
+        if Path(path) == nested and not swapped:
+            swapped = True
+            inside.unlink()
+            nested.rmdir()
+            nested.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swapping_open)
+
+    with pytest.raises(BenchmarkEnvironmentError, match="environment directory"):
+        seal_benchmark_environment_suite(_suite(), root=root)
+
+    assert swapped is True
