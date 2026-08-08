@@ -10,10 +10,10 @@ import shutil
 import stat
 import tempfile
 import zipfile
-from collections.abc import Iterable
-from contextlib import suppress
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any, BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -40,6 +40,8 @@ DEFAULT_EXCLUDES = (
 )
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 
 
 class SnapshotError(ValueError):
@@ -184,20 +186,117 @@ def revalidate_snapshot_limits(
         raise error_type(f"invalid snapshot limits: {exc}") from exc
 
 
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
 def snapshot_id(core: SnapshotCore) -> str:
     payload = _canonical_json(core.model_dump(mode="json"))
     return hashlib.sha256(payload).hexdigest()
 
 
-def archive_sha256(path: Path) -> str:
+@contextmanager
+def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
+    try:
+        parent = path.parent.resolve(strict=True)
+        parent_expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+    if not stat.S_ISDIR(parent_expected.st_mode):
+        raise SnapshotError("snapshot archive parent must be a directory")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        parent_descriptor = os.open(parent, directory_flags)
+    except OSError as exc:
+        raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+    descriptor: int | None = None
+    handle: BinaryIO | None = None
+    try:
+        parent_opened = os.fstat(parent_descriptor)
+        if _stat_identity(parent_opened) != _stat_identity(parent_expected):
+            raise SnapshotError("snapshot archive parent changed while opening")
+        try:
+            expected = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _STAT_SUPPORTS_DIR_FD
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+        except OSError as exc:
+            raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+        if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+            raise SnapshotError("snapshot archive must be a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = (
+                os.open(path.name, flags, dir_fd=parent_descriptor)
+                if _OPEN_SUPPORTS_DIR_FD
+                else os.open(parent / path.name, flags)
+            )
+        except OSError as exc:
+            raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise SnapshotError("snapshot archive must be a regular file")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise SnapshotError("snapshot archive changed while opening")
+        handle = os.fdopen(descriptor, "rb", closefd=False)
+        try:
+            yield handle
+        except Exception:
+            raise
+        else:
+            after = os.fstat(descriptor)
+            current = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _STAT_SUPPORTS_DIR_FD
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+            parent_after = os.fstat(parent_descriptor)
+            parent_current = parent.stat(follow_symlinks=False)
+            if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
+                current
+            ) != _stat_identity(opened):
+                raise SnapshotError("snapshot archive changed while reading")
+            if _stat_identity(parent_after) != _stat_identity(parent_opened) or _stat_identity(
+                parent_current
+            ) != _stat_identity(parent_opened):
+                raise SnapshotError("snapshot archive parent changed while reading")
+    except OSError as exc:
+        raise SnapshotError(f"unable to read snapshot archive: {exc}") from exc
+    finally:
+        if handle is not None:
+            with suppress(OSError):
+                handle.close()
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+
+
+def _archive_sha256_handle(handle: BinaryIO) -> str:
     digest = hashlib.sha256()
     try:
-        with path.open("rb") as handle:
-            while chunk := handle.read(1024 * 1024):
-                digest.update(chunk)
+        handle.seek(0)
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+        handle.seek(0)
     except OSError as exc:
         raise SnapshotError(f"unable to hash snapshot archive: {exc}") from exc
     return digest.hexdigest()
+
+
+def archive_sha256(path: Path) -> str:
+    with _open_snapshot_archive_file(path) as handle:
+        return _archive_sha256_handle(handle)
 
 
 def _relative(root: Path, candidate: Path) -> str:
@@ -223,10 +322,6 @@ def _resolve_selected(root: Path, value: str) -> Path:
     except OSError as exc:
         raise SnapshotError(f"unable to stat include path {value}: {exc}") from exc
     return candidate
-
-
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
 
 
 def _resolve_under_root(root: Path, path: Path, relative: str) -> Path:
@@ -473,6 +568,57 @@ def _read_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) ->
     return data
 
 
+def _verify_snapshot_archive(
+    archive: zipfile.ZipFile,
+    limits: SnapshotLimits,
+) -> SnapshotManifest:
+    infos = archive.infolist()
+    names = [info.filename for info in infos]
+    for name in names:
+        _safe_member_name(name)
+    if len(names) != len(set(names)):
+        raise SnapshotError("snapshot archive contains duplicate members")
+    manifest_info = next((info for info in infos if info.filename == MANIFEST_NAME), None)
+    if manifest_info is None:
+        raise SnapshotError("snapshot archive is missing manifest.json")
+    manifest_data = _read_member(archive, manifest_info, MAX_MANIFEST_BYTES)
+    try:
+        raw_manifest = json.loads(manifest_data)
+        manifest = SnapshotManifest.model_validate(raw_manifest)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise SnapshotError(f"invalid snapshot manifest: {exc}") from exc
+    if len(manifest.core.entries) > limits.max_entries:
+        raise SnapshotError("snapshot exceeds max_entries")
+    if manifest.core.total_bytes > limits.max_total_bytes:
+        raise SnapshotError("snapshot exceeds max_total_bytes")
+    expected_blobs = {
+        entry.sha256: entry.size_bytes
+        for entry in manifest.core.entries
+        if entry.kind == "file" and entry.sha256 is not None
+    }
+    actual_blob_infos: dict[str, zipfile.ZipInfo] = {}
+    for info in infos:
+        if info.filename == MANIFEST_NAME:
+            continue
+        if not info.filename.startswith(BLOB_PREFIX):
+            raise SnapshotError(f"unexpected snapshot archive member: {info.filename}")
+        digest = info.filename.removeprefix(BLOB_PREFIX)
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise SnapshotError(f"invalid snapshot blob name: {info.filename}")
+        actual_blob_infos[digest] = info
+    if set(actual_blob_infos) != set(expected_blobs):
+        raise SnapshotError("snapshot blob set does not match the manifest")
+    for digest, expected_size in expected_blobs.items():
+        if expected_size > limits.max_file_bytes:
+            raise SnapshotError(f"blob exceeds max_file_bytes: {digest}")
+        data = _read_member(archive, actual_blob_infos[digest], limits.max_file_bytes)
+        if len(data) != expected_size:
+            raise SnapshotError(f"snapshot blob size mismatch: {digest}")
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise SnapshotError(f"snapshot blob digest mismatch: {digest}")
+    return manifest
+
+
 def verify_snapshot(
     archive_path: Path,
     *,
@@ -480,56 +626,13 @@ def verify_snapshot(
 ) -> SnapshotManifest:
     """Verify archive structure, manifest identity, and every content blob."""
     limits = revalidate_snapshot_limits(limits)
-    try:
-        archive = zipfile.ZipFile(archive_path, "r")
-    except (OSError, zipfile.BadZipFile) as exc:
-        raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
-    with archive:
-        infos = archive.infolist()
-        names = [info.filename for info in infos]
-        for name in names:
-            _safe_member_name(name)
-        if len(names) != len(set(names)):
-            raise SnapshotError("snapshot archive contains duplicate members")
-        manifest_info = next((info for info in infos if info.filename == MANIFEST_NAME), None)
-        if manifest_info is None:
-            raise SnapshotError("snapshot archive is missing manifest.json")
-        manifest_data = _read_member(archive, manifest_info, MAX_MANIFEST_BYTES)
+    with _open_snapshot_archive_file(archive_path) as handle:
         try:
-            raw_manifest = json.loads(manifest_data)
-            manifest = SnapshotManifest.model_validate(raw_manifest)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise SnapshotError(f"invalid snapshot manifest: {exc}") from exc
-        if len(manifest.core.entries) > limits.max_entries:
-            raise SnapshotError("snapshot exceeds max_entries")
-        if manifest.core.total_bytes > limits.max_total_bytes:
-            raise SnapshotError("snapshot exceeds max_total_bytes")
-        expected_blobs = {
-            entry.sha256: entry.size_bytes
-            for entry in manifest.core.entries
-            if entry.kind == "file" and entry.sha256 is not None
-        }
-        actual_blob_infos: dict[str, zipfile.ZipInfo] = {}
-        for info in infos:
-            if info.filename == MANIFEST_NAME:
-                continue
-            if not info.filename.startswith(BLOB_PREFIX):
-                raise SnapshotError(f"unexpected snapshot archive member: {info.filename}")
-            digest = info.filename.removeprefix(BLOB_PREFIX)
-            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
-                raise SnapshotError(f"invalid snapshot blob name: {info.filename}")
-            actual_blob_infos[digest] = info
-        if set(actual_blob_infos) != set(expected_blobs):
-            raise SnapshotError("snapshot blob set does not match the manifest")
-        for digest, expected_size in expected_blobs.items():
-            if expected_size > limits.max_file_bytes:
-                raise SnapshotError(f"blob exceeds max_file_bytes: {digest}")
-            data = _read_member(archive, actual_blob_infos[digest], limits.max_file_bytes)
-            if len(data) != expected_size:
-                raise SnapshotError(f"snapshot blob size mismatch: {digest}")
-            if hashlib.sha256(data).hexdigest() != digest:
-                raise SnapshotError(f"snapshot blob digest mismatch: {digest}")
-        return manifest
+            archive = zipfile.ZipFile(handle, "r")
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+        with archive:
+            return _verify_snapshot_archive(archive, limits)
 
 
 def restore_snapshot(
@@ -540,7 +643,6 @@ def restore_snapshot(
 ) -> SnapshotManifest:
     """Verify and atomically restore a snapshot into a new or empty directory."""
     limits = revalidate_snapshot_limits(limits)
-    manifest = verify_snapshot(archive_path, limits=limits)
     destination = destination.resolve()
     if destination.exists() and not destination.is_dir():
         raise SnapshotError("restore destination exists and is not a directory")
@@ -555,25 +657,35 @@ def restore_snapshot(
         tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
     ).resolve()
     try:
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            for entry in manifest.core.entries:
-                target = (staging / Path(*PurePosixPath(entry.path).parts)).resolve()
-                try:
-                    target.relative_to(staging)
-                except ValueError as exc:
-                    raise SnapshotError(f"restore path escapes staging root: {entry.path}") from exc
-                if entry.kind == "directory":
-                    target.mkdir(parents=True, exist_ok=True)
-                    continue
-                assert entry.sha256 is not None
-                target.parent.mkdir(parents=True, exist_ok=True)
-                info = archive.getinfo(f"{BLOB_PREFIX}{entry.sha256}")
-                data = _read_member(archive, info, limits.max_file_bytes)
-                target.write_bytes(data)
-                target.chmod(0o755 if entry.executable else 0o644)
+        with _open_snapshot_archive_file(archive_path) as handle:
+            try:
+                archive = zipfile.ZipFile(handle, "r")
+            except (OSError, zipfile.BadZipFile) as exc:
+                raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+            with archive:
+                manifest = _verify_snapshot_archive(archive, limits)
+                for entry in manifest.core.entries:
+                    target = (staging / Path(*PurePosixPath(entry.path).parts)).resolve()
+                    try:
+                        target.relative_to(staging)
+                    except ValueError as exc:
+                        raise SnapshotError(
+                            f"restore path escapes staging root: {entry.path}"
+                        ) from exc
+                    if entry.kind == "directory":
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    assert entry.sha256 is not None
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    info = archive.getinfo(f"{BLOB_PREFIX}{entry.sha256}")
+                    data = _read_member(archive, info, limits.max_file_bytes)
+                    target.write_bytes(data)
+                    target.chmod(0o755 if entry.executable else 0o644)
         if destination.exists():
             destination.rmdir()
         os.replace(staging, destination)
+    except SnapshotError:
+        raise
     except (OSError, zipfile.BadZipFile) as exc:
         raise SnapshotError(f"unable to restore snapshot: {exc}") from exc
     finally:
@@ -589,10 +701,18 @@ def snapshot_reference(
     role: Literal["workspace", "artifact"] = "workspace",
 ) -> SnapshotReference:
     """Verify an archive and return a portable content-addressed reference."""
-    manifest = verify_snapshot(archive_path)
+    limits = revalidate_snapshot_limits(None)
+    with _open_snapshot_archive_file(archive_path) as handle:
+        try:
+            archive = zipfile.ZipFile(handle, "r")
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+        with archive:
+            manifest = _verify_snapshot_archive(archive, limits)
+        archive_digest = _archive_sha256_handle(handle)
     return SnapshotReference(
         snapshot_id=manifest.snapshot_id,
-        archive_sha256=archive_sha256(archive_path),
+        archive_sha256=archive_digest,
         locator=locator or archive_path.name,
         role=role,
     )
