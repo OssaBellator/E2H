@@ -16,6 +16,7 @@ from e2h.promotion_models import (
     RollbackTrigger,
     promotion_receipt_sha256,
 )
+from e2h.promotion_validation import revalidate_promotion_model
 
 _ROLLBACK_OPERATORS: dict[
     RollbackOperator,
@@ -35,6 +36,14 @@ def rollback_triggered(
     observed_window_seconds: int | None = None,
 ) -> bool:
     """Return whether one observation matches and satisfies a declared trigger."""
+    try:
+        trigger = revalidate_promotion_model(
+            trigger,
+            RollbackTrigger,
+            noun="rollback trigger",
+        )
+    except ValueError as exc:
+        raise PromotionError(f"invalid rollback trigger: {exc}") from exc
     if not math.isfinite(observed_value):
         raise PromotionError("rollback observed value must be finite")
     if observed_samples < 1:
@@ -66,7 +75,11 @@ def record_rollback(
     if _ID_RE.fullmatch(event_id) is None or _ID_RE.fullmatch(actor) is None:
         raise PromotionError("rollback event id and actor must use stable identifiers")
     try:
-        receipt = PromotionReceipt.model_validate(receipt.model_dump(mode="json"))
+        receipt = revalidate_promotion_model(
+            receipt,
+            PromotionReceipt,
+            noun="promotion receipt",
+        )
     except ValueError as exc:
         raise PromotionError(f"invalid promotion receipt: {exc}") from exc
     triggers = {trigger.id: trigger for trigger in receipt.rollback.triggers}
