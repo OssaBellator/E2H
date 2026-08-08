@@ -15,6 +15,7 @@ from e2h.snapshot import (
     SnapshotCore,
     SnapshotEntry,
     SnapshotLimits,
+    revalidate_snapshot_limits,
     snapshot_id,
 )
 
@@ -84,7 +85,7 @@ def source_tree_sha256(
     limits: SnapshotLimits | None = None,
 ) -> str:
     """Return the canonical snapshot-core SHA-256 for one release source tree."""
-    limits = limits or SnapshotLimits()
+    limits = revalidate_snapshot_limits(limits, error_type=ReleaseSourceError)
     try:
         if root.is_symlink() or not root.is_dir():
             raise ReleaseSourceError("release source root must be a real directory")

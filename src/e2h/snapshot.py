@@ -164,6 +164,25 @@ class SnapshotLimits(StrictModel):
     max_total_bytes: int = Field(default=DEFAULT_MAX_TOTAL_BYTES, ge=1)
 
 
+def revalidate_snapshot_limits(
+    limits: SnapshotLimits | None,
+    *,
+    error_type: type[ValueError] = SnapshotError,
+) -> SnapshotLimits:
+    """Return a detached limits snapshot before any bounded filesystem work."""
+    if limits is None:
+        return SnapshotLimits()
+    if type(limits) is not SnapshotLimits:
+        raise error_type(
+            f"invalid snapshot limits: expected SnapshotLimits, got {type(limits).__name__}"
+        )
+    try:
+        payload = limits.model_dump(mode="python", warnings="none")
+        return SnapshotLimits.model_validate(payload)
+    except ValueError as exc:
+        raise error_type(f"invalid snapshot limits: {exc}") from exc
+
+
 def snapshot_id(core: SnapshotCore) -> str:
     payload = _canonical_json(core.model_dump(mode="json"))
     return hashlib.sha256(payload).hexdigest()
@@ -283,7 +302,7 @@ def create_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Create a deterministic snapshot archive and return its manifest."""
-    limits = limits or SnapshotLimits()
+    limits = revalidate_snapshot_limits(limits)
     root = root.resolve()
     if not root.is_dir():
         raise SnapshotError(f"snapshot root is not a directory: {root}")
@@ -361,7 +380,7 @@ def verify_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Verify archive structure, manifest identity, and every content blob."""
-    limits = limits or SnapshotLimits()
+    limits = revalidate_snapshot_limits(limits)
     try:
         archive = zipfile.ZipFile(archive_path, "r")
     except (OSError, zipfile.BadZipFile) as exc:
@@ -421,7 +440,7 @@ def restore_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Verify and atomically restore a snapshot into a new or empty directory."""
-    limits = limits or SnapshotLimits()
+    limits = revalidate_snapshot_limits(limits)
     manifest = verify_snapshot(archive_path, limits=limits)
     destination = destination.resolve()
     if destination.exists() and not destination.is_dir():
