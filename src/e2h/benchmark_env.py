@@ -398,7 +398,9 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
     try:
         source_info = source.stat(follow_symlinks=False)
     except OSError as exc:
-        raise BenchmarkEnvironmentError(f"unable to stat environment source_dir: {exc}") from exc
+        raise BenchmarkEnvironmentError(
+            f"unable to stat environment source_dir: {exc}"
+        ) from exc
     if stat.S_ISLNK(source_info.st_mode) or not stat.S_ISDIR(source_info.st_mode):
         raise BenchmarkEnvironmentError("environment source_dir is not a directory")
     roots = _list_environment_directory(source, source, ".", source_info)
@@ -609,7 +611,7 @@ def load_benchmark_environment_suite(path: Path) -> BenchmarkEnvironmentSuite:
 
 def load_benchmark_environment_lock(path: Path) -> BenchmarkEnvironmentSuiteLock:
     """Load a bounded strict JSON/YAML generated environment lock."""
-    payload = _read_mapping(path, noun="benchmark environment lock", max_bytes=_MAX_DOCUMENT_BYTES) if False else _read_mapping(path, noun="benchmark environment lock")
+    payload = _read_mapping(path, noun="benchmark environment lock")
     try:
         return BenchmarkEnvironmentSuiteLock.model_validate(payload)
     except ValueError as exc:
