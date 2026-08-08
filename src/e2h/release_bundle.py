@@ -141,9 +141,7 @@ def _copy_verified_file(
             while chunk := handle.read(1024 * 1024):
                 observed += len(chunk)
                 if observed > _MAX_BUNDLE_FILE_BYTES:
-                    raise ReleaseBundleError(
-                        f"{noun} exceeds {_MAX_BUNDLE_FILE_BYTES} bytes"
-                    )
+                    raise ReleaseBundleError(f"{noun} exceeds {_MAX_BUNDLE_FILE_BYTES} bytes")
                 output.write(chunk)
                 digest.update(chunk)
         after = os.fstat(descriptor)
@@ -216,16 +214,10 @@ def _validate_checksum_shape(checksums: dict[str, str]) -> None:
     distribution_paths = paths - _STATIC_CHECKSUM_PATHS
     if len(distribution_paths) != 2:
         raise ReleaseBundleError("release checksum manifest must contain exactly two distributions")
-    if (
-        sum(path.startswith("dist/") and path.endswith(".whl") for path in distribution_paths)
-        != 1
-    ):
+    if sum(path.startswith("dist/") and path.endswith(".whl") for path in distribution_paths) != 1:
         raise ReleaseBundleError("release checksum manifest must contain exactly one wheel")
     if (
-        sum(
-            path.startswith("dist/") and path.endswith(".tar.gz")
-            for path in distribution_paths
-        )
+        sum(path.startswith("dist/") and path.endswith(".tar.gz") for path in distribution_paths)
         != 1
     ):
         raise ReleaseBundleError("release checksum manifest must contain exactly one sdist")
@@ -295,9 +287,7 @@ def _verify_bundle_layout(directory: Path) -> None:
 
 def _verify_distribution_layout(directory: Path, checksums: dict[str, str]) -> None:
     expected = {
-        PurePosixPath(relative).name
-        for relative in checksums
-        if relative.startswith("dist/")
+        PurePosixPath(relative).name for relative in checksums if relative.startswith("dist/")
     }
     dist = directory / "dist"
     try:
@@ -421,10 +411,7 @@ def _verify_staged_bundle(
         canonical_sbom = canonicalize_cyclonedx_sbom_file(sbom_path).encode("utf-8")
     except ValueError as exc:
         raise ReleaseBundleError(f"release SBOM verification failed: {exc}") from exc
-    if (
-        _read_regular_bytes(sbom_path, limit=8 * 1024 * 1024, noun="release SBOM")
-        != canonical_sbom
-    ):
+    if _read_regular_bytes(sbom_path, limit=8 * 1024 * 1024, noun="release SBOM") != canonical_sbom:
         raise ReleaseBundleError("release SBOM is not canonical")
     sbom = json.loads(canonical_sbom)
     component = sbom["metadata"]["component"]
