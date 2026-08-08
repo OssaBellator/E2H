@@ -474,12 +474,7 @@ def _copy_environment_file(
             raise BenchmarkEnvironmentError(
                 f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
             )
-        destination_flags = (
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0)
-        )
+        destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         try:
             destination_descriptor = os.open(destination, destination_flags, 0o600)
         except OSError as exc:
