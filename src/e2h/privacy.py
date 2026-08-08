@@ -11,7 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeVar, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -48,6 +48,9 @@ class RedactionPolicyError(ValueError):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
 
 
 class RedactionKind(StrEnum):
@@ -168,6 +171,48 @@ class RedactionOutcome:
 def default_redaction_policy() -> RedactionPolicy:
     """Return the stable built-in baseline policy."""
     return RedactionPolicy()
+
+
+def _revalidate_privacy_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    """Return a detached model snapshot after enforcing one concrete privacy type."""
+    if type(value) is not model_type:
+        raise RedactionPolicyError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise RedactionPolicyError(f"invalid {noun}: {exc}") from exc
+
+
+def _validated_privacy_inputs(
+    traces: list[Trace],
+    policy: RedactionPolicy | None,
+) -> tuple[list[Trace], RedactionPolicy]:
+    active_policy = (
+        default_redaction_policy()
+        if policy is None
+        else _revalidate_privacy_model(
+            policy,
+            RedactionPolicy,
+            noun="redaction policy",
+        )
+    )
+    validated_traces = [
+        _revalidate_privacy_model(
+            trace,
+            Trace,
+            noun=f"trace at index {index}",
+        )
+        for index, trace in enumerate(traces)
+    ]
+    return validated_traces, active_policy
 
 
 def redaction_policy_sha256(policy: RedactionPolicy) -> str:
@@ -600,11 +645,12 @@ def apply_redaction_policy(
     """Apply a policy under a bounded, invocation-local review limit."""
     if max_records < 1:
         raise RedactionPolicyError("max_records must be at least 1")
+    traces, active_policy = _validated_privacy_inputs(traces, policy)
     token = _ACTIVE_REDACTION_LIMIT.set(max_records)
     try:
         return _apply_redaction_policy_with_active_limit(
             traces,
-            policy=policy,
+            policy=active_policy,
             redaction_enabled=redaction_enabled,
         )
     finally:
