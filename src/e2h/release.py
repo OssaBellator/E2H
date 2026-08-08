@@ -406,10 +406,26 @@ def seal_release_artifacts(
         raise ReleaseIntegrityError(f"release artifacts are inconsistent: {exc}") from exc
 
 
-def release_manifest_sha256(manifest: ReleaseManifest) -> str:
-    """Return the canonical identity of a release manifest."""
+def _validated_release_manifest(manifest: ReleaseManifest) -> ReleaseManifest:
+    if type(manifest) is not ReleaseManifest:
+        raise ReleaseIntegrityError(
+            f"invalid release manifest: expected ReleaseManifest, got {type(manifest).__name__}"
+        )
+    try:
+        payload = manifest.model_dump(mode="python", warnings="none")
+        return ReleaseManifest.model_validate(payload)
+    except ValueError as exc:
+        raise ReleaseIntegrityError(f"invalid release manifest: {exc}") from exc
+
+
+def _release_manifest_sha256_validated(manifest: ReleaseManifest) -> str:
     payload = manifest.model_dump(mode="json")
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def release_manifest_sha256(manifest: ReleaseManifest) -> str:
+    """Return the canonical identity of a release manifest."""
+    return _release_manifest_sha256_validated(_validated_release_manifest(manifest))
 
 
 def verify_release_artifacts(
@@ -417,15 +433,7 @@ def verify_release_artifacts(
     directory: Path,
 ) -> ReleaseVerification:
     """Verify that a directory exactly matches one sealed release manifest."""
-    if type(manifest) is not ReleaseManifest:
-        raise ReleaseIntegrityError(
-            f"invalid release manifest: expected ReleaseManifest, got {type(manifest).__name__}"
-        )
-    try:
-        payload = manifest.model_dump(mode="python", warnings="none")
-        validated = ReleaseManifest.model_validate(payload)
-    except ValueError as exc:
-        raise ReleaseIntegrityError(f"invalid release manifest: {exc}") from exc
+    validated = _validated_release_manifest(manifest)
     actual = seal_release_artifacts(
         directory,
         expected_project=validated.project,
@@ -446,7 +454,7 @@ def verify_release_artifacts(
     return ReleaseVerification(
         project=validated.project,
         version=validated.version,
-        manifest_sha256=release_manifest_sha256(validated),
+        manifest_sha256=_release_manifest_sha256_validated(validated),
         artifact_count=len(validated.artifacts),
         total_bytes=sum(artifact.size_bytes for artifact in validated.artifacts),
         artifacts={artifact.filename: artifact.sha256 for artifact in validated.artifacts},
