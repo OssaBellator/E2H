@@ -156,7 +156,8 @@ def test_timeout_force_removes_container(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv("FAKE_DOCKER_LOG", str(log))
     capsule = _capsule().model_copy(deep=True)
     capsule.success.commands[0].argv = ["timeout-check"]
-    capsule.success.commands[0].timeout_seconds = 0.1
+    # Leave startup margin so this tests cleanup after the cidfile exists, not Python startup speed.
+    capsule.success.commands[0].timeout_seconds = 0.5
     result = run_capsule(
         capsule,
         tmp_path,
