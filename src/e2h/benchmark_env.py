@@ -245,9 +245,14 @@ class _ScannedEnvironment:
     total_bytes: int
 
 
+def _benchmark_environment_suite_sha256_validated(suite: BenchmarkEnvironmentSuite) -> str:
+    return hashlib.sha256(_canonical_json_bytes(suite.model_dump(mode="json"))).hexdigest()
+
+
 def benchmark_environment_suite_sha256(suite: BenchmarkEnvironmentSuite) -> str:
     """Return the canonical identity of a human-authored environment suite."""
-    return hashlib.sha256(_canonical_json_bytes(suite.model_dump(mode="json"))).hexdigest()
+    suite = _validated_benchmark_environment_suite(suite)
+    return _benchmark_environment_suite_sha256_validated(suite)
 
 
 def _tree_digest(files: list[BenchmarkEnvironmentFile]) -> str:
@@ -366,7 +371,7 @@ def seal_benchmark_environment_suite(
         )
     return BenchmarkEnvironmentSuiteLock(
         suite_id=suite.id,
-        suite_sha256=benchmark_environment_suite_sha256(suite),
+        suite_sha256=_benchmark_environment_suite_sha256_validated(suite),
         environments=entries,
     )
 
@@ -379,7 +384,7 @@ def _verify_benchmark_environment_suite_validated(
 ) -> BenchmarkEnvironmentVerification:
     if lock.suite_id != suite.id:
         raise BenchmarkEnvironmentError("environment lock suite_id does not match suite")
-    expected_suite_sha256 = benchmark_environment_suite_sha256(suite)
+    expected_suite_sha256 = _benchmark_environment_suite_sha256_validated(suite)
     if lock.suite_sha256 != expected_suite_sha256:
         raise BenchmarkEnvironmentError("environment lock suite_sha256 does not match suite")
     locked = {entry.id: entry for entry in lock.environments}
