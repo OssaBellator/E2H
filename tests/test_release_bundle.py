@@ -173,6 +173,7 @@ def _write_bundle(
                 }
             },
             "components": [],
+            "dependencies": [],
         }
     )
     (bundle / "e2h-sbom.cdx.json").write_text(sbom, encoding="utf-8")
@@ -288,6 +289,20 @@ def test_verify_release_bundle_rejects_noncanonical_sbom_even_with_new_checksum(
     _rewrite_checksums(bundle)
 
     with pytest.raises(ReleaseBundleError, match="SBOM is not canonical"):
+        verify_release_bundle(bundle)
+
+
+def test_verify_release_bundle_rejects_sbom_version_mismatch_with_new_checksum(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, _ = _write_bundle(tmp_path, monkeypatch)
+    sbom = bundle / "e2h-sbom.cdx.json"
+    payload = json.loads(sbom.read_text(encoding="utf-8"))
+    payload["metadata"]["component"]["version"] = "999.0.0"
+    sbom.write_text(canonicalize_cyclonedx_sbom(payload), encoding="utf-8")
+    _rewrite_checksums(bundle)
+
+    with pytest.raises(ReleaseBundleError, match="SBOM component does not match release manifest"):
         verify_release_bundle(bundle)
 
 
