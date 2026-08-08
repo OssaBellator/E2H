@@ -73,6 +73,14 @@ class PartitionRole(StrEnum):
     SEALED_TEST = "sealed_test"
 
 
+def _validated_partition_role(role: PartitionRole) -> PartitionRole:
+    if type(role) is not PartitionRole:
+        raise DatasetPartitionError(
+            f"invalid partition role: expected PartitionRole, got {type(role).__name__}"
+        )
+    return role
+
+
 class DatasetPartitionDocument(StrictModel):
     """Bind complete, disjoint dataset splits to exact private and public identities."""
 
@@ -114,11 +122,14 @@ class DatasetPartitionDocument(StrictModel):
 
     def ids_for(self, role: PartitionRole) -> list[str]:
         """Return normalized example ids for one split."""
+        role = _validated_partition_role(role)
         if role is PartitionRole.TRAIN:
             return self.train
         if role is PartitionRole.VALIDATION:
             return self.validation
-        return self.sealed_test
+        if role is PartitionRole.SEALED_TEST:
+            return self.sealed_test
+        raise DatasetPartitionError(f"unsupported partition role: {role!r}")
 
 
 class DatasetPartitionVerification(StrictModel):
@@ -392,6 +403,7 @@ def export_dataset_partition(
     role: PartitionRole,
 ) -> DatasetPartitionExport:
     """Export one split while withholding sealed-test outputs and metadata."""
+    role = _validated_partition_role(role)
     document, dataset = _validated_inputs(document, dataset)
     verification = _verify_validated_partitions(document, dataset)
     examples_by_id = {example.id: example for example in dataset.examples}
