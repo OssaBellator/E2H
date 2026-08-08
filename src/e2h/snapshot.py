@@ -145,7 +145,7 @@ class SnapshotManifest(StrictModel):
 
     @model_validator(mode="after")
     def identifier_must_match_core(self) -> SnapshotManifest:
-        if self.snapshot_id != snapshot_id(self.core):
+        if self.snapshot_id != _snapshot_id_validated(self.core):
             raise ValueError("snapshot_id does not match the manifest core")
         return self
 
@@ -190,9 +190,25 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
 
 
-def snapshot_id(core: SnapshotCore) -> str:
+def _validated_snapshot_core(core: SnapshotCore) -> SnapshotCore:
+    if type(core) is not SnapshotCore:
+        raise SnapshotError(
+            f"invalid snapshot core: expected SnapshotCore, got {type(core).__name__}"
+        )
+    try:
+        payload = core.model_dump(mode="python", warnings="none")
+        return SnapshotCore.model_validate(payload)
+    except ValueError as exc:
+        raise SnapshotError(f"invalid snapshot core: {exc}") from exc
+
+
+def _snapshot_id_validated(core: SnapshotCore) -> str:
     payload = _canonical_json(core.model_dump(mode="json"))
     return hashlib.sha256(payload).hexdigest()
+
+
+def snapshot_id(core: SnapshotCore) -> str:
+    return _snapshot_id_validated(_validated_snapshot_core(core))
 
 
 @contextmanager
@@ -530,7 +546,7 @@ def create_snapshot(
         )
         blobs.setdefault(digest, data)
     core = SnapshotCore(entries=entries, total_bytes=total_bytes, metadata=metadata or {})
-    manifest = SnapshotManifest(snapshot_id=snapshot_id(core), core=core)
+    manifest = SnapshotManifest(snapshot_id=_snapshot_id_validated(core), core=core)
     manifest_bytes = _canonical_json(manifest.model_dump(mode="json")) + b"\n"
     if len(manifest_bytes) > MAX_MANIFEST_BYTES:
         raise SnapshotError("snapshot manifest is too large")
