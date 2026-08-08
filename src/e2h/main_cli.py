@@ -4,11 +4,11 @@ from e2h.benchmark_cli import benchmark_app
 from e2h.capture_cli import capture_app
 from e2h.cli import app as app
 from e2h.genome_cli import genome_app
-from e2h.openai_runtime_cli import runtime_app
 from e2h.optimizer_cli import optimizer_app
 from e2h.partition_cli import partition_app
 from e2h.promotion_cli import promotion_app
 from e2h.release_cli import release_app
+from e2h.runtime_cli import runtime_app
 from e2h.variant_cli import variant_app
 
 app.add_typer(benchmark_app, name="benchmark")
