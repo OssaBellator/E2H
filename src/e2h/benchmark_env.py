@@ -398,9 +398,7 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
     try:
         source_info = source.stat(follow_symlinks=False)
     except OSError as exc:
-        raise BenchmarkEnvironmentError(
-            f"unable to stat environment source_dir: {exc}"
-        ) from exc
+        raise BenchmarkEnvironmentError(f"unable to stat environment source_dir: {exc}") from exc
     if stat.S_ISLNK(source_info.st_mode) or not stat.S_ISDIR(source_info.st_mode):
         raise BenchmarkEnvironmentError("environment source_dir is not a directory")
     roots = _list_environment_directory(source, source, ".", source_info)
