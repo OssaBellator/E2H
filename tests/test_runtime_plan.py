@@ -256,6 +256,21 @@ def test_runtime_request_plan_rejects_provider_request_type_mismatch() -> None:
         )
 
 
+def test_runtime_request_plan_rejects_unknown_schema_version() -> None:
+    openai_case = CASES[0]
+    plan = plan_runtime_request(
+        RuntimeProvider.OPENAI_RESPONSES,
+        document(openai_case),
+        capsule(),
+        invocation(openai_case),
+    )
+    payload = plan.model_dump()
+    payload["schema_version"] = "999"
+
+    with pytest.raises(ValueError):
+        RuntimeRequestPlan.model_validate(payload)
+
+
 def test_load_runtime_request_plan_normalizes_document_errors(tmp_path: Path) -> None:
     bad_capsule = tmp_path / "capsule.json"
     variant = tmp_path / "variant.json"
