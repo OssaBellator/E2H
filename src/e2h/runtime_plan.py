@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -54,6 +54,7 @@ RuntimeInvocation = (
     OpenAIResponsesInvocation | AnthropicMessagesInvocation | GeminiGenerateContentInvocation
 )
 RuntimeRequest = OpenAIResponsesRequest | AnthropicMessagesRequest | GeminiGenerateContentRequest
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class RuntimeRequestPlan(BaseModel):
@@ -109,6 +110,15 @@ def _invocation_for_provider(
     return invocation
 
 
+def _revalidate_model(value: BaseModel, model_type: type[ModelT], *, noun: str) -> ModelT:
+    """Re-run model invariants for mutable object-backed planner inputs."""
+    try:
+        payload = value.model_dump(mode="json", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise RuntimePlanError(f"invalid {noun}: {exc}") from exc
+
+
 def plan_runtime_request(
     provider: RuntimeProvider | str,
     document: HarnessVariantDocument,
@@ -118,27 +128,44 @@ def plan_runtime_request(
     """Materialize one exact provider request without credentials or network I/O."""
     selected = _provider(provider)
     checked = _invocation_for_provider(selected, invocation)
+    document = _revalidate_model(document, HarnessVariantDocument, noun="variant document")
+    capsule = _revalidate_model(capsule, TaskCapsule, noun="task capsule")
     try:
         if selected is RuntimeProvider.OPENAI_RESPONSES:
             assert isinstance(checked, OpenAIResponsesInvocation)
+            openai_invocation = _revalidate_model(
+                checked,
+                OpenAIResponsesInvocation,
+                noun="openai-responses invocation",
+            )
             request: RuntimeRequest = build_openai_responses_request(
                 document,
                 capsule,
-                checked,
+                openai_invocation,
             )
         elif selected is RuntimeProvider.ANTHROPIC_MESSAGES:
             assert isinstance(checked, AnthropicMessagesInvocation)
+            anthropic_invocation = _revalidate_model(
+                checked,
+                AnthropicMessagesInvocation,
+                noun="anthropic-messages invocation",
+            )
             request = build_anthropic_messages_request(
                 document,
                 capsule,
-                checked,
+                anthropic_invocation,
             )
         else:
             assert isinstance(checked, GeminiGenerateContentInvocation)
+            gemini_invocation = _revalidate_model(
+                checked,
+                GeminiGenerateContentInvocation,
+                noun="gemini-generate-content invocation",
+            )
             request = build_gemini_generate_content_request(
                 document,
                 capsule,
-                checked,
+                gemini_invocation,
             )
     except (OpenAIRuntimeError, AnthropicRuntimeError, GeminiRuntimeError) as exc:
         raise RuntimePlanError(f"unable to plan {selected.value} request: {exc}") from exc
