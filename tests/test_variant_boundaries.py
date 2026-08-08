@@ -95,7 +95,9 @@ def test_verification_rejects_model_subclasses_and_plain_wrong_types() -> None:
     base = capsule()
     variant = document(base)
 
-    with pytest.raises(VariantError, match="expected HarnessVariantDocument, got _DocumentSubclass"):
+    with pytest.raises(
+        VariantError, match="expected HarnessVariantDocument, got _DocumentSubclass"
+    ):
         verify_variant_document(_as_subclass(variant, _DocumentSubclass), base)
 
     with pytest.raises(VariantError, match="expected TaskCapsule, got _CapsuleSubclass"):
