@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any, cast
 
@@ -196,15 +195,14 @@ def test_materialize_uses_detached_suite_and_lock_snapshots(
     root = _root(tmp_path)
     lock = seal_benchmark_environment_suite(suite, root=root)
     destination = tmp_path / "materialized"
-    original_copytree = shutil.copytree
+    original_copy = benchmark_env._copy_environment_tree
 
-    def mutating_copytree(source: Path, target: Path, **kwargs: Any) -> str:
+    def mutating_copy(source: Path, target: Path) -> None:
         suite.environments[0].source_dir = "../caller-mutated"
         lock.environments[0].source_sha256 = "0" * 64
-        result = original_copytree(source, target, **kwargs)
-        return str(result)
+        original_copy(source, target)
 
-    monkeypatch.setattr(benchmark_env.shutil, "copytree", mutating_copytree)
+    monkeypatch.setattr(benchmark_env, "_copy_environment_tree", mutating_copy)
 
     verification = materialize_benchmark_environment(
         suite,
