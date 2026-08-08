@@ -18,6 +18,7 @@ from e2h.ingest import (
     _load_json,
 )
 from e2h.privacy import RedactionPolicy, RedactionPolicyError, apply_redaction_policy
+from e2h.provider_ingest_validation import revalidate_provider_ingest_inputs
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 _MAX_PROVIDER_ITEMS = 10_000
@@ -630,6 +631,12 @@ def import_gemini_generate_content_document(
     redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize a validated Gemini archive into observable trace events."""
+    document, provenance = revalidate_provider_ingest_inputs(
+        document,
+        GeminiGenerateContentDocument,
+        provenance,
+        EvidenceFormat.GEMINI_GENERATE_CONTENT_JSON,
+    )
     selected_capsule = capsule_id or document.capsule_id
     context = TraceContext(
         run_id=document.id,

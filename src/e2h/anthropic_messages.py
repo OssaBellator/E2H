@@ -22,6 +22,7 @@ from e2h.privacy import (
     RedactionPolicyError,
     apply_redaction_policy,
 )
+from e2h.provider_ingest_validation import revalidate_provider_ingest_inputs
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 _MAX_PROVIDER_ITEMS = 10_000
@@ -581,6 +582,12 @@ def import_anthropic_messages_document(
     redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize a validated Anthropic archive into observable trace events."""
+    document, provenance = revalidate_provider_ingest_inputs(
+        document,
+        AnthropicMessagesDocument,
+        provenance,
+        EvidenceFormat.ANTHROPIC_MESSAGES_JSON,
+    )
     selected_capsule = capsule_id or document.capsule_id
     context = TraceContext(
         run_id=document.id,

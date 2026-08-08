@@ -22,6 +22,7 @@ from e2h.privacy import (
     RedactionPolicyError,
     apply_redaction_policy,
 )
+from e2h.provider_ingest_validation import revalidate_provider_ingest_inputs
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 _MAX_PROVIDER_ITEMS = 10_000
@@ -573,6 +574,12 @@ def import_openai_responses_document(
     redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize an archived Responses export into one observable trace."""
+    document, provenance = revalidate_provider_ingest_inputs(
+        document,
+        OpenAIResponsesDocument,
+        provenance,
+        EvidenceFormat.OPENAI_RESPONSES_JSON,
+    )
     selected_capsule = capsule_id or document.capsule_id
     first_timestamp = _timestamp(document.responses[0].response)
     context = TraceContext(
