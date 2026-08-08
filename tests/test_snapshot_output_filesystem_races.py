@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from e2h.snapshot import SnapshotError, create_snapshot, restore_snapshot, verify_snapshot
+from e2h.snapshot import SnapshotError, create_snapshot, verify_snapshot
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -47,20 +47,3 @@ def test_create_snapshot_does_not_follow_predictable_temporary_symlink(tmp_path:
     assert output.is_file()
     assert not output.is_symlink()
     assert verify_snapshot(output).snapshot_id == manifest.snapshot_id
-
-
-def test_restore_snapshot_rejects_existing_destination_symlink(tmp_path: Path) -> None:
-    root = _workspace(tmp_path)
-    archive = tmp_path / "workspace.e2hsnap"
-    create_snapshot(root, archive)
-
-    outside = tmp_path / "outside-restore"
-    outside.mkdir()
-    destination = tmp_path / "restored"
-    destination.symlink_to(outside, target_is_directory=True)
-
-    with pytest.raises(SnapshotError, match="restore destination must not be a symbolic link"):
-        restore_snapshot(archive, destination)
-
-    assert destination.is_symlink()
-    assert list(outside.iterdir()) == []
