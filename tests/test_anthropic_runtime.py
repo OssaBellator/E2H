@@ -15,7 +15,7 @@ from e2h.anthropic_runtime import (
 )
 from e2h.genome import capsule_sha256
 from e2h.models import TaskCapsule
-from e2h.variants import HarnessVariant, HarnessVariantDocument
+from e2h.variants import HarnessVariant, HarnessVariantDocument, PromptMessage
 
 
 def capsule() -> TaskCapsule:
@@ -211,7 +211,9 @@ def test_build_request_maps_required_auto_none_and_parallel_tool_policy() -> Non
         "disable_parallel_tool_use": False,
     }
 
-    none = build_anthropic_messages_request(document(tool_selection="none"), capsule(), invocation())
+    none = build_anthropic_messages_request(
+        document(tool_selection="none"), capsule(), invocation()
+    )
     assert none.body["tool_choice"] == {"type": "none"}
 
 
@@ -358,11 +360,7 @@ def test_runtime_rejects_unfaithful_provider_neutral_semantics() -> None:
     late_system = base.model_copy(deep=True)
     assert late_system.variant.prompt is not None
     late_system.variant.prompt.messages.append(
-        {
-            "id": "late-system",
-            "role": "system",
-            "content": "Too late.",
-        }
+        PromptMessage(id="late-system", role="system", content="Too late.")
     )
     with pytest.raises(AnthropicRuntimeError, match="top-level only"):
         build_anthropic_messages_request(
@@ -400,7 +398,10 @@ def test_runtime_rejects_invalid_key_and_parallel_provider_calls() -> None:
         transport=fake_transport,
     )
     assert not result.accepted
-    assert "provider returned parallel tool calls despite parallel_calls=false" in result.policy_violations
+    assert (
+        "provider returned parallel tool calls despite parallel_calls=false"
+        in result.policy_violations
+    )
 
 
 def test_invocation_loader_is_strict(tmp_path: Path) -> None:
