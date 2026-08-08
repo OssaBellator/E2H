@@ -297,7 +297,9 @@ def _open_materialization_parent(destination: Path) -> tuple[Path, int, os.stat_
             f"unable to prepare environment materialization destination: {exc}"
         ) from exc
     if not stat.S_ISDIR(expected.st_mode):
-        raise BenchmarkEnvironmentError("environment materialization destination parent is not a directory")
+        raise BenchmarkEnvironmentError(
+            "environment materialization destination parent is not a directory"
+        )
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(parent, flags)
