@@ -18,7 +18,7 @@ def revalidate_promotion_model(
     """Return a warning-free revalidated copy after enforcing one concrete model type."""
     if type(value) is not model_type:
         raise ValueError(f"{noun} must be {model_type.__name__}, got {type(value).__name__}")
-    payload = value.model_dump(mode="json", warnings="none")
+    payload = value.model_dump(mode="python", warnings="none")
     return model_type.model_validate(payload)
 
 
