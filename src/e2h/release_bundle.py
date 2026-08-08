@@ -44,6 +44,9 @@ _STATIC_CHECKSUM_PATHS = {
     "release-source-inspection.json",
 }
 _REQUIRED_TOP_LEVEL = _STATIC_CHECKSUM_PATHS | {"release-checksums.txt", "dist"}
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_LISTDIR_SUPPORTS_FD = os.listdir in os.supports_fd
 
 
 class ReleaseBundleError(ValueError):
@@ -107,7 +110,7 @@ def _open_child_directory(
 ) -> tuple[int, os.stat_result]:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        if os.open in os.supports_dir_fd:
+        if _OPEN_SUPPORTS_DIR_FD:
             descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
         else:
             descriptor = os.open(path, flags)
@@ -152,11 +155,7 @@ def _list_directory(
     noun: str,
 ) -> list[str]:
     try:
-        names = (
-            sorted(os.listdir(descriptor))
-            if os.listdir in os.supports_fd
-            else sorted(os.listdir(path))
-        )
+        names = sorted(os.listdir(descriptor)) if _LISTDIR_SUPPORTS_FD else sorted(os.listdir(path))
     except OSError as exc:
         raise ReleaseBundleError(f"unable to inspect {noun}: {exc}") from exc
     _directory_must_be_stable(path, descriptor, opened, noun=noun)
@@ -170,7 +169,7 @@ def _stat_directory_entry(
     noun: str,
 ) -> os.stat_result:
     try:
-        if os.stat in os.supports_dir_fd:
+        if _STAT_SUPPORTS_DIR_FD:
             return os.stat(
                 path.name,
                 dir_fd=directory_descriptor,
@@ -191,7 +190,7 @@ def _read_regular_bytes(
 ) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        if directory_descriptor is not None and os.open in os.supports_dir_fd:
+        if directory_descriptor is not None and _OPEN_SUPPORTS_DIR_FD:
             descriptor = os.open(path.name, flags, dir_fd=directory_descriptor)
         else:
             descriptor = os.open(path, flags)
@@ -235,7 +234,7 @@ def _copy_verified_file(
 ) -> None:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        if directory_descriptor is not None and os.open in os.supports_dir_fd:
+        if directory_descriptor is not None and _OPEN_SUPPORTS_DIR_FD:
             descriptor = os.open(source.name, flags, dir_fd=directory_descriptor)
         else:
             descriptor = os.open(source, flags)
