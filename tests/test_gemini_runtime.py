@@ -255,27 +255,21 @@ def test_build_request_maps_tool_modes_and_provider_alias() -> None:
         capsule(),
         invocation(),
     )
-    assert required.body["toolConfig"] == {
-        "functionCallingConfig": {"mode": "ANY"}
-    }
+    assert required.body["toolConfig"] == {"functionCallingConfig": {"mode": "ANY"}}
 
     automatic = build_gemini_generate_content_request(
         document(tool_selection="auto", provider="gemini"),
         capsule(),
         invocation(),
     )
-    assert automatic.body["toolConfig"] == {
-        "functionCallingConfig": {"mode": "AUTO"}
-    }
+    assert automatic.body["toolConfig"] == {"functionCallingConfig": {"mode": "AUTO"}}
 
     none = build_gemini_generate_content_request(
         document(tool_selection="none"),
         capsule(),
         invocation(),
     )
-    assert none.body["toolConfig"] == {
-        "functionCallingConfig": {"mode": "NONE"}
-    }
+    assert none.body["toolConfig"] == {"functionCallingConfig": {"mode": "NONE"}}
 
 
 def test_build_request_uses_fallback_and_accepts_models_prefix() -> None:
@@ -299,9 +293,7 @@ def test_build_request_rejects_variable_and_provider_contract_violations() -> No
         build_gemini_generate_content_request(
             document(),
             capsule(),
-            invocation().model_copy(
-                update={"variables": {"task": "x", "extra": "y"}}
-            ),
+            invocation().model_copy(update={"variables": {"task": "x", "extra": "y"}}),
         )
     with pytest.raises(GeminiRuntimeError, match="not 'google' or 'gemini'"):
         build_gemini_generate_content_request(
@@ -317,15 +309,11 @@ def test_runtime_rejects_workflow_references_and_unfaithful_placement() -> None:
     workflow = base.model_copy(deep=True)
     workflow.variant.workflow = {
         "id": "workflow",
-        "stages": [
-            {"id": "solve", "kind": "model", "handler": "solve"}
-        ],
+        "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
     }
     with pytest.raises(GeminiRuntimeError, match="does not execute workflow DAGs"):
         build_gemini_generate_content_request(
-            HarnessVariantDocument.model_validate(
-                workflow.model_dump(mode="json")
-            ),
+            HarnessVariantDocument.model_validate(workflow.model_dump(mode="json")),
             capsule(),
             invocation(),
         )
@@ -343,9 +331,7 @@ def test_runtime_rejects_workflow_references_and_unfaithful_placement() -> None:
     ]
     with pytest.raises(GeminiRuntimeError, match="does not dereference"):
         build_gemini_generate_content_request(
-            HarnessVariantDocument.model_validate(
-                referenced.model_dump(mode="json")
-            ),
+            HarnessVariantDocument.model_validate(referenced.model_dump(mode="json")),
             capsule(),
             invocation(),
         )
@@ -526,10 +512,7 @@ def test_tool_policy_flags_unknown_parallel_and_server_tool_calls() -> None:
     violations = runtime._tool_policy_violations(tools, payload)
     assert "provider called undeclared tools: other" in violations
     assert "provider returned 2 function calls; max_calls is 1" in violations
-    assert (
-        "provider returned parallel function calls despite parallel_calls=false"
-        in violations
-    )
+    assert "provider returned parallel function calls despite parallel_calls=false" in violations
     assert "provider returned undeclared server-side tool calls" in violations
 
 
@@ -616,9 +599,7 @@ def test_invocation_request_endpoint_and_archive_helpers_fail_closed() -> None:
         )
 
     assert runtime._build_tools(None) == ([], None)
-    empty = ToolVariant.model_validate(
-        {"id": "empty", "tools": [], "selection": "none"}
-    )
+    empty = ToolVariant.model_validate({"id": "empty", "tools": [], "selection": "none"})
     assert runtime._build_tools(empty) == ([], None)
 
     with pytest.raises(GeminiRuntimeError, match="contents must be an array"):
@@ -629,9 +610,7 @@ def test_invocation_request_endpoint_and_archive_helpers_fail_closed() -> None:
             )
         )
     with pytest.raises(GeminiRuntimeError, match="contain objects"):
-        runtime._archive_contents(
-            SimpleNamespace(body={"contents": [1]}, invocation_id="run")
-        )
+        runtime._archive_contents(SimpleNamespace(body={"contents": [1]}, invocation_id="run"))
     with pytest.raises(GeminiRuntimeError, match="user/model role"):
         runtime._archive_contents(
             SimpleNamespace(
@@ -733,15 +712,9 @@ def test_format_http_error_and_request_digest_are_deterministic() -> None:
         "Gemini GenerateContent request failed with HTTP 500"
     )
 
-    body = {
-        "contents": [
-            {"role": "user", "parts": [{"text": "hi"}]}
-        ]
-    }
+    body = {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
     digest = hashlib.sha256(
-        runtime._canonical_json_bytes(
-            {"model": "gemini-test", "body": body}
-        )
+        runtime._canonical_json_bytes({"model": "gemini-test", "body": body})
     ).hexdigest()
     request = GeminiGenerateContentRequest(
         invocation_id="runtime",
