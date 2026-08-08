@@ -135,6 +135,16 @@ def test_verification_revalidates_mutated_adapter_cross_fields() -> None:
         verify_optimizer_adapter(adapter, base, variant)
 
 
+def test_verification_rejects_canonical_invalid_adapter_metadata() -> None:
+    base = capsule()
+    variant = variant_document(base)
+    adapter = adapter_document(base, variant)
+    adapter.metadata = {"not_json": {"value"}}
+
+    with pytest.raises(OptimizerAdapterError, match="invalid optimizer adapter"):
+        verify_optimizer_adapter(adapter, base, variant)
+
+
 def test_verification_revalidates_capsule_before_digest_binding() -> None:
     base = capsule()
     variant = variant_document(base)
