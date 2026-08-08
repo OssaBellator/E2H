@@ -14,7 +14,7 @@ Python 3.11, 3.12, and 3.13 are exercised in CI.
 | Evidence | Canonical transcripts, OTLP/HTTP traces, OpenAI Responses, Anthropic Messages, Gemini GenerateContent, corrections, privacy redaction/review, content-addressed provenance |
 | Harness compilation | Review-gated capsule proposals, controlled mutation verification, file/JSON/artifact oracles, workspace snapshots, human approval before materialization |
 | Optimization | Typed harness genomes and patches, prompt/tool/context/routing/workflow variants, DSPy/GEPA adapters, train/validation/sealed-test partitions, promotion/rollback gates |
-| Frontier integrations | OpenAI Responses runtime adapter, MCP verification server, A2A verification agent, browser and VS Code capture clients |
+| Frontier integrations | OpenAI Responses, Anthropic Messages, and Gemini GenerateContent runtime adapters; credential-free request planning; MCP verification server; A2A verification agent; browser and VS Code capture clients |
 | Community benchmark | Sanitized real-world failure patterns, long-horizon correction/constraint tasks, reproducible coding/research/browser environments |
 | Distribution integrity | Reproducible wheel/sdist builds, deterministic release manifests, canonical CycloneDX runtime SBOMs, OIDC PyPI publication, provenance/SBOM attestations, immutable GitHub releases |
 
@@ -246,9 +246,19 @@ uv run e2h promotion --help
 
 ## Frontier integrations
 
-### OpenAI Responses runtime
+### Provider runtimes
 
-The runtime adapter executes the explicit E2H runtime contract against the OpenAI Responses API surface while preserving observable request/result evidence. See:
+E2H executes the same verified typed harness contract through three live provider adapters while preserving provider-native request/result evidence:
+
+- [OpenAI Responses](docs/openai-responses-runtime.md);
+- [Anthropic Messages](docs/anthropic-messages-runtime.md);
+- [Gemini GenerateContent](docs/gemini-generate-content-runtime.md).
+
+All three runtimes are single-turn adapters: they map the provider-neutral prompt, context, routing, and custom-tool contract to the provider API, fail closed where a mapping cannot be represented faithfully, and never execute returned tool/function calls implicitly.
+
+The [runtime request planner](docs/runtime-request-planning.md) materializes the exact provider request and deterministic request digest without reading credentials or opening a network connection.
+
+See the installed runtime commands with:
 
 ```bash
 uv run e2h runtime --help
