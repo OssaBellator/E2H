@@ -22,6 +22,23 @@ _MAX_ENVIRONMENT_BYTES = 64 * 1024 * 1024
 _MAX_FILES = 10_000
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_LISTDIR_SUPPORTS_FD = os.listdir in os.supports_fd
+_MKDIR_SUPPORTS_DIR_FD = os.mkdir in os.supports_dir_fd
+_RMDIR_SUPPORTS_DIR_FD = os.rmdir in os.supports_dir_fd
+_UNLINK_SUPPORTS_DIR_FD = os.unlink in os.supports_dir_fd
+_UTIME_SUPPORTS_FD = os.utime in os.supports_fd
+_MATERIALIZATION_DIR_FD_SUPPORTED = (
+    _OPEN_SUPPORTS_DIR_FD
+    and _STAT_SUPPORTS_DIR_FD
+    and _LISTDIR_SUPPORTS_FD
+    and _MKDIR_SUPPORTS_DIR_FD
+    and _RMDIR_SUPPORTS_DIR_FD
+    and _UNLINK_SUPPORTS_DIR_FD
+    and _UTIME_SUPPORTS_FD
+    and hasattr(os, "fchmod")
+)
 
 
 class BenchmarkEnvironmentError(ValueError):
@@ -266,6 +283,166 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
 
 
+def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_mode)
+
+
+def _open_materialization_parent(destination: Path) -> tuple[Path, int, os.stat_result]:
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        parent = destination.parent.resolve(strict=True)
+        expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to prepare environment materialization destination: {exc}"
+        ) from exc
+    if not stat.S_ISDIR(expected.st_mode):
+        raise BenchmarkEnvironmentError("environment materialization destination parent is not a directory")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(parent, flags)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to open environment materialization destination parent: {exc}"
+        ) from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise BenchmarkEnvironmentError(
+                "environment materialization destination parent changed while opening"
+            )
+        return parent / destination.name, descriptor, opened
+    except Exception:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _materialization_parent_must_be_stable(
+    destination: Path,
+    descriptor: int,
+    opened: os.stat_result,
+) -> None:
+    try:
+        after = os.fstat(descriptor)
+        current = destination.parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to restat environment materialization destination parent: {exc}"
+        ) from exc
+    if _directory_identity(after) != _directory_identity(opened) or _directory_identity(
+        current
+    ) != _directory_identity(opened):
+        raise BenchmarkEnvironmentError(
+            "environment materialization destination parent changed while writing"
+        )
+
+
+def _stat_materialization_entry(parent_descriptor: int, name: str) -> os.stat_result:
+    return os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+
+
+def _open_bound_materialized_directory(
+    parent_descriptor: int,
+    name: str,
+    expected: os.stat_result,
+    *,
+    noun: str,
+) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(f"unable to open {noun}: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise BenchmarkEnvironmentError(f"{noun} changed while opening")
+        return descriptor
+    except Exception:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _open_materialized_directory(
+    root_descriptor: int,
+    parts: tuple[str, ...],
+    *,
+    create: bool,
+) -> int:
+    current = os.dup(root_descriptor)
+    try:
+        for part in parts:
+            try:
+                expected = _stat_materialization_entry(current, part)
+            except FileNotFoundError:
+                if not create:
+                    raise BenchmarkEnvironmentError(
+                        f"materialized environment directory is missing: {part}"
+                    ) from None
+                os.mkdir(part, 0o700, dir_fd=current)
+                expected = _stat_materialization_entry(current, part)
+            except OSError as exc:
+                raise BenchmarkEnvironmentError(
+                    f"unable to inspect materialized environment directory {part}: {exc}"
+                ) from exc
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+                raise BenchmarkEnvironmentError(
+                    f"materialized environment path component is not a directory: {part}"
+                )
+            child = _open_bound_materialized_directory(
+                current,
+                part,
+                expected,
+                noun=f"materialized environment directory {part}",
+            )
+            os.close(current)
+            current = child
+        return current
+    except Exception:
+        with suppress(OSError):
+            os.close(current)
+        raise
+
+
+def _remove_materialized_tree_at(parent_descriptor: int, name: str) -> None:
+    try:
+        expected = _stat_materialization_entry(parent_descriptor, name)
+    except OSError:
+        return
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        with suppress(OSError):
+            os.unlink(name, dir_fd=parent_descriptor)
+        return
+    descriptor: int | None = None
+    try:
+        descriptor = _open_bound_materialized_directory(
+            parent_descriptor,
+            name,
+            expected,
+            noun="materialized environment destination",
+        )
+        for child_name in os.listdir(descriptor):
+            try:
+                child = _stat_materialization_entry(descriptor, child_name)
+            except OSError:
+                continue
+            if stat.S_ISDIR(child.st_mode) and not stat.S_ISLNK(child.st_mode):
+                _remove_materialized_tree_at(descriptor, child_name)
+            else:
+                with suppress(OSError):
+                    os.unlink(child_name, dir_fd=descriptor)
+    except BenchmarkEnvironmentError:
+        return
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+    with suppress(OSError):
+        os.rmdir(name, dir_fd=parent_descriptor)
+
+
 def _resolve_under_source(source: Path, path: Path, relative: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
@@ -448,6 +625,128 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
     )
 
 
+def _hash_materialized_file(
+    directory_descriptor: int,
+    name: str,
+    relative: str,
+    expected: os.stat_result,
+) -> tuple[str, int, bool]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to open materialized environment file {relative}: {exc}"
+        ) from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise BenchmarkEnvironmentError(
+                f"materialized environment file changed while opening: {relative}"
+            )
+        digest = hashlib.sha256()
+        observed = 0
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while chunk := handle.read(1024 * 1024):
+                observed += len(chunk)
+                if observed > _MAX_ENVIRONMENT_BYTES:
+                    raise BenchmarkEnvironmentError(
+                        f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+                    )
+                digest.update(chunk)
+        after = os.fstat(descriptor)
+        current = _stat_materialization_entry(directory_descriptor, name)
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or observed != opened.st_size
+        ):
+            raise BenchmarkEnvironmentError(
+                f"materialized environment file changed while hashing: {relative}"
+            )
+        return digest.hexdigest(), observed, bool(opened.st_mode & stat.S_IXUSR)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to hash materialized environment file {relative}: {exc}"
+        ) from exc
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
+
+
+def _scan_materialized_environment(root_descriptor: int) -> _ScannedEnvironment:
+    files: list[BenchmarkEnvironmentFile] = []
+    total_bytes = 0
+    stack: list[tuple[str, ...]] = [()]
+    while stack:
+        parts = stack.pop()
+        directory_descriptor = _open_materialized_directory(
+            root_descriptor,
+            parts,
+            create=False,
+        )
+        try:
+            try:
+                names = sorted(os.listdir(directory_descriptor))
+            except OSError as exc:
+                relative = PurePosixPath(*parts).as_posix() if parts else "."
+                raise BenchmarkEnvironmentError(
+                    f"unable to list materialized environment directory {relative}: {exc}"
+                ) from exc
+            for name in names:
+                relative_parts = (*parts, name)
+                relative = PurePosixPath(*relative_parts).as_posix()
+                try:
+                    entry = _stat_materialization_entry(directory_descriptor, name)
+                except OSError as exc:
+                    raise BenchmarkEnvironmentError(
+                        f"unable to stat materialized environment entry {relative}: {exc}"
+                    ) from exc
+                if stat.S_ISLNK(entry.st_mode):
+                    raise BenchmarkEnvironmentError(
+                        f"materialized environment contains symlink: {relative}"
+                    )
+                if stat.S_ISDIR(entry.st_mode):
+                    stack.append(relative_parts)
+                    continue
+                if not stat.S_ISREG(entry.st_mode):
+                    raise BenchmarkEnvironmentError(
+                        f"materialized environment contains non-regular file: {relative}"
+                    )
+                if len(files) >= _MAX_FILES:
+                    raise BenchmarkEnvironmentError(f"environment exceeds {_MAX_FILES} files")
+                if total_bytes + entry.st_size > _MAX_ENVIRONMENT_BYTES:
+                    raise BenchmarkEnvironmentError(
+                        f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+                    )
+                digest, size, executable = _hash_materialized_file(
+                    directory_descriptor,
+                    name,
+                    relative,
+                    entry,
+                )
+                total_bytes += size
+                files.append(
+                    BenchmarkEnvironmentFile(
+                        path=relative,
+                        sha256=digest,
+                        size=size,
+                        executable=executable,
+                    )
+                )
+        finally:
+            with suppress(OSError):
+                os.close(directory_descriptor)
+    if not files:
+        raise BenchmarkEnvironmentError("environment source_dir contains no files")
+    files.sort(key=lambda item: item.path)
+    return _ScannedEnvironment(
+        files=files,
+        source_sha256=_tree_digest(files),
+        total_bytes=total_bytes,
+    )
+
+
 def _copy_environment_file(
     source: Path,
     path: Path,
@@ -534,7 +833,122 @@ def _copy_environment_file(
             os.close(descriptor)
 
 
-def _copy_environment_tree(source: Path, destination: Path) -> None:
+def _copy_environment_file_at(
+    source: Path,
+    path: Path,
+    relative: str,
+    expected: os.stat_result,
+    root_descriptor: int,
+    parts: tuple[str, ...],
+) -> int:
+    _resolve_under_source(source, path, relative)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to open environment file {relative} for materialization: {exc}"
+        ) from exc
+    parent_descriptor = _open_materialized_directory(
+        root_descriptor,
+        parts[:-1],
+        create=False,
+    )
+    destination_descriptor: int | None = None
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise BenchmarkEnvironmentError(f"environment contains non-regular file: {relative}")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise BenchmarkEnvironmentError(f"environment file changed while opening: {relative}")
+        if opened.st_size > _MAX_ENVIRONMENT_BYTES:
+            raise BenchmarkEnvironmentError(
+                f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+            )
+        destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            destination_descriptor = os.open(
+                parts[-1],
+                destination_flags,
+                0o600,
+                dir_fd=parent_descriptor,
+            )
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to create materialized environment file {relative}: {exc}"
+            ) from exc
+        observed = 0
+        try:
+            with (
+                os.fdopen(descriptor, "rb", closefd=False) as source_handle,
+                os.fdopen(destination_descriptor, "wb", closefd=False) as destination_handle,
+            ):
+                while chunk := source_handle.read(1024 * 1024):
+                    observed += len(chunk)
+                    if observed > _MAX_ENVIRONMENT_BYTES:
+                        raise BenchmarkEnvironmentError(
+                            f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+                        )
+                    destination_handle.write(chunk)
+            os.fchmod(destination_descriptor, stat.S_IMODE(opened.st_mode))
+            os.utime(
+                destination_descriptor,
+                ns=(opened.st_atime_ns, opened.st_mtime_ns),
+            )
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to copy environment file {relative}: {exc}"
+            ) from exc
+        after = os.fstat(descriptor)
+        try:
+            current = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to restat environment file {relative}: {exc}"
+            ) from exc
+        _resolve_under_source(source, path, relative)
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or observed != opened.st_size
+            or _stat_identity(current) != _stat_identity(opened)
+        ):
+            raise BenchmarkEnvironmentError(
+                f"environment file changed while materializing: {relative}"
+            )
+        return observed
+    finally:
+        if destination_descriptor is not None:
+            with suppress(OSError):
+                os.close(destination_descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+        with suppress(OSError):
+            os.close(descriptor)
+
+
+def _copy_environment_tree_path(
+    source: Path,
+    destination: Path,
+    *,
+    expected: BenchmarkEnvironmentLockEntry | None,
+) -> _ScannedEnvironment:
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination = destination.parent.resolve(strict=True) / destination.name
+        try:
+            destination.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise BenchmarkEnvironmentError(
+                "environment materialization destination already exists"
+            )
+    except BenchmarkEnvironmentError:
+        raise
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to prepare environment materialization destination: {exc}"
+        ) from exc
     try:
         source_info = source.stat(follow_symlinks=False)
     except OSError as exc:
@@ -547,66 +961,249 @@ def _copy_environment_tree(source: Path, destination: Path) -> None:
         raise BenchmarkEnvironmentError(
             f"unable to create benchmark environment destination: {exc}"
         ) from exc
-    roots = _list_environment_directory(source, source, ".", source_info)
-    directory_metadata: list[tuple[Path, os.stat_result]] = [(destination, source_info)]
-    total_bytes = 0
-    file_count = 0
-    stack = list(reversed(roots))
-    while stack:
-        path = stack.pop()
-        relative = path.relative_to(source).as_posix()
-        _resolve_under_source(source, path, relative)
-        try:
-            entry = path.stat(follow_symlinks=False)
-        except OSError as exc:
-            raise BenchmarkEnvironmentError(
-                f"unable to stat environment entry {relative}: {exc}"
-            ) from exc
-        if stat.S_ISLNK(entry.st_mode):
-            raise BenchmarkEnvironmentError(f"environment contains symlink: {relative}")
-        destination_path = destination / Path(*PurePosixPath(relative).parts)
-        if stat.S_ISDIR(entry.st_mode):
-            children = _list_environment_directory(source, path, relative, entry)
+    try:
+        roots = _list_environment_directory(source, source, ".", source_info)
+        directory_metadata: list[tuple[Path, os.stat_result]] = [(destination, source_info)]
+        total_bytes = 0
+        file_count = 0
+        stack = list(reversed(roots))
+        while stack:
+            path = stack.pop()
+            relative = path.relative_to(source).as_posix()
+            _resolve_under_source(source, path, relative)
             try:
-                destination_path.mkdir()
+                entry = path.stat(follow_symlinks=False)
             except OSError as exc:
                 raise BenchmarkEnvironmentError(
-                    f"unable to create materialized environment directory {relative}: {exc}"
+                    f"unable to stat environment entry {relative}: {exc}"
                 ) from exc
-            directory_metadata.append((destination_path, entry))
-            stack.extend(reversed(children))
-            continue
-        if not stat.S_ISREG(entry.st_mode):
-            raise BenchmarkEnvironmentError(f"environment contains non-regular file: {relative}")
-        if file_count >= _MAX_FILES:
-            raise BenchmarkEnvironmentError(f"environment exceeds {_MAX_FILES} files")
-        if total_bytes + entry.st_size > _MAX_ENVIRONMENT_BYTES:
-            raise BenchmarkEnvironmentError(
-                f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+            if stat.S_ISLNK(entry.st_mode):
+                raise BenchmarkEnvironmentError(f"environment contains symlink: {relative}")
+            destination_path = destination / Path(*PurePosixPath(relative).parts)
+            if stat.S_ISDIR(entry.st_mode):
+                children = _list_environment_directory(source, path, relative, entry)
+                try:
+                    destination_path.mkdir()
+                except OSError as exc:
+                    raise BenchmarkEnvironmentError(
+                        f"unable to create materialized environment directory {relative}: {exc}"
+                    ) from exc
+                directory_metadata.append((destination_path, entry))
+                stack.extend(reversed(children))
+                continue
+            if not stat.S_ISREG(entry.st_mode):
+                raise BenchmarkEnvironmentError(
+                    f"environment contains non-regular file: {relative}"
+                )
+            if file_count >= _MAX_FILES:
+                raise BenchmarkEnvironmentError(f"environment exceeds {_MAX_FILES} files")
+            if total_bytes + entry.st_size > _MAX_ENVIRONMENT_BYTES:
+                raise BenchmarkEnvironmentError(
+                    f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+                )
+            copied = _copy_environment_file(
+                source,
+                path,
+                relative,
+                entry,
+                destination_path,
             )
-        copied = _copy_environment_file(
-            source,
-            path,
-            relative,
-            entry,
-            destination_path,
-        )
-        file_count += 1
-        total_bytes += copied
-    if file_count == 0:
-        raise BenchmarkEnvironmentError("environment source_dir contains no files")
-    for directory, info in reversed(directory_metadata):
+            file_count += 1
+            total_bytes += copied
+        if file_count == 0:
+            raise BenchmarkEnvironmentError("environment source_dir contains no files")
+        for directory, info in reversed(directory_metadata):
+            try:
+                directory.chmod(stat.S_IMODE(info.st_mode), follow_symlinks=False)
+                os.utime(
+                    directory,
+                    ns=(info.st_atime_ns, info.st_mtime_ns),
+                    follow_symlinks=False,
+                )
+            except OSError as exc:
+                raise BenchmarkEnvironmentError(
+                    f"unable to preserve materialized environment directory metadata: {exc}"
+                ) from exc
+        scanned = _scan_environment(destination)
+        if expected is not None and (
+            scanned.source_sha256 != expected.source_sha256 or scanned.files != expected.files
+        ):
+            raise BenchmarkEnvironmentError("materialized environment does not match locked source")
+        return scanned
+    except BenchmarkEnvironmentError:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+
+
+def _copy_environment_tree_descriptor(
+    source: Path,
+    destination: Path,
+    *,
+    expected: BenchmarkEnvironmentLockEntry | None,
+) -> _ScannedEnvironment:
+    destination, parent_descriptor, parent_info = _open_materialization_parent(destination)
+    root_descriptor: int | None = None
+    created = False
+    try:
         try:
-            directory.chmod(stat.S_IMODE(info.st_mode), follow_symlinks=False)
-            os.utime(
-                directory,
-                ns=(info.st_atime_ns, info.st_mtime_ns),
-                follow_symlinks=False,
-            )
+            _stat_materialization_entry(parent_descriptor, destination.name)
+        except FileNotFoundError:
+            pass
         except OSError as exc:
             raise BenchmarkEnvironmentError(
-                f"unable to preserve materialized environment directory metadata: {exc}"
+                f"unable to inspect environment materialization destination: {exc}"
             ) from exc
+        else:
+            raise BenchmarkEnvironmentError(
+                "environment materialization destination already exists"
+            )
+        try:
+            source_info = source.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to stat environment source_dir: {exc}"
+            ) from exc
+        if stat.S_ISLNK(source_info.st_mode) or not stat.S_ISDIR(source_info.st_mode):
+            raise BenchmarkEnvironmentError("environment source_dir is not a directory")
+        _materialization_parent_must_be_stable(
+            destination,
+            parent_descriptor,
+            parent_info,
+        )
+        try:
+            os.mkdir(destination.name, 0o700, dir_fd=parent_descriptor)
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to create benchmark environment destination: {exc}"
+            ) from exc
+        created = True
+        root_expected = _stat_materialization_entry(parent_descriptor, destination.name)
+        root_descriptor = _open_bound_materialized_directory(
+            parent_descriptor,
+            destination.name,
+            root_expected,
+            noun="materialized environment destination",
+        )
+        _materialization_parent_must_be_stable(
+            destination,
+            parent_descriptor,
+            parent_info,
+        )
+        roots = _list_environment_directory(source, source, ".", source_info)
+        directory_metadata: list[tuple[tuple[str, ...], os.stat_result]] = [((), source_info)]
+        total_bytes = 0
+        file_count = 0
+        stack = list(reversed(roots))
+        while stack:
+            path = stack.pop()
+            relative = path.relative_to(source).as_posix()
+            _resolve_under_source(source, path, relative)
+            try:
+                entry = path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise BenchmarkEnvironmentError(
+                    f"unable to stat environment entry {relative}: {exc}"
+                ) from exc
+            if stat.S_ISLNK(entry.st_mode):
+                raise BenchmarkEnvironmentError(f"environment contains symlink: {relative}")
+            parts = tuple(PurePosixPath(relative).parts)
+            if stat.S_ISDIR(entry.st_mode):
+                children = _list_environment_directory(source, path, relative, entry)
+                directory_descriptor = _open_materialized_directory(
+                    root_descriptor,
+                    parts,
+                    create=True,
+                )
+                with suppress(OSError):
+                    os.close(directory_descriptor)
+                directory_metadata.append((parts, entry))
+                stack.extend(reversed(children))
+                continue
+            if not stat.S_ISREG(entry.st_mode):
+                raise BenchmarkEnvironmentError(
+                    f"environment contains non-regular file: {relative}"
+                )
+            if file_count >= _MAX_FILES:
+                raise BenchmarkEnvironmentError(f"environment exceeds {_MAX_FILES} files")
+            if total_bytes + entry.st_size > _MAX_ENVIRONMENT_BYTES:
+                raise BenchmarkEnvironmentError(
+                    f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+                )
+            copied = _copy_environment_file_at(
+                source,
+                path,
+                relative,
+                entry,
+                root_descriptor,
+                parts,
+            )
+            file_count += 1
+            total_bytes += copied
+        if file_count == 0:
+            raise BenchmarkEnvironmentError("environment source_dir contains no files")
+        for parts, info in reversed(directory_metadata):
+            directory_descriptor = _open_materialized_directory(
+                root_descriptor,
+                parts,
+                create=False,
+            )
+            try:
+                os.fchmod(directory_descriptor, stat.S_IMODE(info.st_mode))
+                os.utime(
+                    directory_descriptor,
+                    ns=(info.st_atime_ns, info.st_mtime_ns),
+                )
+            except OSError as exc:
+                raise BenchmarkEnvironmentError(
+                    f"unable to preserve materialized environment directory metadata: {exc}"
+                ) from exc
+            finally:
+                with suppress(OSError):
+                    os.close(directory_descriptor)
+        scanned = _scan_materialized_environment(root_descriptor)
+        if expected is not None and (
+            scanned.source_sha256 != expected.source_sha256 or scanned.files != expected.files
+        ):
+            raise BenchmarkEnvironmentError("materialized environment does not match locked source")
+        _materialization_parent_must_be_stable(
+            destination,
+            parent_descriptor,
+            parent_info,
+        )
+        return scanned
+    except BenchmarkEnvironmentError:
+        if root_descriptor is not None:
+            with suppress(OSError):
+                os.close(root_descriptor)
+            root_descriptor = None
+        if created:
+            _remove_materialized_tree_at(parent_descriptor, destination.name)
+        raise
+    finally:
+        if root_descriptor is not None:
+            with suppress(OSError):
+                os.close(root_descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+
+
+def _copy_environment_tree(
+    source: Path,
+    destination: Path,
+    *,
+    expected: BenchmarkEnvironmentLockEntry | None = None,
+) -> _ScannedEnvironment:
+    if _MATERIALIZATION_DIR_FD_SUPPORTED:
+        return _copy_environment_tree_descriptor(
+            source,
+            destination,
+            expected=expected,
+        )
+    return _copy_environment_tree_path(
+        source,
+        destination,
+        expected=expected,
+    )
 
 
 def _validated_benchmark_environment_suite(
@@ -742,33 +1339,12 @@ def materialize_benchmark_environment(
         raise BenchmarkEnvironmentError(f"unknown benchmark environment {environment_id!r}")
     resolved_root = _safe_root(root)
     source = _resolve_relative(resolved_root, environment.source_dir, "environment source_dir")
-    try:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        resolved_destination = destination.parent.resolve(strict=True) / destination.name
-        try:
-            resolved_destination.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise BenchmarkEnvironmentError(
-                "environment materialization destination already exists"
-            )
-    except BenchmarkEnvironmentError:
-        raise
-    except OSError as exc:
-        raise BenchmarkEnvironmentError(
-            f"unable to prepare environment materialization destination: {exc}"
-        ) from exc
     locked = {entry.id: entry for entry in lock.environments}[environment_id]
-    try:
-        _copy_environment_tree(source, resolved_destination)
-        scanned = _scan_environment(resolved_destination)
-    except BenchmarkEnvironmentError:
-        shutil.rmtree(resolved_destination, ignore_errors=True)
-        raise
-    if scanned.source_sha256 != locked.source_sha256 or scanned.files != locked.files:
-        shutil.rmtree(resolved_destination, ignore_errors=True)
-        raise BenchmarkEnvironmentError("materialized environment does not match locked source")
+    _copy_environment_tree(
+        source,
+        destination,
+        expected=locked,
+    )
     return verification
 
 
