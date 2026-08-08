@@ -31,6 +31,7 @@ from e2h.openai_runtime import (
     build_openai_responses_request,
     load_openai_responses_invocation,
 )
+from e2h.runtime_validation import revalidate_runtime_model
 from e2h.variants import (
     HarnessVariantDocument,
     VariantError,
@@ -121,24 +122,42 @@ def plan_runtime_request(
     try:
         if selected is RuntimeProvider.OPENAI_RESPONSES:
             assert isinstance(checked, OpenAIResponsesInvocation)
+            openai_invocation = revalidate_runtime_model(
+                checked,
+                OpenAIResponsesInvocation,
+                error_type=RuntimePlanError,
+                noun="openai-responses invocation",
+            )
             request: RuntimeRequest = build_openai_responses_request(
                 document,
                 capsule,
-                checked,
+                openai_invocation,
             )
         elif selected is RuntimeProvider.ANTHROPIC_MESSAGES:
             assert isinstance(checked, AnthropicMessagesInvocation)
+            anthropic_invocation = revalidate_runtime_model(
+                checked,
+                AnthropicMessagesInvocation,
+                error_type=RuntimePlanError,
+                noun="anthropic-messages invocation",
+            )
             request = build_anthropic_messages_request(
                 document,
                 capsule,
-                checked,
+                anthropic_invocation,
             )
         else:
             assert isinstance(checked, GeminiGenerateContentInvocation)
+            gemini_invocation = revalidate_runtime_model(
+                checked,
+                GeminiGenerateContentInvocation,
+                error_type=RuntimePlanError,
+                noun="gemini-generate-content invocation",
+            )
             request = build_gemini_generate_content_request(
                 document,
                 capsule,
-                checked,
+                gemini_invocation,
             )
     except (OpenAIRuntimeError, AnthropicRuntimeError, GeminiRuntimeError) as exc:
         raise RuntimePlanError(f"unable to plan {selected.value} request: {exc}") from exc
