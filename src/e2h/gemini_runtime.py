@@ -22,6 +22,7 @@ from e2h.gemini_generate_content import (
     GeminiGenerateContentRecord,
 )
 from e2h.models import TaskCapsule
+from e2h.runtime_validation import revalidate_runtime_inputs
 from e2h.variants import (
     ContextVariant,
     HarnessVariantDocument,
@@ -308,6 +309,14 @@ def build_gemini_generate_content_request(
     invocation: GeminiGenerateContentInvocation,
 ) -> GeminiGenerateContentRequest:
     """Materialize a deterministic GenerateContent request from a verified variant."""
+    document, capsule, invocation = revalidate_runtime_inputs(
+        document,
+        capsule,
+        invocation,
+        GeminiGenerateContentInvocation,
+        error_type=GeminiRuntimeError,
+        invocation_noun="Gemini GenerateContent invocation",
+    )
     try:
         verification = verify_variant_document(document, capsule)
     except VariantError as exc:
@@ -536,6 +545,14 @@ def run_gemini_generate_content(
     """Execute one live GenerateContent request and preserve an observable archive."""
     if not api_key or any(character in api_key for character in "\r\n\x00"):
         raise GeminiRuntimeError("Gemini API key is missing or not header-safe")
+    document, capsule, invocation = revalidate_runtime_inputs(
+        document,
+        capsule,
+        invocation,
+        GeminiGenerateContentInvocation,
+        error_type=GeminiRuntimeError,
+        invocation_noun="Gemini GenerateContent invocation",
+    )
     request = build_gemini_generate_content_request(document, capsule, invocation)
     sender = transport or _http_transport
     http_result = sender(
