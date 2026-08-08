@@ -24,7 +24,8 @@ def _bundle_source(tmp_path: Path) -> tuple[Path, dict[str, str], bytes, Path]:
     wheel.write_bytes(b"wheel-fixture\n")
     sdist.write_bytes(b"sdist-fixture\n")
 
-    paths = sorted(release_bundle._STATIC_CHECKSUM_PATHS) + [
+    paths = [
+        *sorted(release_bundle._STATIC_CHECKSUM_PATHS),
         f"dist/{wheel.name}",
         f"dist/{sdist.name}",
     ]
