@@ -134,6 +134,11 @@ def invocation(case: ProviderCase) -> BaseModel:
     )
 
 
+def mutate_model(model: BaseModel, **updates: object) -> None:
+    for name, value in updates.items():
+        setattr(model, name, value)
+
+
 def build_request(
     case: ProviderCase,
     current_document: HarnessVariantDocument,
@@ -308,9 +313,9 @@ def run_runtime(
 @pytest.mark.parametrize("case", CASES, ids=lambda item: item.name)
 def test_builders_revalidate_mutated_invocation_bounds(case: ProviderCase) -> None:
     current_invocation = invocation(case)
-    setattr(current_invocation, "max_output_tokens", 0)
+    mutate_model(current_invocation, max_output_tokens=0)
 
-    with pytest.raises(case.error_type, match="invalid .* invocation"):
+    with pytest.raises(case.error_type, match=r"invalid .* invocation"):
         build_request(case, document(case), capsule(), current_invocation)
 
 
@@ -336,10 +341,9 @@ def test_builders_revalidate_mutated_capsules(case: ProviderCase) -> None:
 @pytest.mark.parametrize("case", CASES, ids=lambda item: item.name)
 def test_builders_revalidate_without_serializer_warnings(case: ProviderCase) -> None:
     current_document = document(case)
-    setattr(
+    mutate_model(
         current_document.variant,
-        "workflow",
-        {
+        workflow={
             "id": "workflow",
             "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
         },
@@ -352,8 +356,8 @@ def test_builders_revalidate_without_serializer_warnings(case: ProviderCase) -> 
 @pytest.mark.parametrize("case", CASES, ids=lambda item: item.name)
 def test_runs_accept_valid_post_construction_mutation(case: ProviderCase) -> None:
     current_invocation = invocation(case)
-    setattr(current_invocation, "timeout_seconds", 7.5)
-    setattr(current_invocation, "metadata", {"phase": "mutated"})
+    mutate_model(current_invocation, timeout_seconds=7.5)
+    mutate_model(current_invocation, metadata={"phase": "mutated"})
     observed: dict[str, float] = {}
 
     result = run_runtime(
@@ -374,12 +378,12 @@ def test_runs_keep_using_normalized_snapshots_after_transport_starts(case: Provi
     current_document = document(case)
     current_capsule = capsule()
     current_invocation = invocation(case)
-    setattr(current_invocation, "metadata", {"phase": "normalized"})
+    mutate_model(current_invocation, metadata={"phase": "normalized"})
     observed: dict[str, float] = {}
 
     def mutate_originals() -> None:
-        setattr(current_invocation, "id", "late-mutation")
-        setattr(current_invocation, "metadata", {"phase": "late"})
+        mutate_model(current_invocation, id="late-mutation")
+        mutate_model(current_invocation, metadata={"phase": "late"})
         current_capsule.id = "late-capsule"
         assert current_document.variant.tools is not None
         current_document.variant.tools.max_calls = 0

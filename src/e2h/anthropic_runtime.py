@@ -319,7 +319,7 @@ def build_anthropic_messages_request(
         invocation,
         AnthropicMessagesInvocation,
         error_type=AnthropicRuntimeError,
-        invocation_noun='Anthropic Messages invocation',
+        invocation_noun="Anthropic Messages invocation",
     )
     try:
         verification = verify_variant_document(document, capsule)
@@ -511,7 +511,7 @@ def run_anthropic_messages(
         invocation,
         AnthropicMessagesInvocation,
         error_type=AnthropicRuntimeError,
-        invocation_noun='Anthropic Messages invocation',
+        invocation_noun="Anthropic Messages invocation",
     )
     request = build_anthropic_messages_request(document, capsule, invocation)
     sender = transport or _http_transport

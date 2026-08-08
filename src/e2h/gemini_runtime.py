@@ -315,7 +315,7 @@ def build_gemini_generate_content_request(
         invocation,
         GeminiGenerateContentInvocation,
         error_type=GeminiRuntimeError,
-        invocation_noun='Gemini GenerateContent invocation',
+        invocation_noun="Gemini GenerateContent invocation",
     )
     try:
         verification = verify_variant_document(document, capsule)
@@ -551,7 +551,7 @@ def run_gemini_generate_content(
         invocation,
         GeminiGenerateContentInvocation,
         error_type=GeminiRuntimeError,
-        invocation_noun='Gemini GenerateContent invocation',
+        invocation_noun="Gemini GenerateContent invocation",
     )
     request = build_gemini_generate_content_request(document, capsule, invocation)
     sender = transport or _http_transport

@@ -283,7 +283,7 @@ def build_openai_responses_request(
         invocation,
         OpenAIResponsesInvocation,
         error_type=OpenAIRuntimeError,
-        invocation_noun='OpenAI Responses invocation',
+        invocation_noun="OpenAI Responses invocation",
     )
     try:
         verification = verify_variant_document(document, capsule)
@@ -481,7 +481,7 @@ def run_openai_responses(
         invocation,
         OpenAIResponsesInvocation,
         error_type=OpenAIRuntimeError,
-        invocation_noun='OpenAI Responses invocation',
+        invocation_noun="OpenAI Responses invocation",
     )
     request = build_openai_responses_request(document, capsule, invocation)
     sender = transport or _http_transport
