@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import e2h.runner as runner_module
 from e2h.models import (
     AllowedActions,
     CommandCheck,
@@ -47,7 +48,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import time
 
 log = Path(os.environ["FAKE_DOCKER_LOG"])
 with log.open("a", encoding="utf-8") as handle:
@@ -58,8 +58,6 @@ args = sys.argv[1:]
 if "--cidfile" in args:
     cidfile = Path(args[args.index("--cidfile") + 1])
     cidfile.write_text("a" * 64, encoding="utf-8")
-if "timeout-check" in args:
-    time.sleep(10)
 print("sandbox-ok")
 """,
         encoding="utf-8",
@@ -154,9 +152,31 @@ def test_container_backend_requires_sandbox(tmp_path: Path) -> None:
 def test_timeout_force_removes_container(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runtime, log = _fake_runtime(tmp_path)
     monkeypatch.setenv("FAKE_DOCKER_LOG", str(log))
+    observed_argv: list[list[str]] = []
+
+    def timeout_after_cidfile(
+        argv: list[str],
+        cwd: Path,
+        env: dict[str, str],
+        timeout: float,
+        max_output_chars: int,
+    ) -> runner_module._ProcessOutcome:
+        del cwd, env, timeout, max_output_chars
+        observed_argv.append(argv)
+        cidfile = Path(argv[argv.index("--cidfile") + 1])
+        cidfile.write_text("a" * 64, encoding="utf-8")
+        return runner_module._ProcessOutcome(
+            exit_code=None,
+            timed_out=True,
+            stdout="",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+        )
+
+    monkeypatch.setattr(runner_module, "_execute_process", timeout_after_cidfile)
     capsule = _capsule().model_copy(deep=True)
     capsule.success.commands[0].argv = ["timeout-check"]
-    capsule.success.commands[0].timeout_seconds = 0.1
     result = run_capsule(
         capsule,
         tmp_path,
@@ -165,9 +185,9 @@ def test_timeout_force_removes_container(tmp_path: Path, monkeypatch: pytest.Mon
     )
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.TIMED_OUT
+    assert observed_argv[0][1] == "run"
     records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    assert records[0][0] == "run"
-    assert records[1] == ["rm", "-f", "a" * 64]
+    assert records == [["rm", "-f", "a" * 64]]
 
 
 def test_cleanup_rejects_invalid_container_id(tmp_path: Path) -> None:
