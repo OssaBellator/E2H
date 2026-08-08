@@ -206,11 +206,7 @@ def test_materialize_rejects_destination_parent_replacement(
         **kwargs: Any,
     ) -> None:
         nonlocal swapped
-        if (
-            Path(path).name == destination.name
-            and kwargs.get("dir_fd") is not None
-            and not swapped
-        ):
+        if Path(path).name == destination.name and kwargs.get("dir_fd") is not None and not swapped:
             swapped = True
             destination_parent.rename(moved)
             destination_parent.symlink_to(outside, target_is_directory=True)
