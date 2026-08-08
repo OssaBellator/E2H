@@ -7,7 +7,7 @@ import json
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -62,6 +62,27 @@ class ReviewDecision(StrEnum):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
+
+
+def _revalidate_compiler_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    """Return a detached compiler-stage input after enforcing one concrete model type."""
+    if type(value) is not model_type:
+        raise CapsuleCompileError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise CapsuleCompileError(f"invalid {noun}: {exc}") from exc
 
 
 class GoalSelector(StrictModel):
@@ -446,6 +467,8 @@ def _select_goal(
 
 def compile_proposal(bundle: IngestionBundle, spec: CompilerSpec) -> CapsuleProposal:
     """Compile sanitized evidence and trusted check declarations into a draft proposal."""
+    bundle = _revalidate_compiler_model(bundle, IngestionBundle, noun="ingestion bundle")
+    spec = _revalidate_compiler_model(spec, CompilerSpec, noun="compiler specification")
     compiled_checks = [*spec.checks, *(compile_oracle(oracle) for oracle in spec.oracles)]
     compiled_mutations = [
         *spec.mutations,
@@ -522,6 +545,7 @@ def verify_proposal(
     container_runtime: str | None = None,
 ) -> VerificationReport:
     """Run the baseline capsule and ensure each controlled mutation is detected."""
+    proposal = _revalidate_compiler_model(proposal, CapsuleProposal, noun="capsule proposal")
     baseline = run_capsule(
         proposal.core.capsule,
         workspace,
@@ -567,6 +591,7 @@ def review_proposal(
     timestamp: datetime | None = None,
 ) -> CapsuleProposal:
     """Append a human review decision without changing the immutable proposal core."""
+    proposal = _revalidate_compiler_model(proposal, CapsuleProposal, noun="capsule proposal")
     updated = proposal.model_copy(deep=True)
     updated.reviews.append(
         ReviewRecord(
@@ -577,7 +602,7 @@ def review_proposal(
             note=note,
         )
     )
-    return CapsuleProposal.model_validate(updated.model_dump())
+    return CapsuleProposal.model_validate(updated.model_dump(mode="python", warnings="none"))
 
 
 def materialize_capsule(
@@ -588,6 +613,8 @@ def materialize_capsule(
     require_strong: bool = True,
 ) -> TaskCapsule:
     """Return the executable capsule only after matching review and verification gates."""
+    proposal = _revalidate_compiler_model(proposal, CapsuleProposal, noun="capsule proposal")
+    report = _revalidate_compiler_model(report, VerificationReport, noun="verification report")
     if report.proposal_id != proposal.proposal_id:
         raise CapsuleCompileError("verification report does not match the proposal")
     if report.capsule_sha256 != capsule_digest(proposal.core.capsule):
