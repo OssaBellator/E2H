@@ -60,8 +60,8 @@ def run_anthropic_messages_command(
         if not api_key_env or "=" in api_key_env or "\x00" in api_key_env:
             raise AnthropicRuntimeError("api key environment variable name is invalid")
         api_key = os.environ.get(api_key_env)
-        if api_key is None:
-            raise AnthropicRuntimeError(f"environment variable {api_key_env!r} is not set")
+        if not api_key:
+            raise AnthropicRuntimeError(f"environment variable {api_key_env!r} is not set or empty")
         loaded_capsule = load_capsule(capsule)
         loaded_variant = load_variant_document(variant)
         loaded_invocation = load_anthropic_messages_invocation(invocation)
