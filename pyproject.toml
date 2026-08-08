@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "e2h"
-version = "0.27.0"
+version = "0.28.0"
 description = "Evidence-to-Harness: reproducible evaluations, harness optimization, and verifiable AI-agent evidence."
 readme = "README.md"
 requires-python = ">=3.11"

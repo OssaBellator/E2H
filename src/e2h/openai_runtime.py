@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h._version import VERSION
 from e2h.document import load_mapping_document
 from e2h.models import TaskCapsule
 from e2h.openai_responses import OpenAIResponseRecord, OpenAIResponsesDocument
@@ -30,6 +31,7 @@ from e2h.variants import (
 )
 
 _RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
+_USER_AGENT = f"e2h-openai-runtime/{VERSION}"
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 _MAX_ERROR_BYTES = 65_536
@@ -474,7 +476,7 @@ def run_openai_responses(
         {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "e2h-openai-runtime/0.18",
+            "User-Agent": _USER_AGENT,
         },
         invocation.timeout_seconds,
     )

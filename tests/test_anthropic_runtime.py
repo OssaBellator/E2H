@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from e2h._version import VERSION
 from e2h.anthropic_runtime import (
     AnthropicHTTPResult,
     AnthropicMessagesInvocation,
@@ -274,7 +275,7 @@ def test_run_archives_request_response_and_headers_without_key_leakage() -> None
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
         "accept": "application/json",
-        "user-agent": "e2h-anthropic-runtime/0.28",
+        "user-agent": f"e2h-anthropic-runtime/{VERSION}",
     }
     record = result.archive.records[0]
     assert record.request_id == "req_123"
