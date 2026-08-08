@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -24,6 +24,26 @@ class GenomeError(ValueError):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
+
+
+def _revalidate_genome_input(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    if type(value) is not model_type:
+        raise GenomeError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="json", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise GenomeError(f"invalid {noun}: {exc}") from exc
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -361,6 +381,16 @@ def _apply_patch(capsule: TaskCapsule, patch: HarnessPatch) -> None:
 
 def apply_genome(genome: HarnessGenome, capsule: TaskCapsule) -> GenomeApplication:
     """Apply a genome without executing commands or mutating the input capsule."""
+    genome = _revalidate_genome_input(
+        genome,
+        HarnessGenome,
+        noun="genome",
+    )
+    capsule = _revalidate_genome_input(
+        capsule,
+        TaskCapsule,
+        noun="task capsule",
+    )
     try:
         base_digest = capsule_sha256(capsule)
     except ValueError as exc:
@@ -387,7 +417,11 @@ def apply_genome(genome: HarnessGenome, capsule: TaskCapsule) -> GenomeApplicati
 
 def materialize_application(application: GenomeApplication) -> TaskCapsule:
     """Return a detached capsule after re-validating the application digest."""
-    validated = GenomeApplication.model_validate(application.model_dump())
+    validated = _revalidate_genome_input(
+        application,
+        GenomeApplication,
+        noun="genome application",
+    )
     return validated.capsule.model_copy(deep=True)
 
 
