@@ -10,10 +10,10 @@ import shutil
 import stat
 import tempfile
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Iterator, Literal
+from typing import Any, BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -660,7 +660,9 @@ def restore_snapshot(
                         if any(destination.iterdir()):
                             raise SnapshotError("restore destination must be empty")
                     except OSError as exc:
-                        raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
+                        raise SnapshotError(
+                            f"unable to inspect restore destination: {exc}"
+                        ) from exc
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 staging = Path(
                     tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
@@ -670,7 +672,9 @@ def restore_snapshot(
                     try:
                         target.relative_to(staging)
                     except ValueError as exc:
-                        raise SnapshotError(f"restore path escapes staging root: {entry.path}") from exc
+                        raise SnapshotError(
+                            f"restore path escapes staging root: {entry.path}"
+                        ) from exc
                     if entry.kind == "directory":
                         target.mkdir(parents=True, exist_ok=True)
                         continue
