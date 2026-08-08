@@ -143,3 +143,31 @@ def test_materialize_rejects_directory_replaced_after_verification(
 
     assert replaced is True
     assert not destination.exists()
+
+
+def test_materialize_rejects_dangling_destination_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    source = root / "coding"
+    source.mkdir(parents=True)
+    (source / "check.py").write_text("print('inside')\n", encoding="utf-8")
+    suite = _suite()
+    lock = seal_benchmark_environment_suite(suite, root=root)
+
+    outside = tmp_path / "outside-materialized"
+    destination = tmp_path / "materialized"
+    destination.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="environment materialization destination already exists",
+    ):
+        materialize_benchmark_environment(
+            suite,
+            lock,
+            "coding",
+            root=root,
+            destination=destination,
+        )
+
+    assert destination.is_symlink()
+    assert not outside.exists()
