@@ -471,9 +471,7 @@ def _read_release_manifest_bytes(path: Path) -> bytes:
         raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
     if not stat.S_ISDIR(parent_expected.st_mode):
         raise ReleaseIntegrityError("release manifest parent must be a directory")
-    directory_flags = (
-        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    )
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         parent_descriptor = os.open(parent, directory_flags)
     except OSError as exc:
