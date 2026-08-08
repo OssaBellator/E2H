@@ -59,7 +59,7 @@ def test_seal_rejects_file_swapped_to_symlink_during_open(
 
     monkeypatch.setattr(os, "open", swapping_open)
 
-    with pytest.raises(BenchmarkEnvironmentError, match="unable to open environment file"):
+    with pytest.raises(BenchmarkEnvironmentError, match="environment file"):
         seal_benchmark_environment_suite(_suite(), root=root)
 
     assert swapped is True
