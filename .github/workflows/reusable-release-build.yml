@@ -82,8 +82,10 @@ jobs:
           uv pip install --python .venv/bin/python --no-deps "${wheels[0]}"
           .venv/bin/python - <<'PY'
           import importlib.metadata
+          import os
           import subprocess
           import sys
+          import tempfile
           import tomllib
           from pathlib import Path
 
@@ -97,24 +99,33 @@ jobs:
               for entry in distribution.entry_points
               if entry.group == "console_scripts"
           }
-
-          import e2h
-
-          assert distribution.version == project["version"]
-          assert e2h.__version__ == project["version"]
-          assert installed_scripts == expected_scripts
-
           bin_dir = Path(sys.executable).parent
-          for name in sorted(expected_scripts):
-              executable = bin_dir / name
-              assert executable.is_file(), executable
-              completed = subprocess.run(
-                  [str(executable), "--help"],
-                  capture_output=True,
-                  text=True,
-                  check=False,
-              )
-              assert completed.returncode == 0, (name, completed.stdout, completed.stderr)
+          venv_dir = Path(sys.prefix).resolve()
+
+          with tempfile.TemporaryDirectory() as working_directory:
+              os.chdir(working_directory)
+
+              import e2h
+
+              assert distribution.version == project["version"]
+              assert e2h.__version__ == project["version"]
+              assert installed_scripts == expected_scripts
+              assert Path(e2h.__file__).resolve().is_relative_to(venv_dir)
+
+              for name in sorted(expected_scripts):
+                  executable = bin_dir / name
+                  assert executable.is_file(), executable
+                  completed = subprocess.run(
+                      [str(executable), "--help"],
+                      capture_output=True,
+                      text=True,
+                      check=False,
+                  )
+                  assert completed.returncode == 0, (
+                      name,
+                      completed.stdout,
+                      completed.stderr,
+                  )
           PY
       - name: Export and canonicalize runtime SBOM twice
         shell: bash
