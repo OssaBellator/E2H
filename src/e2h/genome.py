@@ -40,7 +40,7 @@ def _revalidate_genome_input(
             f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
         )
     try:
-        payload = value.model_dump(mode="json", warnings="none")
+        payload = value.model_dump(mode="python", warnings="none")
         return model_type.model_validate(payload)
     except ValueError as exc:
         raise GenomeError(f"invalid {noun}: {exc}") from exc
