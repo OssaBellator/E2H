@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from e2h.anthropic_runtime import (
     AnthropicMessagesInvocation,
@@ -21,6 +21,10 @@ from e2h.openai_runtime import (
 )
 from e2h.runtime_validation import revalidate_runtime_inputs
 from e2h.variants import HarnessVariantDocument
+
+
+class _Lookalike(BaseModel):
+    model_config = ConfigDict(extra="allow")
 
 
 def capsule() -> TaskCapsule:
@@ -48,6 +52,10 @@ def document() -> HarnessVariantDocument:
             "variant": {"id": "runtime-validation-variant"},
         }
     )
+
+
+def _lookalike(value: BaseModel) -> _Lookalike:
+    return _Lookalike.model_validate(value.model_dump(mode="json"))
 
 
 @pytest.mark.parametrize(
@@ -92,4 +100,38 @@ def test_revalidation_rejects_structurally_compatible_wrong_provider_invocation(
             expected_type,
             error_type=error_type,
             invocation_noun=noun,
+        )
+
+
+def test_revalidation_rejects_structurally_compatible_wrong_document_type() -> None:
+    wrong_document = _lookalike(document())
+
+    with pytest.raises(
+        OpenAIRuntimeError,
+        match=r"invalid variant document: expected HarnessVariantDocument, got _Lookalike",
+    ):
+        revalidate_runtime_inputs(
+            wrong_document,
+            capsule(),
+            OpenAIResponsesInvocation(id="openai-runtime"),
+            OpenAIResponsesInvocation,
+            error_type=OpenAIRuntimeError,
+            invocation_noun="OpenAI Responses invocation",
+        )
+
+
+def test_revalidation_rejects_structurally_compatible_wrong_capsule_type() -> None:
+    wrong_capsule = _lookalike(capsule())
+
+    with pytest.raises(
+        OpenAIRuntimeError,
+        match=r"invalid task capsule: expected TaskCapsule, got _Lookalike",
+    ):
+        revalidate_runtime_inputs(
+            document(),
+            wrong_capsule,
+            OpenAIResponsesInvocation(id="openai-runtime"),
+            OpenAIResponsesInvocation,
+            error_type=OpenAIRuntimeError,
+            invocation_noun="OpenAI Responses invocation",
         )
