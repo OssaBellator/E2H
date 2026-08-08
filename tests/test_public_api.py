@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 
 import e2h
-from e2h import anthropic_runtime, gemini_runtime
+from e2h import anthropic_runtime, gemini_runtime, runtime_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,9 +33,23 @@ GEMINI_RUNTIME_EXPORTS = {
     "run_gemini_generate_content": gemini_runtime.run_gemini_generate_content,
 }
 
+RUNTIME_PLAN_EXPORTS = {
+    "RuntimeInvocation": runtime_plan.RuntimeInvocation,
+    "RuntimePlanError": runtime_plan.RuntimePlanError,
+    "RuntimeProvider": runtime_plan.RuntimeProvider,
+    "RuntimeRequest": runtime_plan.RuntimeRequest,
+    "RuntimeRequestPlan": runtime_plan.RuntimeRequestPlan,
+    "load_runtime_request_plan": runtime_plan.load_runtime_request_plan,
+    "plan_runtime_request": runtime_plan.plan_runtime_request,
+}
+
 
 def test_provider_runtime_exports_are_available_from_package_root() -> None:
-    expected = {**ANTHROPIC_RUNTIME_EXPORTS, **GEMINI_RUNTIME_EXPORTS}
+    expected = {
+        **ANTHROPIC_RUNTIME_EXPORTS,
+        **GEMINI_RUNTIME_EXPORTS,
+        **RUNTIME_PLAN_EXPORTS,
+    }
     for name, value in expected.items():
         assert name in e2h.__all__
         assert getattr(e2h, name) is value
