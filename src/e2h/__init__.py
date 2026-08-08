@@ -187,6 +187,15 @@ from e2h.promotion import (
     variant_prediction_sha256,
 )
 from e2h.runner import ExecutionBackend, RunResult, run_capsule
+from e2h.runtime_plan import (
+    RuntimeInvocation,
+    RuntimePlanError,
+    RuntimeProvider,
+    RuntimeRequest,
+    RuntimeRequestPlan,
+    load_runtime_request_plan,
+    plan_runtime_request,
+)
 from e2h.snapshot import (
     SnapshotLimits,
     SnapshotManifest,
@@ -325,6 +334,11 @@ __all__ = [
     "RoutingRule",
     "RoutingVariant",
     "RunResult",
+    "RuntimeInvocation",
+    "RuntimePlanError",
+    "RuntimeProvider",
+    "RuntimeRequest",
+    "RuntimeRequestPlan",
     "SealedEvaluationReport",
     "SealedPrediction",
     "SealedPredictionDocument",
@@ -396,6 +410,7 @@ __all__ = [
     "load_promotion_receipt",
     "load_redaction_policy",
     "load_rollback_plan",
+    "load_runtime_request_plan",
     "load_sealed_predictions",
     "load_variant_document",
     "load_variant_predictions",
@@ -406,6 +421,7 @@ __all__ = [
     "optimizer_candidate_sha256",
     "output_capture_failure",
     "paired_evaluation_sha256",
+    "plan_runtime_request",
     "promotion_decision_sha256",
     "promotion_policy_sha256",
     "promotion_proposal_sha256",
