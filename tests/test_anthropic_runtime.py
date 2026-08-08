@@ -15,7 +15,13 @@ from e2h.anthropic_runtime import (
 )
 from e2h.genome import capsule_sha256
 from e2h.models import TaskCapsule
-from e2h.variants import HarnessVariant, HarnessVariantDocument, PromptMessage
+from e2h.variants import (
+    HarnessVariant,
+    HarnessVariantDocument,
+    PromptMessage,
+    ReferencedContextItem,
+    WorkflowVariant,
+)
 
 
 def capsule() -> TaskCapsule:
@@ -321,34 +327,32 @@ def test_runtime_rejects_unfaithful_provider_neutral_semantics() -> None:
         build_anthropic_messages_request(non_anthropic, capsule(), invocation())
 
     workflow = base.model_copy(deep=True)
-    workflow.variant.workflow = {
-        "id": "workflow",
-        "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
-    }
+    workflow.variant.workflow = WorkflowVariant.model_validate(
+        {
+            "id": "workflow",
+            "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
+        }
+    )
+    workflow = HarnessVariantDocument.model_validate(workflow.model_dump(mode="json"))
     with pytest.raises(AnthropicRuntimeError, match="does not execute workflow DAGs"):
-        build_anthropic_messages_request(
-            HarnessVariantDocument.model_validate(workflow.model_dump(mode="json")),
-            capsule(),
-            invocation(),
-        )
+        build_anthropic_messages_request(workflow, capsule(), invocation())
 
     referenced = base.model_copy(deep=True)
     assert referenced.variant.context is not None
     referenced.variant.context.items = [
-        {
-            "id": "artifact",
-            "kind": "artifact",
-            "sha256": "1" * 64,
-            "locator": "cas://artifact/one",
-            "max_chars": 16,
-        }
-    ]
-    with pytest.raises(AnthropicRuntimeError, match="does not dereference"):
-        build_anthropic_messages_request(
-            HarnessVariantDocument.model_validate(referenced.model_dump(mode="json")),
-            capsule(),
-            invocation(),
+        ReferencedContextItem.model_validate(
+            {
+                "id": "artifact",
+                "kind": "artifact",
+                "sha256": "1" * 64,
+                "locator": "cas://artifact/one",
+                "max_chars": 16,
+            }
         )
+    ]
+    referenced = HarnessVariantDocument.model_validate(referenced.model_dump(mode="json"))
+    with pytest.raises(AnthropicRuntimeError, match="does not dereference"):
+        build_anthropic_messages_request(referenced, capsule(), invocation())
 
     after = base.model_copy(deep=True)
     assert after.variant.context is not None
