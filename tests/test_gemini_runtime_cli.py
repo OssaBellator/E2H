@@ -209,7 +209,8 @@ def test_cli_rejects_invalid_key_environment_name(
         ],
     )
     assert result.exit_code == 2
-    assert "environment variable name is invalid" in result.stderr
+    normalized = " ".join(result.stderr.split())
+    assert "environment variable name is invalid" in normalized
 
 
 def test_cli_fails_closed_on_ingestion_error(
