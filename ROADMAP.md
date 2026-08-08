@@ -62,4 +62,4 @@
 ## Milestone 7 — Provider runtime parity
 
 - [x] Anthropic Messages API runtime adapter.
-- [ ] Gemini GenerateContent runtime adapter.
+- [x] Gemini GenerateContent runtime adapter.
