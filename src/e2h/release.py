@@ -190,9 +190,9 @@ def _release_directory_must_be_stable(
         current = directory.stat(follow_symlinks=False)
     except OSError as exc:
         raise ReleaseIntegrityError(f"unable to restat release directory: {exc}") from exc
-    if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
-        current
-    ) != _stat_identity(opened):
+    if _stat_identity(after) != _stat_identity(opened) or _stat_identity(current) != _stat_identity(
+        opened
+    ):
         raise ReleaseIntegrityError("release directory changed during sealing")
 
 
@@ -217,12 +217,12 @@ def _distribution_entries(
     entries: list[tuple[Path, os.stat_result]] = []
     for name in names:
         path = directory / name
-        _artifact_kind(name)
         entry = _stat_release_entry(descriptor, path)
         if stat.S_ISLNK(entry.st_mode) or not stat.S_ISREG(entry.st_mode):
             raise ReleaseIntegrityError(
                 f"release directory may contain only regular distribution files: {name}"
             )
+        _artifact_kind(name)
         entries.append((path, entry))
     _release_directory_must_be_stable(directory, descriptor, opened)
     return entries
