@@ -8,8 +8,12 @@ import pytest
 from typer.testing import CliRunner
 
 import e2h.runtime_cli as runtime_cli
+from e2h.genome import capsule_sha256
+from e2h.models import TaskCapsule
+from e2h.openai_runtime import OpenAIResponsesInvocation
 from e2h.runtime_cli import runtime_app
 from e2h.runtime_plan import RuntimePlanError
+from e2h.variants import HarnessVariantDocument
 
 runner = CliRunner()
 
@@ -44,6 +48,72 @@ def _input_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
     paths = tuple(tmp_path / name for name in ("capsule.json", "variant.json", "invocation.json"))
     for path in paths:
         path.write_text("{}\n", encoding="utf-8")
+    return paths
+
+
+def _real_openai_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
+    capsule = TaskCapsule.model_validate(
+        {
+            "id": "runtime-plan-cli",
+            "goal": "Plan one provider request from the CLI.",
+            "success": {
+                "commands": [
+                    {
+                        "id": "contract",
+                        "argv": ["python", "-c", "print('ok')"],
+                    }
+                ]
+            },
+        }
+    )
+    variant = HarnessVariantDocument.model_validate(
+        {
+            "base_capsule_sha256": capsule_sha256(capsule),
+            "variant": {
+                "id": "runtime-plan-cli-variant",
+                "prompt": {
+                    "id": "prompt",
+                    "variables": ["task"],
+                    "messages": [
+                        {
+                            "id": "system",
+                            "role": "system",
+                            "content": "Preserve observable evidence.",
+                        },
+                        {
+                            "id": "user",
+                            "role": "user",
+                            "content": "Execute ${task}.",
+                        },
+                    ],
+                },
+                "routing": {
+                    "id": "routing",
+                    "targets": [
+                        {
+                            "id": "primary",
+                            "provider": "openai",
+                            "model": "openai-test",
+                            "capabilities": ["text"],
+                        }
+                    ],
+                    "rules": [],
+                    "fallback_target": "primary",
+                },
+            },
+        }
+    )
+    invocation = OpenAIResponsesInvocation.model_validate(
+        {
+            "id": "plan-cli-001",
+            "variables": {"task": "the deterministic check"},
+            "max_output_tokens": 128,
+        }
+    )
+    paths = _input_paths(tmp_path)
+    paths[0].write_text(capsule.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    paths[1].write_text(variant.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    paths[2].write_text(invocation.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return paths
 
 
@@ -97,6 +167,38 @@ def test_plan_cli_writes_exact_json_without_credentials(
         "capsule": capsule,
         "variant": variant,
         "invocation": invocation,
+    }
+
+
+def test_plan_cli_runs_actual_file_backed_planner_without_credentials(tmp_path: Path) -> None:
+    capsule, variant, invocation = _real_openai_inputs(tmp_path)
+    result = runner.invoke(
+        runtime_app,
+        [
+            "plan",
+            "openai-responses",
+            str(capsule),
+            str(variant),
+            str(invocation),
+            "--json",
+        ],
+        env={
+            "OPENAI_API_KEY": "",
+            "ANTHROPIC_API_KEY": "",
+            "GEMINI_API_KEY": "",
+        },
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["provider"] == "openai-responses"
+    assert payload["request"]["invocation_id"] == "plan-cli-001"
+    assert payload["request"]["model"] == "openai-test"
+    assert payload["request"]["route_target_id"] == "primary"
+    assert len(payload["request"]["request_sha256"]) == 64
+    assert payload["request"]["body"]["input"][-1] == {
+        "role": "user",
+        "content": "Execute the deterministic check.",
     }
 
 
