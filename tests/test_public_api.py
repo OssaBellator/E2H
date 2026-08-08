@@ -44,7 +44,7 @@ RUNTIME_PLAN_EXPORTS = {
 }
 
 
-def test_provider_runtime_exports_are_available_from_package_root() -> None:
+def test_runtime_exports_are_available_from_package_root() -> None:
     expected = {
         **ANTHROPIC_RUNTIME_EXPORTS,
         **GEMINI_RUNTIME_EXPORTS,
