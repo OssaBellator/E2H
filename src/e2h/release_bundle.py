@@ -210,15 +210,24 @@ def _parse_checksums(path: Path) -> tuple[dict[str, str], bytes]:
 
 def _validate_checksum_shape(checksums: dict[str, str]) -> None:
     paths = set(checksums)
-    if not _STATIC_CHECKSUM_PATHS <= paths:
+    if not paths >= _STATIC_CHECKSUM_PATHS:
         missing = sorted(_STATIC_CHECKSUM_PATHS - paths)
         raise ReleaseBundleError(f"release checksum manifest is missing evidence: {missing}")
     distribution_paths = paths - _STATIC_CHECKSUM_PATHS
     if len(distribution_paths) != 2:
         raise ReleaseBundleError("release checksum manifest must contain exactly two distributions")
-    if sum(path.startswith("dist/") and path.endswith(".whl") for path in distribution_paths) != 1:
+    if (
+        sum(path.startswith("dist/") and path.endswith(".whl") for path in distribution_paths)
+        != 1
+    ):
         raise ReleaseBundleError("release checksum manifest must contain exactly one wheel")
-    if sum(path.startswith("dist/") and path.endswith(".tar.gz") for path in distribution_paths) != 1:
+    if (
+        sum(
+            path.startswith("dist/") and path.endswith(".tar.gz")
+            for path in distribution_paths
+        )
+        != 1
+    ):
         raise ReleaseBundleError("release checksum manifest must contain exactly one sdist")
 
 
@@ -412,8 +421,15 @@ def _verify_staged_bundle(
         canonical_sbom = canonicalize_cyclonedx_sbom_file(sbom_path).encode("utf-8")
     except ValueError as exc:
         raise ReleaseBundleError(f"release SBOM verification failed: {exc}") from exc
-    if _read_regular_bytes(sbom_path, limit=8 * 1024 * 1024, noun="release SBOM") != canonical_sbom:
+    if (
+        _read_regular_bytes(sbom_path, limit=8 * 1024 * 1024, noun="release SBOM")
+        != canonical_sbom
+    ):
         raise ReleaseBundleError("release SBOM is not canonical")
+    sbom = json.loads(canonical_sbom)
+    component = sbom["metadata"]["component"]
+    if component.get("name") != manifest.project or component.get("version") != manifest.version:
+        raise ReleaseBundleError("release SBOM component does not match release manifest")
 
     source_path = directory / "e2h-source.e2hsnap"
     try:
