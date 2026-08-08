@@ -20,6 +20,7 @@ from e2h.promotion_models import (
     promotion_proposal_sha256,
     rollback_plan_sha256,
 )
+from e2h.promotion_validation import revalidate_promotion_model
 
 
 def _promotion_checks(
@@ -120,8 +121,16 @@ def evaluate_promotion(
 ) -> PromotionDecision:
     """Evaluate all exact statistical rules and return a self-verifying decision."""
     try:
-        policy = PromotionGatePolicy.model_validate(policy.model_dump(mode="json"))
-        proposal = PromotionProposal.model_validate(proposal.model_dump(mode="json"))
+        policy = revalidate_promotion_model(
+            policy,
+            PromotionGatePolicy,
+            noun="promotion policy",
+        )
+        proposal = revalidate_promotion_model(
+            proposal,
+            PromotionProposal,
+            noun="promotion proposal",
+        )
     except ValueError as exc:
         raise PromotionError(f"invalid promotion inputs: {exc}") from exc
 
@@ -153,8 +162,16 @@ def materialize_promotion(
 ) -> PromotionReceipt:
     """Materialize a passing, internally verified decision with exact rollback metadata."""
     try:
-        decision = PromotionDecision.model_validate(decision.model_dump(mode="json"))
-        rollback = RollbackPlan.model_validate(rollback.model_dump(mode="json"))
+        decision = revalidate_promotion_model(
+            decision,
+            PromotionDecision,
+            noun="promotion decision",
+        )
+        rollback = revalidate_promotion_model(
+            rollback,
+            RollbackPlan,
+            noun="rollback plan",
+        )
     except ValueError as exc:
         raise PromotionError(f"invalid promotion materialization inputs: {exc}") from exc
     if decision.decision is not PromotionDecisionKind.PROMOTE:
