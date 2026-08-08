@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typer import Typer
 from typer.testing import CliRunner
 
@@ -24,7 +24,7 @@ class _Request(BaseModel):
 
 class _Plan(BaseModel):
     provider: RuntimeProvider = RuntimeProvider.OPENAI_RESPONSES
-    request: _Request = _Request()
+    request: _Request = Field(default_factory=_Request)
 
     @property
     def request_sha256(self) -> str:
@@ -41,6 +41,11 @@ def _input_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
 def _command_app() -> Typer:
     command_app = Typer()
     command_app.command("plan")(plan_cli.plan_runtime_request_command)
+
+    @command_app.command("noop")
+    def noop() -> None:
+        pass
+
     return command_app
 
 
