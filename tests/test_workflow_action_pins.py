@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 
 REVIEWED_ACTION_PINS = {
-    "actions/attest": "508db95dd578ae2727ebd6217d5ba78e4fbda05d",
+    "actions/attest": "1e69f48acb82d1966a394da916b4c1698aa569d6",
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     "actions/setup-node": "e51e5fe84fc33b4c73ebe40526b2694712b5b858",
