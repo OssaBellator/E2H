@@ -309,27 +309,12 @@ def optimizer_candidate_sha256(document: OptimizerCandidateDocument) -> str:
     return hashlib.sha256(_canonical_json_bytes(document.model_dump(mode="json"))).hexdigest()
 
 
-def verify_optimizer_adapter(
+def _verify_optimizer_adapter_validated(
     adapter: OptimizerAdapterDocument,
     capsule: TaskCapsule,
     variant_document: HarnessVariantDocument,
 ) -> OptimizerAdapterVerification:
-    """Verify exact identities and prompt component bindings without execution."""
-    adapter = _revalidate_optimizer_input(
-        adapter,
-        OptimizerAdapterDocument,
-        noun="optimizer adapter",
-    )
-    capsule = _revalidate_optimizer_input(
-        capsule,
-        TaskCapsule,
-        noun="task capsule",
-    )
-    variant_document = _revalidate_optimizer_input(
-        variant_document,
-        HarnessVariantDocument,
-        noun="variant document",
-    )
+    """Verify one already-normalized optimizer input set."""
     verification = verify_variant_document(variant_document, capsule)
     if adapter.base_capsule_sha256 != verification.base_capsule_sha256:
         raise OptimizerAdapterError(
@@ -359,6 +344,30 @@ def verify_optimizer_adapter(
     )
 
 
+def verify_optimizer_adapter(
+    adapter: OptimizerAdapterDocument,
+    capsule: TaskCapsule,
+    variant_document: HarnessVariantDocument,
+) -> OptimizerAdapterVerification:
+    """Verify exact identities and prompt component bindings without execution."""
+    adapter = _revalidate_optimizer_input(
+        adapter,
+        OptimizerAdapterDocument,
+        noun="optimizer adapter",
+    )
+    capsule = _revalidate_optimizer_input(
+        capsule,
+        TaskCapsule,
+        noun="task capsule",
+    )
+    variant_document = _revalidate_optimizer_input(
+        variant_document,
+        HarnessVariantDocument,
+        noun="variant document",
+    )
+    return _verify_optimizer_adapter_validated(adapter, capsule, variant_document)
+
+
 def apply_optimizer_candidate(
     adapter: OptimizerAdapterDocument,
     candidate: OptimizerCandidateDocument,
@@ -386,7 +395,7 @@ def apply_optimizer_candidate(
         HarnessVariantDocument,
         noun="variant document",
     )
-    verification = verify_optimizer_adapter(adapter, capsule, variant_document)
+    verification = _verify_optimizer_adapter_validated(adapter, capsule, variant_document)
     if candidate.optimizer is not adapter.optimizer:
         raise OptimizerAdapterError("candidate optimizer does not match adapter optimizer")
     if candidate.adapter_sha256 != verification.adapter_sha256:
