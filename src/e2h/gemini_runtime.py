@@ -45,7 +45,7 @@ _PLACEHOLDER_PATTERN = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]{0,127})\}")
 
 
 class GeminiRuntimeError(ValueError):
-    """Raised when a live Gemini GenerateContent invocation cannot be executed safely."""
+    """Raised when a live Gemini GenerateContent invocation cannot run safely."""
 
 
 class StrictModel(BaseModel):
@@ -127,16 +127,15 @@ class GeminiGenerateContentRequest(StrictModel):
 
     @model_validator(mode="after")
     def request_digest_must_match(self) -> GeminiGenerateContentRequest:
-        expected = hashlib.sha256(
-            _canonical_json_bytes({"model": self.model, "body": self.body})
-        ).hexdigest()
+        payload = {"model": self.model, "body": self.body}
+        expected = hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
         if self.request_sha256 != expected:
             raise ValueError("request_sha256 does not match the canonical Gemini request")
         return self
 
 
 class GeminiGenerateContentRuntimeResult(StrictModel):
-    """One live Gemini result plus the archive used by the ingestion adapter."""
+    """One live Gemini result plus its observable archive."""
 
     schema_version: Literal["0.1"] = "0.1"
     request: GeminiGenerateContentRequest
@@ -146,7 +145,7 @@ class GeminiGenerateContentRuntimeResult(StrictModel):
 
     @property
     def accepted(self) -> bool:
-        """Return whether the response satisfied the local typed-tool contract."""
+        """Return whether the response satisfied the local tool contract."""
         return not self.policy_violations
 
 
@@ -169,14 +168,13 @@ def _select_route(routing: RoutingVariant, metadata: Mapping[str, str]) -> Route
         if all(metadata.get(key) == expected for key, expected in rule.match.items())
     ]
     if matches:
-        selected_rule = max(matches, key=lambda rule: rule.priority)
-        target = targets[selected_rule.target_id]
+        target = targets[max(matches, key=lambda rule: rule.priority).target_id]
     else:
         target = targets[routing.fallback_target]
     if target.provider.casefold() not in {"google", "gemini"}:
         raise GeminiRuntimeError(
-            f"selected routing target {target.id!r} uses provider {target.provider!r}, "
-            "not 'google' or 'gemini'"
+            f"selected routing target {target.id!r} uses provider "
+            f"{target.provider!r}, not 'google' or 'gemini'"
         )
     return target
 
@@ -210,26 +208,30 @@ def _context_items(context: ContextVariant) -> list[LiteralContextItem]:
             )
         if item.placement == "after_prompt":
             raise GeminiRuntimeError(
-                f"context item {item.id!r} uses after_prompt; Gemini GenerateContent has no "
-                "faithful system-instruction placement after conversational contents"
+                f"context item {item.id!r} uses after_prompt; Gemini GenerateContent has "
+                "no faithful system-instruction placement after conversational contents"
             )
         literals.append((index, item))
 
     rendered = [(index, item, item.content[: item.max_chars]) for index, item in literals]
-    total = sum(len(content) for _, _, content in rendered)
-    if total > context.max_chars:
+    if sum(len(content) for _, _, content in rendered) > context.max_chars:
         if context.overflow == "reject":
             raise GeminiRuntimeError("materialized context exceeds the declared max_chars")
         budget = context.max_chars
         kept: dict[str, str] = {}
-        for _, item, content in sorted(rendered, key=lambda entry: (-entry[1].priority, entry[0])):
+        prioritized = sorted(rendered, key=lambda entry: (-entry[1].priority, entry[0]))
+        for _, item, content in prioritized:
             if budget <= 0:
                 break
             selected = content[:budget]
             if selected:
                 kept[item.id] = selected
                 budget -= len(selected)
-        rendered = [(index, item, kept[item.id]) for index, item, _ in rendered if item.id in kept]
+        rendered = [
+            (index, item, kept[item.id])
+            for index, item, _ in rendered
+            if item.id in kept
+        ]
 
     if context.ordering == "priority":
         rendered.sort(key=lambda entry: (-entry[1].priority, entry[0]))
@@ -257,7 +259,9 @@ def _build_prompt(
 
     system_parts: list[dict[str, str]] = []
     if variant.context is not None:
-        system_parts.extend({"text": item.content} for item in _context_items(variant.context))
+        system_parts.extend(
+            {"text": item.content} for item in _context_items(variant.context)
+        )
 
     contents: list[dict[str, Any]] = []
     conversation_started = False
@@ -276,11 +280,15 @@ def _build_prompt(
         contents.append({"role": role, "parts": [{"text": rendered}]})
 
     if not contents:
-        raise GeminiRuntimeError("Gemini runtime requires at least one user or assistant message")
+        raise GeminiRuntimeError(
+            "Gemini runtime requires at least one user or assistant message"
+        )
     return system_parts, contents
 
 
-def _build_tools(tools: ToolVariant | None) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+def _build_tools(
+    tools: ToolVariant | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     if tools is None:
         return [], None
     declarations = [
@@ -308,7 +316,7 @@ def build_gemini_generate_content_request(
     capsule: TaskCapsule,
     invocation: GeminiGenerateContentInvocation,
 ) -> GeminiGenerateContentRequest:
-    """Materialize one deterministic Gemini GenerateContent request from a verified variant."""
+    """Materialize a deterministic GenerateContent request from a verified variant."""
     try:
         verification = verify_variant_document(document, capsule)
     except VariantError as exc:
@@ -318,7 +326,8 @@ def build_gemini_generate_content_request(
         raise GeminiRuntimeError("Gemini runtime requires a routing variant")
     if variant.workflow is not None:
         raise GeminiRuntimeError(
-            "Gemini runtime does not execute workflow DAGs; materialize one model turn explicitly"
+            "Gemini runtime does not execute workflow DAGs; "
+            "materialize one model turn explicitly"
         )
 
     target = _select_route(variant.routing, invocation.route_metadata)
@@ -335,9 +344,8 @@ def build_gemini_generate_content_request(
         body["tools"] = tools
         body["toolConfig"] = tool_config
 
-    request_sha256 = hashlib.sha256(
-        _canonical_json_bytes({"model": target.model, "body": body})
-    ).hexdigest()
+    request_payload = {"model": target.model, "body": body}
+    request_sha256 = hashlib.sha256(_canonical_json_bytes(request_payload)).hexdigest()
     return GeminiGenerateContentRequest(
         invocation_id=invocation.id,
         variant_id=variant.id,
@@ -352,7 +360,9 @@ def build_gemini_generate_content_request(
     )
 
 
-def _archive_contents(request: GeminiGenerateContentRequest) -> list[GeminiContentRecord]:
+def _archive_contents(
+    request: GeminiGenerateContentRequest,
+) -> list[GeminiContentRecord]:
     raw_contents = request.body.get("contents")
     if not isinstance(raw_contents, list):
         raise GeminiRuntimeError("materialized Gemini contents must be an array")
@@ -363,7 +373,9 @@ def _archive_contents(request: GeminiGenerateContentRequest) -> list[GeminiConte
         role = raw_content.get("role")
         parts = raw_content.get("parts")
         if role not in {"user", "model"} or not isinstance(parts, list):
-            raise GeminiRuntimeError("materialized Gemini content requires user/model role and parts")
+            raise GeminiRuntimeError(
+                "materialized Gemini content requires user/model role and parts"
+            )
         contents.append(
             GeminiContentRecord(
                 id=f"{request.invocation_id}.input.{index}",
@@ -374,12 +386,16 @@ def _archive_contents(request: GeminiGenerateContentRequest) -> list[GeminiConte
     return contents
 
 
-def _archive_system(request: GeminiGenerateContentRequest) -> GeminiContentRecord | None:
+def _archive_system(
+    request: GeminiGenerateContentRequest,
+) -> GeminiContentRecord | None:
     raw_system = request.body.get("systemInstruction")
     if raw_system is None:
         return None
     if not isinstance(raw_system, dict) or not isinstance(raw_system.get("parts"), list):
-        raise GeminiRuntimeError("materialized Gemini systemInstruction must contain parts")
+        raise GeminiRuntimeError(
+            "materialized Gemini systemInstruction must contain parts"
+        )
     return GeminiContentRecord(
         id=f"{request.invocation_id}.system",
         role="system",
@@ -420,9 +436,11 @@ def _function_calls(response: Mapping[str, Any]) -> tuple[list[dict[str, Any]], 
     return calls, unexpected_tool_call
 
 
-def _tool_policy_violations(tools: ToolVariant | None, response: Mapping[str, Any]) -> list[str]:
-    raw_candidates = response.get("candidates")
-    if not isinstance(raw_candidates, list):
+def _tool_policy_violations(
+    tools: ToolVariant | None,
+    response: Mapping[str, Any],
+) -> list[str]:
+    if not isinstance(response.get("candidates"), list):
         return ["provider response candidates is not an array"]
     calls, unexpected_tool_call = _function_calls(response)
     violations: list[str] = []
@@ -444,17 +462,21 @@ def _tool_policy_violations(tools: ToolVariant | None, response: Mapping[str, An
             violations.append(f"provider function call {index} has invalid name")
         else:
             names.append(name)
-        args = call.get("args", {})
-        if not isinstance(args, dict):
+        if not isinstance(call.get("args", {}), dict):
             violations.append(f"provider function call {index} args is not an object")
 
     unknown = sorted({name for name in names if name not in declared})
     if unknown:
         violations.append(f"provider called undeclared tools: {', '.join(unknown)}")
     if len(calls) > tools.max_calls:
-        violations.append(f"provider returned {len(calls)} function calls; max_calls is {tools.max_calls}")
+        violations.append(
+            f"provider returned {len(calls)} function calls; "
+            f"max_calls is {tools.max_calls}"
+        )
     if not tools.parallel_calls and len(calls) > 1:
-        violations.append("provider returned parallel function calls despite parallel_calls=false")
+        violations.append(
+            "provider returned parallel function calls despite parallel_calls=false"
+        )
     if tools.selection == "none" and calls:
         violations.append("provider returned function calls despite selection='none'")
     if tools.selection == "required" and not calls:
@@ -462,7 +484,8 @@ def _tool_policy_violations(tools: ToolVariant | None, response: Mapping[str, An
     if tools.selection == "named":
         if len(calls) != 1:
             violations.append(
-                f"provider returned {len(calls)} function calls; selection='named' requires exactly one"
+                f"provider returned {len(calls)} function calls; selection='named' "
+                "requires exactly one"
             )
         wrong = sorted({name for name in names if name != tools.selected_tool})
         if wrong:
@@ -501,14 +524,19 @@ def _http_transport(
     except (URLError, OSError) as exc:
         raise GeminiRuntimeError(f"Gemini GenerateContent request failed: {exc}") from exc
     if len(raw) > _MAX_RESPONSE_BYTES:
-        raise GeminiRuntimeError(f"Gemini GenerateContent response exceeds {_MAX_RESPONSE_BYTES} bytes")
+        raise GeminiRuntimeError(
+            f"Gemini GenerateContent response exceeds {_MAX_RESPONSE_BYTES} bytes"
+        )
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise GeminiRuntimeError("Gemini GenerateContent response was not valid JSON") from exc
     if not isinstance(payload, dict):
         raise GeminiRuntimeError("Gemini GenerateContent response must be a JSON object")
-    return GeminiHTTPResult(payload=cast(dict[str, Any], payload), request_id=request_id)
+    return GeminiHTTPResult(
+        payload=cast(dict[str, Any], payload),
+        request_id=request_id,
+    )
 
 
 def run_gemini_generate_content(
@@ -519,7 +547,7 @@ def run_gemini_generate_content(
     api_key: str,
     transport: GeminiTransport | None = None,
 ) -> GeminiGenerateContentRuntimeResult:
-    """Execute one live GenerateContent request and preserve a replayable archive."""
+    """Execute one live GenerateContent request and preserve an observable archive."""
     if not api_key or any(character in api_key for character in "\r\n\x00"):
         raise GeminiRuntimeError("Gemini API key is missing or not header-safe")
     request = build_gemini_generate_content_request(document, capsule, invocation)
@@ -590,4 +618,6 @@ def load_gemini_generate_content_invocation(path: Any) -> GeminiGenerateContentI
     except ValueError as exc:
         if isinstance(exc, GeminiRuntimeError):
             raise
-        raise GeminiRuntimeError(f"invalid Gemini GenerateContent invocation: {exc}") from exc
+        raise GeminiRuntimeError(
+            f"invalid Gemini GenerateContent invocation: {exc}"
+        ) from exc
