@@ -15,7 +15,12 @@ from e2h.openai_runtime import (
     load_openai_responses_invocation,
     run_openai_responses,
 )
-from e2h.variants import HarnessVariant, HarnessVariantDocument
+from e2h.variants import (
+    HarnessVariant,
+    HarnessVariantDocument,
+    ReferencedContextItem,
+    WorkflowVariant,
+)
 
 
 def capsule() -> TaskCapsule:
@@ -273,34 +278,32 @@ def test_runtime_rejects_non_openai_routes_workflows_and_referenced_context() ->
         build_openai_responses_request(local, capsule(), invocation())
 
     workflow = base.model_copy(deep=True)
-    workflow.variant.workflow = {
-        "id": "workflow",
-        "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
-    }
+    workflow.variant.workflow = WorkflowVariant.model_validate(
+        {
+            "id": "workflow",
+            "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
+        }
+    )
+    workflow = HarnessVariantDocument.model_validate(workflow.model_dump(mode="json"))
     with pytest.raises(OpenAIRuntimeError, match="does not execute workflow DAGs"):
-        build_openai_responses_request(
-            HarnessVariantDocument.model_validate(workflow.model_dump(mode="json")),
-            capsule(),
-            invocation(),
-        )
+        build_openai_responses_request(workflow, capsule(), invocation())
 
     referenced = base.model_copy(deep=True)
     assert referenced.variant.context is not None
     referenced.variant.context.items = [
-        {
-            "id": "artifact",
-            "kind": "artifact",
-            "sha256": "1" * 64,
-            "locator": "cas://artifact/one",
-            "max_chars": 16,
-        }
-    ]
-    with pytest.raises(OpenAIRuntimeError, match="does not dereference"):
-        build_openai_responses_request(
-            HarnessVariantDocument.model_validate(referenced.model_dump(mode="json")),
-            capsule(),
-            invocation(),
+        ReferencedContextItem.model_validate(
+            {
+                "id": "artifact",
+                "kind": "artifact",
+                "sha256": "1" * 64,
+                "locator": "cas://artifact/one",
+                "max_chars": 16,
+            }
         )
+    ]
+    referenced = HarnessVariantDocument.model_validate(referenced.model_dump(mode="json"))
+    with pytest.raises(OpenAIRuntimeError, match="does not dereference"):
+        build_openai_responses_request(referenced, capsule(), invocation())
 
 
 def test_invocation_loader_is_strict(tmp_path: Path) -> None:
