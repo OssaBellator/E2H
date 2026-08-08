@@ -684,16 +684,27 @@ def restore_snapshot(
 ) -> SnapshotManifest:
     """Verify and atomically restore a snapshot into a new or empty directory."""
     limits = revalidate_snapshot_limits(limits)
-    destination = destination.resolve()
-    if destination.exists() and not destination.is_dir():
-        raise SnapshotError("restore destination exists and is not a directory")
-    if destination.exists():
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination = destination.parent.resolve(strict=True) / destination.name
         try:
-            if any(destination.iterdir()):
-                raise SnapshotError("restore destination must be empty")
-        except OSError as exc:
-            raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
-    destination.parent.mkdir(parents=True, exist_ok=True)
+            destination_info = destination.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISLNK(destination_info.st_mode):
+                raise SnapshotError("restore destination must not be a symbolic link")
+            if not stat.S_ISDIR(destination_info.st_mode):
+                raise SnapshotError("restore destination exists and is not a directory")
+            try:
+                if any(destination.iterdir()):
+                    raise SnapshotError("restore destination must be empty")
+            except OSError as exc:
+                raise SnapshotError(f"unable to inspect restore destination: {exc}") from exc
+    except SnapshotError:
+        raise
+    except OSError as exc:
+        raise SnapshotError(f"unable to prepare restore destination: {exc}") from exc
     staging = Path(
         tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
     ).resolve()
