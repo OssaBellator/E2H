@@ -4,12 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typer.testing import CliRunner
 
 import e2h.runtime_plan_cli as plan_cli
 from e2h.main_cli import app
-from e2h.openai_runtime import OpenAIRuntimeError
 from e2h.runtime_plan_cli import plan_app
 
 runner = CliRunner()
@@ -20,7 +19,7 @@ class _PlannedRequest(BaseModel):
     model: str = "provider-test-model"
     route_target_id: str = "primary"
     request_sha256: str = "1" * 64
-    body: dict[str, object] = {"input": "planned"}
+    body: dict[str, object] = Field(default_factory=lambda: {"input": "planned"})
 
 
 def _input_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -118,11 +117,12 @@ def test_plan_commands_emit_request_without_credentials(
     }
 
 
-def test_plan_human_output_summarizes_request(
+def test_plan_human_output_summarizes_request_and_writes_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     capsule, variant, invocation = _input_paths(tmp_path)
+    output = tmp_path / "plan.json"
     _stub_common_loaders(monkeypatch)
     monkeypatch.setattr(plan_cli, "load_openai_responses_invocation", lambda path: object())
     monkeypatch.setattr(
@@ -133,7 +133,14 @@ def test_plan_human_output_summarizes_request(
 
     result = runner.invoke(
         plan_app,
-        ["openai-responses", str(capsule), str(variant), str(invocation)],
+        [
+            "openai-responses",
+            str(capsule),
+            str(variant),
+            str(invocation),
+            "--output",
+            str(output),
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -141,26 +148,56 @@ def test_plan_human_output_summarizes_request(
     assert "provider-test-model" in result.stdout
     assert "primary" in result.stdout
     assert "1111111111111111" in result.stdout
+    assert "Wrote request plan to" in result.stdout
+    assert json.loads(output.read_text(encoding="utf-8"))["model"] == "provider-test-model"
 
 
-def test_plan_failure_exits_closed(
+@pytest.mark.parametrize(
+    ("command", "invocation_loader_name", "error_name", "noun"),
+    [
+        (
+            "openai-responses",
+            "load_openai_responses_invocation",
+            "OpenAIRuntimeError",
+            "OpenAI Responses",
+        ),
+        (
+            "anthropic-messages",
+            "load_anthropic_messages_invocation",
+            "AnthropicRuntimeError",
+            "Anthropic Messages",
+        ),
+        (
+            "gemini-generate-content",
+            "load_gemini_generate_content_invocation",
+            "GeminiRuntimeError",
+            "Gemini GenerateContent",
+        ),
+    ],
+)
+def test_plan_failures_exit_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    invocation_loader_name: str,
+    error_name: str,
+    noun: str,
 ) -> None:
     capsule, variant, invocation = _input_paths(tmp_path)
     _stub_common_loaders(monkeypatch)
+    error_type = getattr(plan_cli, error_name)
 
     def fail_invocation(path: Path) -> object:
-        raise OpenAIRuntimeError("invalid invocation")
+        raise error_type("invalid invocation")
 
-    monkeypatch.setattr(plan_cli, "load_openai_responses_invocation", fail_invocation)
+    monkeypatch.setattr(plan_cli, invocation_loader_name, fail_invocation)
     result = runner.invoke(
         plan_app,
-        ["openai-responses", str(capsule), str(variant), str(invocation)],
+        [command, str(capsule), str(variant), str(invocation)],
     )
 
     assert result.exit_code == 2
-    assert "Unable to plan OpenAI Responses request" in result.stderr
+    assert f"Unable to plan {noun} request" in result.stderr
     assert "invalid invocation" in result.stderr
 
 
