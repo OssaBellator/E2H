@@ -27,6 +27,18 @@ class _Lookalike(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class _DocumentSubclass(HarnessVariantDocument):
+    pass
+
+
+class _CapsuleSubclass(TaskCapsule):
+    pass
+
+
+class _OpenAIInvocationSubclass(OpenAIResponsesInvocation):
+    pass
+
+
 def capsule() -> TaskCapsule:
     return TaskCapsule.model_validate(
         {
@@ -135,3 +147,75 @@ def test_revalidation_rejects_structurally_compatible_wrong_capsule_type() -> No
             error_type=OpenAIRuntimeError,
             invocation_noun="OpenAI Responses invocation",
         )
+
+
+def test_revalidation_rejects_document_subclasses() -> None:
+    subclassed = _DocumentSubclass.model_validate(document().model_dump(mode="json"))
+
+    with pytest.raises(
+        OpenAIRuntimeError,
+        match=(r"invalid variant document: expected HarnessVariantDocument, got _DocumentSubclass"),
+    ):
+        revalidate_runtime_inputs(
+            subclassed,
+            capsule(),
+            OpenAIResponsesInvocation(id="openai-runtime"),
+            OpenAIResponsesInvocation,
+            error_type=OpenAIRuntimeError,
+            invocation_noun="OpenAI Responses invocation",
+        )
+
+
+def test_revalidation_rejects_capsule_subclasses() -> None:
+    subclassed = _CapsuleSubclass.model_validate(capsule().model_dump(mode="json"))
+
+    with pytest.raises(
+        OpenAIRuntimeError,
+        match=r"invalid task capsule: expected TaskCapsule, got _CapsuleSubclass",
+    ):
+        revalidate_runtime_inputs(
+            document(),
+            subclassed,
+            OpenAIResponsesInvocation(id="openai-runtime"),
+            OpenAIResponsesInvocation,
+            error_type=OpenAIRuntimeError,
+            invocation_noun="OpenAI Responses invocation",
+        )
+
+
+def test_revalidation_rejects_invocation_subclasses() -> None:
+    subclassed = _OpenAIInvocationSubclass(id="openai-runtime")
+
+    with pytest.raises(
+        OpenAIRuntimeError,
+        match=(
+            r"invalid OpenAI Responses invocation: expected OpenAIResponsesInvocation, "
+            r"got _OpenAIInvocationSubclass"
+        ),
+    ):
+        revalidate_runtime_inputs(
+            document(),
+            capsule(),
+            subclassed,
+            OpenAIResponsesInvocation,
+            error_type=OpenAIRuntimeError,
+            invocation_noun="OpenAI Responses invocation",
+        )
+
+
+def test_revalidation_preserves_canonical_invalid_python_values() -> None:
+    current_capsule = capsule()
+    current_capsule.metadata = {"not_json": {"value"}}
+
+    _, normalized_capsule, _ = revalidate_runtime_inputs(
+        document(),
+        current_capsule,
+        OpenAIResponsesInvocation(id="openai-runtime"),
+        OpenAIResponsesInvocation,
+        error_type=OpenAIRuntimeError,
+        invocation_noun="OpenAI Responses invocation",
+    )
+
+    assert normalized_capsule.metadata["not_json"] == {"value"}
+    with pytest.raises(ValueError, match="canonical JSON"):
+        capsule_sha256(normalized_capsule)

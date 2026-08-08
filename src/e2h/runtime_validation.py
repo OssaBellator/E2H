@@ -21,12 +21,12 @@ def revalidate_runtime_model(
     noun: str,
 ) -> ModelT:
     """Return one fully revalidated model after enforcing its concrete type boundary."""
-    if not isinstance(value, model_type):
+    if type(value) is not model_type:
         raise error_type(
             f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
         )
     try:
-        payload = value.model_dump(mode="json", warnings="none")
+        payload = value.model_dump(mode="python", warnings="none")
         return model_type.model_validate(payload)
     except ValueError as exc:
         raise error_type(f"invalid {noun}: {exc}") from exc
