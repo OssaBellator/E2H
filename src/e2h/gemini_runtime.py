@@ -203,8 +203,7 @@ def _context_items(context: ContextVariant) -> list[LiteralContextItem]:
             )
         if item.placement == "tool_context":
             raise GeminiRuntimeError(
-                f"context item {item.id!r} uses tool_context, which has no implicit "
-                "Gemini mapping"
+                f"context item {item.id!r} uses tool_context, which has no implicit Gemini mapping"
             )
         if item.placement == "after_prompt":
             raise GeminiRuntimeError(
@@ -227,11 +226,7 @@ def _context_items(context: ContextVariant) -> list[LiteralContextItem]:
             if selected:
                 kept[item.id] = selected
                 budget -= len(selected)
-        rendered = [
-            (index, item, kept[item.id])
-            for index, item, _ in rendered
-            if item.id in kept
-        ]
+        rendered = [(index, item, kept[item.id]) for index, item, _ in rendered if item.id in kept]
 
     if context.ordering == "priority":
         rendered.sort(key=lambda entry: (-entry[1].priority, entry[0]))
@@ -259,9 +254,7 @@ def _build_prompt(
 
     system_parts: list[dict[str, str]] = []
     if variant.context is not None:
-        system_parts.extend(
-            {"text": item.content} for item in _context_items(variant.context)
-        )
+        system_parts.extend({"text": item.content} for item in _context_items(variant.context))
 
     contents: list[dict[str, Any]] = []
     conversation_started = False
@@ -280,9 +273,7 @@ def _build_prompt(
         contents.append({"role": role, "parts": [{"text": rendered}]})
 
     if not contents:
-        raise GeminiRuntimeError(
-            "Gemini runtime requires at least one user or assistant message"
-        )
+        raise GeminiRuntimeError("Gemini runtime requires at least one user or assistant message")
     return system_parts, contents
 
 
@@ -326,8 +317,7 @@ def build_gemini_generate_content_request(
         raise GeminiRuntimeError("Gemini runtime requires a routing variant")
     if variant.workflow is not None:
         raise GeminiRuntimeError(
-            "Gemini runtime does not execute workflow DAGs; "
-            "materialize one model turn explicitly"
+            "Gemini runtime does not execute workflow DAGs; materialize one model turn explicitly"
         )
 
     target = _select_route(variant.routing, invocation.route_metadata)
@@ -393,9 +383,7 @@ def _archive_system(
     if raw_system is None:
         return None
     if not isinstance(raw_system, dict) or not isinstance(raw_system.get("parts"), list):
-        raise GeminiRuntimeError(
-            "materialized Gemini systemInstruction must contain parts"
-        )
+        raise GeminiRuntimeError("materialized Gemini systemInstruction must contain parts")
     return GeminiContentRecord(
         id=f"{request.invocation_id}.system",
         role="system",
@@ -469,14 +457,9 @@ def _tool_policy_violations(
     if unknown:
         violations.append(f"provider called undeclared tools: {', '.join(unknown)}")
     if len(calls) > tools.max_calls:
-        violations.append(
-            f"provider returned {len(calls)} function calls; "
-            f"max_calls is {tools.max_calls}"
-        )
+        violations.append(f"provider returned {len(calls)} function calls; max_calls is {tools.max_calls}")
     if not tools.parallel_calls and len(calls) > 1:
-        violations.append(
-            "provider returned parallel function calls despite parallel_calls=false"
-        )
+        violations.append("provider returned parallel function calls despite parallel_calls=false")
     if tools.selection == "none" and calls:
         violations.append("provider returned function calls despite selection='none'")
     if tools.selection == "required" and not calls:
@@ -618,6 +601,4 @@ def load_gemini_generate_content_invocation(path: Any) -> GeminiGenerateContentI
     except ValueError as exc:
         if isinstance(exc, GeminiRuntimeError):
             raise
-        raise GeminiRuntimeError(
-            f"invalid Gemini GenerateContent invocation: {exc}"
-        ) from exc
+        raise GeminiRuntimeError(f"invalid Gemini GenerateContent invocation: {exc}") from exc
