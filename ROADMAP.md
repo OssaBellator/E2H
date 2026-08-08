@@ -58,3 +58,8 @@
 - [x] Deterministic wheel/sdist manifests and reproducible-build CI.
 - [x] OIDC-based package publication with provenance attestations.
 - [x] Cryptographically attested immutable releases, generated changelogs, and SBOM publication.
+
+## Milestone 7 — Provider runtime parity
+
+- [x] Anthropic Messages API runtime adapter.
+- [ ] Gemini GenerateContent runtime adapter.
