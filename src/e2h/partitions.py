@@ -32,6 +32,7 @@ class StrictModel(BaseModel):
 
 
 _ModelT = TypeVar("_ModelT", bound=StrictModel)
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -250,15 +251,33 @@ def dataset_partition_public_sha256(document: DatasetPartitionDocument) -> str:
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
 
 
+def _revalidate_partition_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    if type(value) is not model_type:
+        raise ValueError(f"{noun} must be {model_type.__name__}, got {type(value).__name__}")
+    payload = value.model_dump(mode="python", warnings="none")
+    return model_type.model_validate(payload)
+
+
 def _validated_inputs(
     document: DatasetPartitionDocument,
     dataset: DSPyDatasetDocument,
 ) -> tuple[DatasetPartitionDocument, DSPyDatasetDocument]:
     try:
-        validated_document = DatasetPartitionDocument.model_validate(
-            document.model_dump(mode="json")
+        validated_document = _revalidate_partition_model(
+            document,
+            DatasetPartitionDocument,
+            noun="dataset partition manifest",
         )
-        validated_dataset = DSPyDatasetDocument.model_validate(dataset.model_dump(mode="json"))
+        validated_dataset = _revalidate_partition_model(
+            dataset,
+            DSPyDatasetDocument,
+            noun="DSPy dataset",
+        )
     except ValueError as exc:
         raise DatasetPartitionError(f"invalid dataset partition inputs: {exc}") from exc
     return validated_document, validated_dataset
@@ -364,7 +383,11 @@ def evaluate_sealed_predictions(
     """Score exact-match sealed predictions without returning labels or case results."""
     document, dataset = _validated_inputs(document, dataset)
     try:
-        predictions = SealedPredictionDocument.model_validate(predictions.model_dump(mode="json"))
+        predictions = _revalidate_partition_model(
+            predictions,
+            SealedPredictionDocument,
+            noun="sealed predictions",
+        )
     except ValueError as exc:
         raise DatasetPartitionError(f"invalid sealed predictions: {exc}") from exc
     verification = _verify_validated_partitions(document, dataset)
