@@ -333,6 +333,7 @@ def test_runtime_rejects_unfaithful_provider_neutral_semantics() -> None:
             "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
         }
     )
+    workflow = HarnessVariantDocument.model_validate(workflow.model_dump(mode="json"))
     with pytest.raises(AnthropicRuntimeError, match="does not execute workflow DAGs"):
         build_anthropic_messages_request(workflow, capsule(), invocation())
 
@@ -349,6 +350,7 @@ def test_runtime_rejects_unfaithful_provider_neutral_semantics() -> None:
             }
         )
     ]
+    referenced = HarnessVariantDocument.model_validate(referenced.model_dump(mode="json"))
     with pytest.raises(AnthropicRuntimeError, match="does not dereference"):
         build_anthropic_messages_request(referenced, capsule(), invocation())
 
