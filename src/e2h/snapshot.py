@@ -272,10 +272,9 @@ def _list_directory(
         except OSError as exc:
             raise SnapshotError(f"unable to restat directory {relative}: {exc}") from exc
         _resolve_under_root(root, path, relative)
-        if (
-            _stat_identity(after) != _stat_identity(opened)
-            or _stat_identity(current) != _stat_identity(opened)
-        ):
+        if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
+            current
+        ) != _stat_identity(opened):
             raise SnapshotError(f"directory changed while listing: {relative}")
         return [path / name for name in names]
     finally:
