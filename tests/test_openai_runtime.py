@@ -284,6 +284,7 @@ def test_runtime_rejects_non_openai_routes_workflows_and_referenced_context() ->
             "stages": [{"id": "solve", "kind": "model", "handler": "solve"}],
         }
     )
+    workflow = HarnessVariantDocument.model_validate(workflow.model_dump(mode="json"))
     with pytest.raises(OpenAIRuntimeError, match="does not execute workflow DAGs"):
         build_openai_responses_request(workflow, capsule(), invocation())
 
@@ -300,6 +301,7 @@ def test_runtime_rejects_non_openai_routes_workflows_and_referenced_context() ->
             }
         )
     ]
+    referenced = HarnessVariantDocument.model_validate(referenced.model_dump(mode="json"))
     with pytest.raises(OpenAIRuntimeError, match="does not dereference"):
         build_openai_responses_request(referenced, capsule(), invocation())
 
