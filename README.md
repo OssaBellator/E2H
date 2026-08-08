@@ -256,7 +256,7 @@ E2H executes the same verified typed harness contract through three live provide
 
 All three runtimes are single-turn adapters: they map the provider-neutral prompt, context, routing, and custom-tool contract to the provider API, fail closed where a mapping cannot be represented faithfully, and never execute returned tool/function calls implicitly.
 
-The [runtime request planner](docs/runtime-request-planning.md) materializes the exact provider request and deterministic request digest without reading credentials or opening a network connection.
+The [runtime request planner](docs/runtime-request-planning.md) materializes the exact provider request and deterministic request digest without reading credentials or opening a network connection. It is available from Python and through `e2h runtime plan`.
 
 See the installed runtime commands with:
 
@@ -393,7 +393,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request.
 
 ## Project status
 
-The implementation roadmap through distribution integrity is complete. [`ROADMAP.md`](ROADMAP.md) records the delivered milestones and remains the reference for any future explicitly scoped milestone work.
+The implementation roadmap through provider runtime parity is complete. [`ROADMAP.md`](ROADMAP.md) records the delivered milestones and remains the reference for any future explicitly scoped milestone work.
 
 ## License
 
