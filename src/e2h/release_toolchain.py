@@ -153,7 +153,9 @@ def _read_regular_file(root_descriptor: int, path: Path) -> bytes:
     if expected.st_size <= 0:
         raise ReleaseToolchainError(f"toolchain input must not be empty: {path.name}")
     if expected.st_size > _MAX_INPUT_BYTES:
-        raise ReleaseToolchainError(f"toolchain input exceeds {_MAX_INPUT_BYTES} bytes: {path.name}")
+        raise ReleaseToolchainError(
+            f"toolchain input exceeds {_MAX_INPUT_BYTES} bytes: {path.name}"
+        )
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = (
@@ -264,7 +266,9 @@ def _collect_release_toolchain_source_inputs(
             try:
                 tree_digest = source_tree_sha256(root)
             except ReleaseSourceError as exc:
-                raise ReleaseToolchainError(f"unable to identify release source tree: {exc}") from exc
+                raise ReleaseToolchainError(
+                    f"unable to identify release source tree: {exc}"
+                ) from exc
             repeated = {
                 name: _read_regular_file(root_descriptor, root / name) for name in input_names
             }
