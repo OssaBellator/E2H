@@ -456,9 +456,7 @@ def _open_verified_bundle_layout(
                     raise ReleaseBundleError("release bundle dist must be a real directory")
                 dist_expected = entry
             elif stat.S_ISLNK(entry.st_mode) or not stat.S_ISREG(entry.st_mode):
-                raise ReleaseBundleError(
-                    f"release bundle entry must be a regular file: {name}"
-                )
+                raise ReleaseBundleError(f"release bundle entry must be a regular file: {name}")
         assert dist_expected is not None
         dist_descriptor, dist_info = _open_child_directory(
             root_descriptor,
