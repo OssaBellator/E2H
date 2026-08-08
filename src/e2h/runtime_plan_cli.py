@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Never
 
 import typer
 from pydantic import BaseModel
@@ -63,7 +63,7 @@ def _emit_plan(
         console.print(f"Wrote request plan to {output}")
 
 
-def _fail_plan(noun: str, exc: Exception) -> None:
+def _fail_plan(noun: str, exc: Exception) -> Never:
     error_console.print(f"[red]Unable to plan {noun} request:[/red] {exc}")
     raise typer.Exit(code=2) from exc
 
