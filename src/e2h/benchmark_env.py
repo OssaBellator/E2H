@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import stat
 from dataclasses import dataclass
@@ -260,6 +261,67 @@ def _tree_digest(files: list[BenchmarkEnvironmentFile]) -> str:
     return hashlib.sha256(_canonical_json_bytes(material)).hexdigest()
 
 
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _hash_environment_file(
+    path: Path,
+    relative: str,
+    expected: os.stat_result,
+) -> tuple[str, int, bool]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to open environment file {relative}: {exc}"
+        ) from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise BenchmarkEnvironmentError(f"environment contains non-regular file: {relative}")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise BenchmarkEnvironmentError(f"environment file changed while opening: {relative}")
+        if opened.st_size > _MAX_ENVIRONMENT_BYTES:
+            raise BenchmarkEnvironmentError(
+                f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+            )
+        digest = hashlib.sha256()
+        observed = 0
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while chunk := handle.read(1024 * 1024):
+                observed += len(chunk)
+                if observed > _MAX_ENVIRONMENT_BYTES:
+                    raise BenchmarkEnvironmentError(
+                        f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
+                    )
+                digest.update(chunk)
+        after = os.fstat(descriptor)
+        try:
+            current = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to restat environment file {relative}: {exc}"
+            ) from exc
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or observed != opened.st_size
+            or _stat_identity(current) != _stat_identity(opened)
+        ):
+            raise BenchmarkEnvironmentError(f"environment file changed while hashing: {relative}")
+        return digest.hexdigest(), observed, bool(opened.st_mode & stat.S_IXUSR)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to hash environment file {relative}: {exc}"
+        ) from exc
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
 def _scan_environment(source: Path) -> _ScannedEnvironment:
     if not source.is_dir():
         raise BenchmarkEnvironmentError("environment source_dir is not a directory")
@@ -267,52 +329,32 @@ def _scan_environment(source: Path) -> _ScannedEnvironment:
     total_bytes = 0
     for path in sorted(source.rglob("*"), key=lambda item: item.as_posix()):
         relative = path.relative_to(source).as_posix()
-        if path.is_symlink():
-            raise BenchmarkEnvironmentError(f"environment contains symlink: {relative}")
-        if path.is_dir():
-            continue
-        if not path.is_file():
-            raise BenchmarkEnvironmentError(f"environment contains non-regular file: {relative}")
         try:
-            before = path.stat()
+            entry = path.stat(follow_symlinks=False)
         except OSError as exc:
             raise BenchmarkEnvironmentError(
-                f"unable to stat environment file {relative}: {exc}"
+                f"unable to stat environment entry {relative}: {exc}"
             ) from exc
-        size = before.st_size
-        total_bytes += size
+        if stat.S_ISLNK(entry.st_mode):
+            raise BenchmarkEnvironmentError(f"environment contains symlink: {relative}")
+        if stat.S_ISDIR(entry.st_mode):
+            continue
+        if not stat.S_ISREG(entry.st_mode):
+            raise BenchmarkEnvironmentError(f"environment contains non-regular file: {relative}")
         if len(files) >= _MAX_FILES:
             raise BenchmarkEnvironmentError(f"environment exceeds {_MAX_FILES} files")
-        if total_bytes > _MAX_ENVIRONMENT_BYTES:
+        if total_bytes + entry.st_size > _MAX_ENVIRONMENT_BYTES:
             raise BenchmarkEnvironmentError(
                 f"environment exceeds {_MAX_ENVIRONMENT_BYTES} total bytes"
             )
-        digest = hashlib.sha256()
-        try:
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-        except OSError as exc:
-            raise BenchmarkEnvironmentError(
-                f"unable to hash environment file {relative}: {exc}"
-            ) from exc
-        try:
-            after = path.stat()
-        except OSError as exc:
-            raise BenchmarkEnvironmentError(
-                f"unable to restat environment file {relative}: {exc}"
-            ) from exc
-        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-        if identity_before != identity_after:
-            raise BenchmarkEnvironmentError(f"environment file changed while hashing: {relative}")
-        mode = after.st_mode
+        digest, size, executable = _hash_environment_file(path, relative, entry)
+        total_bytes += size
         files.append(
             BenchmarkEnvironmentFile(
                 path=relative,
-                sha256=digest.hexdigest(),
+                sha256=digest,
                 size=size,
-                executable=bool(mode & stat.S_IXUSR),
+                executable=executable,
             )
         )
     if not files:
