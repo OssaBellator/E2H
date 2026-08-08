@@ -340,6 +340,19 @@ def _skipped(check: CommandCheck, cwd: str, blocked_by_check_id: str) -> Command
     )
 
 
+def _validated_capsule(capsule: TaskCapsule) -> TaskCapsule:
+    """Return a detached, fully revalidated capsule before executable state is consumed."""
+    if type(capsule) is not TaskCapsule:
+        raise RunnerError(
+            f"invalid task capsule: expected TaskCapsule, got {type(capsule).__name__}"
+        )
+    try:
+        payload = capsule.model_dump(mode="python", warnings="none")
+        return TaskCapsule.model_validate(payload)
+    except ValueError as exc:
+        raise RunnerError(f"invalid task capsule: {exc}") from exc
+
+
 def run_capsule(
     capsule: TaskCapsule,
     workspace: Path,
@@ -348,6 +361,7 @@ def run_capsule(
     container_runtime: str | None = None,
 ) -> RunResult:
     """Execute all command checks in a capsule inside a bounded workspace."""
+    capsule = _validated_capsule(capsule)
     started_at = datetime.now(UTC)
     started_clock = monotonic()
     workspace_root = workspace.resolve()
