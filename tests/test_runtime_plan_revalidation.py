@@ -14,6 +14,10 @@ class _Lookalike(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class _OpenAIInvocationSubclass(OpenAIResponsesInvocation):
+    pass
+
+
 def capsule() -> TaskCapsule:
     return TaskCapsule.model_validate(
         {
@@ -146,4 +150,22 @@ def test_plan_rejects_structurally_compatible_wrong_capsule_type() -> None:
             document(),
             wrong_capsule,
             invocation(),
+        )
+
+
+def test_plan_rejects_invocation_subclasses() -> None:
+    subclassed = _OpenAIInvocationSubclass.model_validate(invocation().model_dump(mode="json"))
+
+    with pytest.raises(
+        RuntimePlanError,
+        match=(
+            r"invalid openai-responses invocation: expected OpenAIResponsesInvocation, "
+            r"got _OpenAIInvocationSubclass"
+        ),
+    ):
+        plan_runtime_request(
+            RuntimeProvider.OPENAI_RESPONSES,
+            document(),
+            capsule(),
+            subclassed,
         )
