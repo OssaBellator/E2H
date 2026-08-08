@@ -55,6 +55,12 @@ def test_runtime_exports_are_available_from_package_root() -> None:
         assert getattr(e2h, name) is value
 
 
+def test_package_all_exports_are_unique_and_resolvable() -> None:
+    assert len(e2h.__all__) == len(set(e2h.__all__))
+    for name in e2h.__all__:
+        assert hasattr(e2h, name), name
+
+
 def test_package_version_matches_project_metadata() -> None:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         project = tomllib.load(handle)["project"]
