@@ -174,6 +174,24 @@ def test_plan_runtime_request_preserves_native_request_and_digest(
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda item: item.provider.value)
+def test_runtime_request_plan_json_round_trip_preserves_native_request(
+    case: ProviderCase,
+) -> None:
+    plan = plan_runtime_request(
+        case.provider,
+        document(case),
+        capsule(),
+        invocation(case),
+    )
+
+    restored = RuntimeRequestPlan.model_validate_json(plan.model_dump_json())
+
+    assert restored == plan
+    assert isinstance(restored.request, case.request_type)
+    assert restored.request_sha256 == plan.request_sha256
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda item: item.provider.value)
 def test_load_runtime_request_plan_is_file_backed_and_credential_free(
     case: ProviderCase,
     tmp_path: Path,
@@ -240,6 +258,7 @@ def test_plan_normalizes_provider_build_failures() -> None:
 
 
 def test_runtime_request_plan_rejects_provider_request_type_mismatch() -> None:
+    openai_case = CASES[0]
     anthropic_case = CASES[1]
     anthropic_plan = plan_runtime_request(
         RuntimeProvider.ANTHROPIC_MESSAGES,
