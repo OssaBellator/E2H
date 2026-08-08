@@ -60,6 +60,23 @@ The same capsule, variant, and provider invocation loaders used by live executio
 
 Planner-facing failures are normalized to `RuntimePlanError` so callers can handle one error boundary when the provider is selected dynamically.
 
+## Planning from the CLI
+
+The runtime command group exposes the same file-backed planner without requiring provider credentials:
+
+```bash
+e2h runtime plan \
+  openai-responses \
+  capsule.yaml \
+  variant.yaml \
+  invocation.yaml \
+  --output request-plan.json
+```
+
+Use `--json` to write the complete `RuntimeRequestPlan` to stdout. Without `--json`, the command prints a compact summary containing the provider, model, selected route, and request digest, followed by the full copyable digest. `--output` and `--json` may be used together when both a file artifact and machine-readable stdout are useful.
+
+The provider argument accepts the same three values as `RuntimeProvider`. Unsupported providers or invalid capsule, variant, invocation, routing, prompt, context, tool, or workflow contracts fail with exit code 2 before any network request can occur.
+
 ## Credential and network boundary
 
 The planner calls only deterministic request builders. It does not:
