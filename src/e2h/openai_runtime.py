@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from e2h.document import load_mapping_document
 from e2h.models import TaskCapsule
 from e2h.openai_responses import OpenAIResponseRecord, OpenAIResponsesDocument
+from e2h.runtime_validation import revalidate_runtime_inputs
 from e2h.variants import (
     ContextVariant,
     HarnessVariantDocument,
@@ -276,6 +277,14 @@ def build_openai_responses_request(
     invocation: OpenAIResponsesInvocation,
 ) -> OpenAIResponsesRequest:
     """Materialize one deterministic Responses request from a verified typed variant."""
+    document, capsule, invocation = revalidate_runtime_inputs(
+        document,
+        capsule,
+        invocation,
+        OpenAIResponsesInvocation,
+        error_type=OpenAIRuntimeError,
+        invocation_noun='OpenAI Responses invocation',
+    )
     try:
         verification = verify_variant_document(document, capsule)
     except VariantError as exc:
@@ -466,6 +475,14 @@ def run_openai_responses(
     """Execute one live Responses request and preserve a replayable observable archive."""
     if not api_key or any(character in api_key for character in "\r\n\x00"):
         raise OpenAIRuntimeError("OpenAI API key is missing or not header-safe")
+    document, capsule, invocation = revalidate_runtime_inputs(
+        document,
+        capsule,
+        invocation,
+        OpenAIResponsesInvocation,
+        error_type=OpenAIRuntimeError,
+        invocation_noun='OpenAI Responses invocation',
+    )
     request = build_openai_responses_request(document, capsule, invocation)
     sender = transport or _http_transport
     http_result = sender(
