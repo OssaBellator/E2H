@@ -177,8 +177,7 @@ def _validated_failure_pattern_corpus(
 ) -> FailurePatternCorpus:
     if type(corpus) is not FailurePatternCorpus:
         raise BenchmarkError(
-            "invalid benchmark corpus: expected FailurePatternCorpus, "
-            f"got {type(corpus).__name__}"
+            f"invalid benchmark corpus: expected FailurePatternCorpus, got {type(corpus).__name__}"
         )
     try:
         payload = corpus.model_dump(mode="python", warnings="none")
