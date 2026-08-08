@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -35,7 +35,7 @@ from e2h.variants import (
 )
 
 _MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
-_ANTHROPIC_VERSION = "2023-06-01"
+_ANTHROPIC_VERSION: Literal["2023-06-01"] = "2023-06-01"
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 _MAX_ERROR_BYTES = 65_536
@@ -321,7 +321,8 @@ def build_anthropic_messages_request(
         raise AnthropicRuntimeError("Anthropic runtime requires a routing variant")
     if variant.workflow is not None:
         raise AnthropicRuntimeError(
-            "Anthropic runtime does not execute workflow DAGs; materialize one model turn explicitly"
+            "Anthropic runtime does not execute workflow DAGs; "
+            "materialize one model turn explicitly"
         )
 
     target = _select_route(variant.routing, invocation.route_metadata)
@@ -511,7 +512,7 @@ def run_anthropic_messages(
     )
     try:
         record = AnthropicMessageRecord(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             response=http_result.payload,
             messages=_archive_messages(request),
             system=_archive_system(request),
