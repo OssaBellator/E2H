@@ -271,7 +271,7 @@ def test_verify_release_bundle_rejects_semantically_wrong_report_even_with_new_c
     bundle, _ = _write_bundle(tmp_path, monkeypatch)
     report = bundle / "release-verification.json"
     payload = json.loads(report.read_text(encoding="utf-8"))
-    payload["artifact_count"] = 99
+    payload["artifact_count"] = 1
     _write_json(report, payload)
     _rewrite_checksums(bundle)
 
