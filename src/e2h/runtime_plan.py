@@ -51,15 +51,9 @@ class RuntimeProvider(StrEnum):
 
 
 RuntimeInvocation = (
-    OpenAIResponsesInvocation
-    | AnthropicMessagesInvocation
-    | GeminiGenerateContentInvocation
+    OpenAIResponsesInvocation | AnthropicMessagesInvocation | GeminiGenerateContentInvocation
 )
-RuntimeRequest = (
-    OpenAIResponsesRequest
-    | AnthropicMessagesRequest
-    | GeminiGenerateContentRequest
-)
+RuntimeRequest = OpenAIResponsesRequest | AnthropicMessagesRequest | GeminiGenerateContentRequest
 
 
 class RuntimeRequestPlan(BaseModel):
@@ -162,9 +156,7 @@ def _load_invocation(
             return load_anthropic_messages_invocation(path)
         return load_gemini_generate_content_invocation(path)
     except (OpenAIRuntimeError, AnthropicRuntimeError, GeminiRuntimeError) as exc:
-        raise RuntimePlanError(
-            f"unable to load {provider.value} invocation: {exc}"
-        ) from exc
+        raise RuntimePlanError(f"unable to load {provider.value} invocation: {exc}") from exc
 
 
 def load_runtime_request_plan(
