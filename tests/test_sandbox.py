@@ -48,7 +48,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import time
 
 log = Path(os.environ["FAKE_DOCKER_LOG"])
 with log.open("a", encoding="utf-8") as handle:
@@ -59,8 +58,6 @@ args = sys.argv[1:]
 if "--cidfile" in args:
     cidfile = Path(args[args.index("--cidfile") + 1])
     cidfile.write_text("a" * 64, encoding="utf-8")
-if "timeout-check" in args:
-    time.sleep(10)
 print("sandbox-ok")
 """,
         encoding="utf-8",
