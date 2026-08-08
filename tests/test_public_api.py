@@ -27,7 +27,9 @@ GEMINI_RUNTIME_EXPORTS = {
     "GeminiHTTPResult": gemini_runtime.GeminiHTTPResult,
     "GeminiRuntimeError": gemini_runtime.GeminiRuntimeError,
     "build_gemini_generate_content_request": gemini_runtime.build_gemini_generate_content_request,
-    "load_gemini_generate_content_invocation": gemini_runtime.load_gemini_generate_content_invocation,
+    "load_gemini_generate_content_invocation": (
+        gemini_runtime.load_gemini_generate_content_invocation
+    ),
     "run_gemini_generate_content": gemini_runtime.run_gemini_generate_content,
 }
 
