@@ -21,7 +21,7 @@ def revalidate_runtime_model(
     noun: str,
 ) -> ModelT:
     """Return one fully revalidated model after enforcing its concrete type boundary."""
-    if not isinstance(value, model_type):
+    if type(value) is not model_type:
         raise error_type(
             f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
         )
