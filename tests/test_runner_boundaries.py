@@ -60,7 +60,10 @@ def test_run_revalidates_mutated_capsule_cross_fields(tmp_path: Path) -> None:
     candidate = capsule()
     candidate.limits.max_commands = 1
 
-    with pytest.raises(runner.RunnerError, match="success.commands exceeds limits.max_commands"):
+    with pytest.raises(
+        runner.RunnerError,
+        match=r"success\.commands exceeds limits\.max_commands",
+    ):
         runner.run_capsule(candidate, tmp_path)
 
 
