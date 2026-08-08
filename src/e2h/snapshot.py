@@ -45,7 +45,7 @@ _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 _LISTDIR_SUPPORTS_FD = os.listdir in os.supports_fd
 _MKDIR_SUPPORTS_DIR_FD = os.mkdir in os.supports_dir_fd
-_REPLACE_SUPPORTS_DIR_FD = os.replace in os.supports_dir_fd
+_RENAME_SUPPORTS_DIR_FD = os.rename in os.supports_dir_fd
 _RMDIR_SUPPORTS_DIR_FD = os.rmdir in os.supports_dir_fd
 _UNLINK_SUPPORTS_DIR_FD = os.unlink in os.supports_dir_fd
 _WRITE_DIR_FD_SUPPORTED = (
@@ -53,7 +53,7 @@ _WRITE_DIR_FD_SUPPORTED = (
     and _STAT_SUPPORTS_DIR_FD
     and _LISTDIR_SUPPORTS_FD
     and _MKDIR_SUPPORTS_DIR_FD
-    and _REPLACE_SUPPORTS_DIR_FD
+    and _RENAME_SUPPORTS_DIR_FD
     and _RMDIR_SUPPORTS_DIR_FD
     and _UNLINK_SUPPORTS_DIR_FD
 )
@@ -885,7 +885,7 @@ def create_snapshot(
                 noun="snapshot output",
             )
             if _WRITE_DIR_FD_SUPPORTED:
-                os.replace(
+                os.rename(
                     temporary_name,
                     output.name,
                     src_dir_fd=parent_descriptor,
@@ -1105,7 +1105,7 @@ def restore_snapshot(
             else:
                 destination.rmdir()
         if _WRITE_DIR_FD_SUPPORTED:
-            os.replace(
+            os.rename(
                 staging_name,
                 destination.name,
                 src_dir_fd=parent_descriptor,
