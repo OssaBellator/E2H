@@ -742,9 +742,23 @@ def materialize_benchmark_environment(
         raise BenchmarkEnvironmentError(f"unknown benchmark environment {environment_id!r}")
     resolved_root = _safe_root(root)
     source = _resolve_relative(resolved_root, environment.source_dir, "environment source_dir")
-    resolved_destination = destination.resolve()
-    if resolved_destination.exists():
-        raise BenchmarkEnvironmentError("environment materialization destination already exists")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        resolved_destination = destination.parent.resolve(strict=True) / destination.name
+        try:
+            resolved_destination.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise BenchmarkEnvironmentError(
+                "environment materialization destination already exists"
+            )
+    except BenchmarkEnvironmentError:
+        raise
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to prepare environment materialization destination: {exc}"
+        ) from exc
     locked = {entry.id: entry for entry in lock.environments}[environment_id]
     try:
         _copy_environment_tree(source, resolved_destination)
