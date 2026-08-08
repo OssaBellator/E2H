@@ -70,6 +70,52 @@ jobs:
           (cd source-a && uv build --build-constraint build-constraints.txt --require-hashes --out-dir ../dist-a)
           (cd source-b && uv build --build-constraint build-constraints.txt --require-hashes --out-dir ../dist-b)
           rm -f dist-a/.gitignore dist-b/.gitignore
+      - name: Smoke-test built wheel installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(dist-a/*.whl)
+          if [[ "${#wheels[@]}" -ne 1 ]]; then
+            echo "Expected exactly one built wheel, found ${#wheels[@]}." >&2
+            exit 1
+          fi
+          uv pip install --python .venv/bin/python --no-deps "${wheels[0]}"
+          .venv/bin/python - <<'PY'
+          import importlib.metadata
+          import subprocess
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          with Path("pyproject.toml").open("rb") as handle:
+              project = tomllib.load(handle)["project"]
+
+          expected_scripts = project["scripts"]
+          distribution = importlib.metadata.distribution("e2h")
+          installed_scripts = {
+              entry.name: entry.value
+              for entry in distribution.entry_points
+              if entry.group == "console_scripts"
+          }
+
+          import e2h
+
+          assert distribution.version == project["version"]
+          assert e2h.__version__ == project["version"]
+          assert installed_scripts == expected_scripts
+
+          bin_dir = Path(sys.executable).parent
+          for name in sorted(expected_scripts):
+              executable = bin_dir / name
+              assert executable.is_file(), executable
+              completed = subprocess.run(
+                  [str(executable), "--help"],
+                  capture_output=True,
+                  text=True,
+                  check=False,
+              )
+              assert completed.returncode == 0, (name, completed.stdout, completed.stderr)
+          PY
       - name: Export and canonicalize runtime SBOM twice
         shell: bash
         run: |
