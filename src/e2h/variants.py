@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -30,6 +30,26 @@ class VariantError(ValueError):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
+
+
+def _revalidate_variant_input(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    if type(value) is not model_type:
+        raise VariantError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise VariantError(f"invalid {noun}: {exc}") from exc
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -482,6 +502,16 @@ def verify_variant_document(
     capsule: TaskCapsule,
 ) -> VariantVerification:
     """Verify exact capsule binding without executing the variant."""
+    document = _revalidate_variant_input(
+        document,
+        HarnessVariantDocument,
+        noun="variant document",
+    )
+    capsule = _revalidate_variant_input(
+        capsule,
+        TaskCapsule,
+        noun="task capsule",
+    )
     try:
         base_digest = capsule_sha256(capsule)
     except ValueError as exc:
