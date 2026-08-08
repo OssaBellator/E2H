@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from e2h.genome import capsule_sha256
 from e2h.models import TaskCapsule
 from e2h.openai_runtime import OpenAIResponsesInvocation
 from e2h.runtime_plan import RuntimePlanError, RuntimeProvider, plan_runtime_request
 from e2h.variants import HarnessVariantDocument
+
+
+class _Lookalike(BaseModel):
+    model_config = ConfigDict(extra="allow")
 
 
 def capsule() -> TaskCapsule:
@@ -70,6 +75,10 @@ def invocation() -> OpenAIResponsesInvocation:
     )
 
 
+def _lookalike(value: BaseModel) -> _Lookalike:
+    return _Lookalike.model_validate(value.model_dump(mode="json"))
+
+
 def test_plan_revalidates_mutated_variant_document() -> None:
     mutated = document()
     assert mutated.variant.prompt is not None
@@ -107,4 +116,34 @@ def test_plan_revalidates_mutated_invocation() -> None:
             document(),
             capsule(),
             mutated,
+        )
+
+
+def test_plan_rejects_structurally_compatible_wrong_document_type() -> None:
+    wrong_document = _lookalike(document())
+
+    with pytest.raises(
+        RuntimePlanError,
+        match=r"invalid variant document: expected HarnessVariantDocument, got _Lookalike",
+    ):
+        plan_runtime_request(
+            RuntimeProvider.OPENAI_RESPONSES,
+            wrong_document,
+            capsule(),
+            invocation(),
+        )
+
+
+def test_plan_rejects_structurally_compatible_wrong_capsule_type() -> None:
+    wrong_capsule = _lookalike(capsule())
+
+    with pytest.raises(
+        RuntimePlanError,
+        match=r"invalid task capsule: expected TaskCapsule, got _Lookalike",
+    ):
+        plan_runtime_request(
+            RuntimeProvider.OPENAI_RESPONSES,
+            document(),
+            wrong_capsule,
+            invocation(),
         )
