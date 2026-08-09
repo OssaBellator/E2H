@@ -63,6 +63,14 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
 
 
+def _requested_parent_identity(requested_parent: Path, *, noun: str) -> os.stat_result:
+    try:
+        current_parent = requested_parent.resolve(strict=True)
+        return current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"unable to read {noun}: {exc}") from exc
+
+
 def _validate_json_compatible(
     value: Any,
     *,
@@ -105,8 +113,9 @@ def _validate_json_compatible(
 
 
 def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> bytes:
+    requested_parent = path.parent.absolute()
     try:
-        parent = path.parent.resolve(strict=True)
+        parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise ValueError(f"unable to read {noun}: {exc}") from exc
@@ -120,7 +129,11 @@ def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> byt
     descriptor: int | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        if _stat_identity(parent_opened) != _stat_identity(parent_expected):
+        requested_opened = _requested_parent_identity(requested_parent, noun=noun)
+        if (
+            _stat_identity(parent_opened) != _stat_identity(parent_expected)
+            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
+        ):
             raise ValueError(f"{noun} parent changed while opening")
         try:
             expected = (
@@ -165,7 +178,7 @@ def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> byt
             else (parent / path.name).stat(follow_symlinks=False)
         )
         parent_after = os.fstat(parent_descriptor)
-        parent_current = parent.stat(follow_symlinks=False)
+        parent_current = _requested_parent_identity(requested_parent, noun=noun)
         if max_bytes is not None and len(raw) > max_bytes:
             raise ValueError(f"{noun} exceeds {max_bytes} bytes")
         if (
