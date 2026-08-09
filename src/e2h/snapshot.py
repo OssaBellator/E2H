@@ -60,6 +60,7 @@ _WRITE_DIR_FD_SUPPORTED = (
     and _MKDIR_SUPPORTS_DIR_FD
     and _RENAME_SUPPORTS_DIR_FD
 )
+_PLATFORM_PATH_TYPE = type(Path())
 
 
 class SnapshotError(ValueError):
@@ -272,6 +273,88 @@ def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
     return (info.st_dev, info.st_ino, info.st_mode)
 
 
+def _requested_snapshot_parent_must_be_stable(
+    requested_parent: Path,
+    expected: os.stat_result,
+    *,
+    noun: str,
+    phase: str,
+    full_identity: bool,
+) -> None:
+    try:
+        current_parent = requested_parent.resolve(strict=True)
+        current = current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SnapshotError(f"unable to restat {noun} parent: {exc}") from exc
+    if not stat.S_ISDIR(current.st_mode):
+        raise SnapshotError(f"{noun} parent changed while {phase}")
+    stable = (
+        _stat_identity(current) == _stat_identity(expected)
+        if full_identity
+        else _directory_identity(current) == _directory_identity(expected)
+    )
+    if not stable:
+        raise SnapshotError(f"{noun} parent changed while {phase}")
+
+
+def _bound_snapshot_parent_stat(
+    self: Any,
+    *,
+    follow_symlinks: bool = True,
+) -> os.stat_result:
+    current = Path(self).stat(follow_symlinks=follow_symlinks)
+    _requested_snapshot_parent_must_be_stable(
+        self.requested_parent,
+        self.expected_parent,
+        noun=self.noun,
+        phase="writing",
+        full_identity=False,
+    )
+    return current
+
+
+_BOUND_SNAPSHOT_PARENT_TYPE = type(
+    "_BoundSnapshotParent",
+    (_PLATFORM_PATH_TYPE,),
+    {
+        "__slots__": ("requested_parent", "expected_parent", "noun"),
+        "stat": _bound_snapshot_parent_stat,
+    },
+)
+
+
+def _bound_snapshot_path_parent(self: Any) -> Path:
+    parent = _BOUND_SNAPSHOT_PARENT_TYPE(Path(self).parent)
+    parent.requested_parent = self.requested_parent
+    parent.expected_parent = self.expected_parent
+    parent.noun = self.noun
+    return parent
+
+
+_BOUND_SNAPSHOT_PATH_TYPE = type(
+    "_BoundSnapshotPath",
+    (_PLATFORM_PATH_TYPE,),
+    {
+        "__slots__": ("requested_parent", "expected_parent", "noun"),
+        "parent": property(_bound_snapshot_path_parent),
+    },
+)
+
+
+def _bind_snapshot_path(
+    path: Path,
+    requested_parent: Path,
+    expected_parent: os.stat_result,
+    *,
+    noun: str,
+) -> Path:
+    bound = _BOUND_SNAPSHOT_PATH_TYPE(path)
+    bound.requested_parent = requested_parent
+    bound.expected_parent = expected_parent
+    bound.noun = noun
+    return bound
+
+
 def _validated_snapshot_core(core: SnapshotCore) -> SnapshotCore:
     if type(core) is not SnapshotCore:
         raise SnapshotError(
@@ -298,9 +381,10 @@ def _open_snapshot_write_parent(
     *,
     noun: str,
 ) -> tuple[Path, int, os.stat_result]:
+    requested_parent = path.parent.absolute()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        parent = path.parent.resolve(strict=True)
+        requested_parent.mkdir(parents=True, exist_ok=True)
+        parent = requested_parent.resolve(strict=True)
         expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise SnapshotError(f"unable to prepare {noun}: {exc}") from exc
@@ -317,7 +401,20 @@ def _open_snapshot_write_parent(
             raise SnapshotError(f"{noun} parent is no longer a directory")
         if _stat_identity(opened) != _stat_identity(expected):
             raise SnapshotError(f"{noun} parent changed while opening")
-        return parent / path.name, descriptor, opened
+        _requested_snapshot_parent_must_be_stable(
+            requested_parent,
+            opened,
+            noun=noun,
+            phase="opening",
+            full_identity=True,
+        )
+        bound_path = _bind_snapshot_path(
+            parent / path.name,
+            requested_parent,
+            opened,
+            noun=noun,
+        )
+        return bound_path, descriptor, opened
     except Exception:
         with suppress(OSError):
             os.close(descriptor)
@@ -549,8 +646,9 @@ def _remove_restore_tree_at(
 
 @contextmanager
 def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
+    requested_parent = path.parent.absolute()
     try:
-        parent = path.parent.resolve(strict=True)
+        parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
@@ -567,6 +665,13 @@ def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
         parent_opened = os.fstat(parent_descriptor)
         if _stat_identity(parent_opened) != _stat_identity(parent_expected):
             raise SnapshotError("snapshot archive parent changed while opening")
+        _requested_snapshot_parent_must_be_stable(
+            requested_parent,
+            parent_opened,
+            noun="snapshot archive",
+            phase="opening",
+            full_identity=True,
+        )
         try:
             expected = (
                 os.stat(
@@ -621,6 +726,13 @@ def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
                 parent_current
             ) != _stat_identity(parent_opened):
                 raise SnapshotError("snapshot archive parent changed while reading")
+            _requested_snapshot_parent_must_be_stable(
+                requested_parent,
+                parent_opened,
+                noun="snapshot archive",
+                phase="reading",
+                full_identity=True,
+            )
     except OSError as exc:
         raise SnapshotError(f"unable to read snapshot archive: {exc}") from exc
     finally:
