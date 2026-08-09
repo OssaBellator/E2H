@@ -129,10 +129,9 @@ def _read_artifact_bytes(path: Path) -> bytes:
             or len(raw) != opened.st_size
         ):
             raise ArtifactError("artifact changed while being read")
-        if (
-            _stat_identity(parent_after) != _stat_identity(parent_opened)
-            or _stat_identity(parent_current) != _stat_identity(parent_opened)
-        ):
+        if _stat_identity(parent_after) != _stat_identity(parent_opened) or _stat_identity(
+            parent_current
+        ) != _stat_identity(parent_opened):
             raise ArtifactError("artifact parent changed while being read")
         return raw
     except OSError as exc:
