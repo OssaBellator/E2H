@@ -51,6 +51,22 @@ class FailureCode(StrEnum):
     SKIPPED_AFTER_FAILURE = "skipped_after_failure"
 
 
+_CODE_CATEGORY = {
+    FailureCode.UNEXPECTED_EXIT: FailureCategory.TASK,
+    FailureCode.SIGNAL_TERMINATION: FailureCategory.TASK,
+    FailureCode.TIMEOUT: FailureCategory.RESOURCE,
+    FailureCode.COMMAND_NOT_FOUND: FailureCategory.DEPENDENCY,
+    FailureCode.PERMISSION_DENIED: FailureCategory.ENVIRONMENT,
+    FailureCode.PROCESS_LAUNCH_ERROR: FailureCategory.ENVIRONMENT,
+    FailureCode.WORKING_DIRECTORY_MISSING: FailureCategory.ENVIRONMENT,
+    FailureCode.SANDBOX_CONFIGURATION: FailureCategory.SANDBOX,
+    FailureCode.SANDBOX_RUNTIME: FailureCategory.SANDBOX,
+    FailureCode.SANDBOX_CLEANUP: FailureCategory.SANDBOX,
+    FailureCode.OUTPUT_CAPTURE: FailureCategory.OBSERVABILITY,
+    FailureCode.SKIPPED_AFTER_FAILURE: FailureCategory.CONTROL_FLOW,
+}
+
+
 class FailureImpact(StrEnum):
     """How the failure affects evaluation interpretation."""
 
@@ -123,12 +139,20 @@ class FailureRecord(StrictModel):
 
     @model_validator(mode="after")
     def causes_must_be_unique_and_not_repeat_primary(self) -> FailureRecord:
+        expected_category = _CODE_CATEGORY[self.code]
+        if self.category is not expected_category:
+            raise ValueError(
+                f"failure code {self.code.value!r} requires category {expected_category.value!r}"
+            )
         if self.code in self.causes:
             raise ValueError("failure causes must not repeat the primary code")
         if len(set(self.causes)) != len(self.causes):
             raise ValueError("failure causes must be unique")
-        if self.code is FailureCode.SKIPPED_AFTER_FAILURE and self.caused_by_check_id is None:
-            raise ValueError("skipped failures require caused_by_check_id")
+        if self.code is FailureCode.SKIPPED_AFTER_FAILURE:
+            if self.caused_by_check_id is None:
+                raise ValueError("skipped failures require caused_by_check_id")
+        elif self.caused_by_check_id is not None:
+            raise ValueError("only skipped failures may define caused_by_check_id")
         return self
 
 
