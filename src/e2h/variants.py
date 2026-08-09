@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.document import load_mapping_document
+from e2h.document import _validate_json_compatible, load_mapping_document
 from e2h.genome import capsule_sha256
 from e2h.models import TaskCapsule
 
@@ -54,6 +54,7 @@ def _revalidate_variant_input(
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
@@ -168,12 +169,13 @@ class ToolVariant(StrictModel):
         tool_ids = [tool.id for tool in self.tools]
         if len(tool_ids) != len(set(tool_ids)):
             raise ValueError("tool ids must be unique")
+        target_set = set(tool_ids)
         if self.selection != "none" and not self.tools:
             raise ValueError("tool selection requires at least one tool")
         if self.selection == "named":
             if self.selected_tool is None:
                 raise ValueError("named tool selection requires selected_tool")
-            if self.selected_tool not in set(tool_ids):
+            if self.selected_tool not in target_set:
                 raise ValueError("selected_tool must reference a declared tool")
         elif self.selected_tool is not None:
             raise ValueError("selected_tool is only valid for named selection")
