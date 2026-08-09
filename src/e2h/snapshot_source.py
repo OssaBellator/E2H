@@ -17,6 +17,11 @@ _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 _LISTDIR_SUPPORTS_FD = os.listdir in os.supports_fd
 _SOURCE_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD and _LISTDIR_SUPPORTS_FD
+_BOUND_ROOT_TYPE = type(
+    "_BoundSnapshotRoot",
+    (type(Path()),),
+    {"__slots__": ("requested_root",)},
+)
 
 
 @dataclass
@@ -41,8 +46,16 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
+def _requested_root(root: Path, explicit: Path | None = None) -> Path | None:
+    if explicit is not None:
+        return explicit
+    candidate = getattr(root, "requested_root", None)
+    return candidate if isinstance(candidate, Path) else None
+
+
 def resolve_snapshot_source_root(root: Path) -> tuple[Path, os.stat_result]:
     """Resolve one snapshot root and bind the directory identity seen at that boundary."""
+    requested_root = root.absolute()
     try:
         resolved = root.resolve(strict=True)
         expected = resolved.stat(follow_symlinks=False)
@@ -50,14 +63,31 @@ def resolve_snapshot_source_root(root: Path) -> tuple[Path, os.stat_result]:
         raise SnapshotError(f"unable to inspect snapshot root: {exc}") from exc
     if not stat.S_ISDIR(expected.st_mode):
         raise SnapshotError(f"snapshot root is not a directory: {resolved}")
-    return resolved, expected
+    bound_root = _BOUND_ROOT_TYPE(resolved)
+    bound_root.requested_root = requested_root
+    return bound_root, expected
 
 
 def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
     return (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode))
 
 
-def _root_path_must_be_stable(root: Path, expected: os.stat_result) -> None:
+def _requested_root_stat(requested_root: Path) -> os.stat_result:
+    try:
+        current_root = requested_root.resolve(strict=True)
+        current = current_root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SnapshotError(f"unable to restat snapshot root: {exc}") from exc
+    if not stat.S_ISDIR(current.st_mode):
+        raise SnapshotError("snapshot root changed during traversal")
+    return current
+
+
+def _root_path_must_be_stable(
+    root: Path,
+    expected: os.stat_result,
+    requested_root: Path | None = None,
+) -> None:
     try:
         current = root.stat(follow_symlinks=False)
     except OSError as exc:
@@ -67,21 +97,36 @@ def _root_path_must_be_stable(root: Path, expected: os.stat_result) -> None:
         or _directory_identity(current) != _directory_identity(expected)
     ):
         raise SnapshotError("snapshot root changed during traversal")
+    requested_root = _requested_root(root, requested_root)
+    if requested_root is not None:
+        requested = _requested_root_stat(requested_root)
+        if _directory_identity(requested) != _directory_identity(expected):
+            raise SnapshotError("snapshot root changed during traversal")
 
 
-def _root_path_contents_must_be_stable(root: Path, expected: os.stat_result) -> None:
+def _root_path_contents_must_be_stable(
+    root: Path,
+    expected: os.stat_result,
+    requested_root: Path | None = None,
+) -> None:
     try:
         current = root.stat(follow_symlinks=False)
     except OSError as exc:
         raise SnapshotError(f"unable to restat snapshot root: {exc}") from exc
     if not stat.S_ISDIR(current.st_mode) or _stat_identity(current) != _stat_identity(expected):
         raise SnapshotError("snapshot root changed during traversal")
+    requested_root = _requested_root(root, requested_root)
+    if requested_root is not None:
+        requested = _requested_root_stat(requested_root)
+        if _stat_identity(requested) != _stat_identity(expected):
+            raise SnapshotError("snapshot root changed during traversal")
 
 
 def _root_descriptor_must_be_stable(
     root: Path,
     descriptor: int,
     opened: os.stat_result,
+    requested_root: Path | None = None,
 ) -> None:
     try:
         after = os.fstat(descriptor)
@@ -95,6 +140,11 @@ def _root_descriptor_must_be_stable(
         or _stat_identity(current) != _stat_identity(opened)
     ):
         raise SnapshotError("snapshot root changed during traversal")
+    requested_root = _requested_root(root, requested_root)
+    if requested_root is not None:
+        requested = _requested_root_stat(requested_root)
+        if _stat_identity(requested) != _stat_identity(opened):
+            raise SnapshotError("snapshot root changed during traversal")
 
 
 def _include_parts(value: str) -> tuple[str, ...]:
@@ -412,6 +462,7 @@ def _collect_descriptor(
     root: Path,
     root_info: os.stat_result,
     *,
+    requested_root: Path | None,
     includes: tuple[str, ...],
     patterns: tuple[str, ...],
     ignored: set[str],
@@ -422,6 +473,12 @@ def _collect_descriptor(
     blobs: dict[str, bytes] = {}
     total_bytes = 0
     try:
+        _root_descriptor_must_be_stable(
+            root,
+            root_descriptor,
+            root_opened,
+            requested_root,
+        )
         for include in includes:
             parts = _include_parts(include)
             if not parts:
@@ -531,7 +588,12 @@ def _collect_descriptor(
                 for guard in reversed(guards):
                     with suppress(OSError):
                         os.close(guard.descriptor)
-        _root_descriptor_must_be_stable(root, root_descriptor, root_opened)
+        _root_descriptor_must_be_stable(
+            root,
+            root_descriptor,
+            root_opened,
+            requested_root,
+        )
         entries = [selected[path] for path in sorted(selected)]
         return entries, blobs, total_bytes
     finally:
@@ -543,6 +605,7 @@ def _collect_path(
     root: Path,
     root_info: os.stat_result,
     *,
+    requested_root: Path | None,
     includes: tuple[str, ...],
     patterns: tuple[str, ...],
     ignored_paths: set[Path],
@@ -554,7 +617,7 @@ def _collect_path(
     blobs: dict[str, bytes] = {}
     total_bytes = 0
     for relative, path in snapshot._iter_selected(root, includes, patterns, ignored_paths):
-        _root_path_contents_must_be_stable(root, root_info)
+        _root_path_contents_must_be_stable(root, root_info, requested_root)
         if len(entries) >= limits.max_entries:
             raise SnapshotError("snapshot exceeds max_entries")
         snapshot._resolve_under_root(root, path, relative)
@@ -566,12 +629,12 @@ def _collect_path(
             raise SnapshotError(f"symbolic links are not supported: {relative}")
         if stat.S_ISDIR(entry.st_mode):
             entries.append(SnapshotEntry(path=relative, kind="directory"))
-            _root_path_contents_must_be_stable(root, root_info)
+            _root_path_contents_must_be_stable(root, root_info, requested_root)
             continue
         if not stat.S_ISREG(entry.st_mode):
             raise SnapshotError(f"unsupported filesystem entry: {relative}")
         data = snapshot._read_file(root, path, relative, limits, entry)
-        _root_path_contents_must_be_stable(root, root_info)
+        _root_path_contents_must_be_stable(root, root_info, requested_root)
         total_bytes += len(data)
         if total_bytes > limits.max_total_bytes:
             raise SnapshotError("snapshot exceeds max_total_bytes")
@@ -586,7 +649,7 @@ def _collect_path(
             )
         )
         blobs.setdefault(digest, data)
-    _root_path_contents_must_be_stable(root, root_info)
+    _root_path_contents_must_be_stable(root, root_info, requested_root)
     return entries, blobs, total_bytes
 
 
@@ -594,12 +657,14 @@ def collect_snapshot_source(
     root: Path,
     root_info: os.stat_result,
     *,
+    requested_root: Path | None = None,
     includes: Iterable[str],
     excludes: Iterable[str],
     ignored_paths: set[Path],
     limits: SnapshotLimits,
 ) -> tuple[list[SnapshotEntry], dict[str, bytes], int]:
     """Collect one stable source-root snapshot into canonical entries and blobs."""
+    requested_root = _requested_root(root, requested_root)
     includes_tuple = tuple(includes)
     patterns = tuple(excludes)
     ignored = _ignored_relatives(root, ignored_paths)
@@ -607,6 +672,7 @@ def collect_snapshot_source(
         return _collect_descriptor(
             root,
             root_info,
+            requested_root=requested_root,
             includes=includes_tuple,
             patterns=patterns,
             ignored=ignored,
@@ -615,6 +681,7 @@ def collect_snapshot_source(
     return _collect_path(
         root,
         root_info,
+        requested_root=requested_root,
         includes=includes_tuple,
         patterns=patterns,
         ignored_paths=ignored_paths,
