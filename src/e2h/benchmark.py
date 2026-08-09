@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.document import load_mapping_document
+from e2h.document import _validate_json_compatible, load_mapping_document
 from e2h.failures import FailureCategory, FailureCode
 from e2h.privacy import RedactionPolicyError, apply_redaction_policy
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
@@ -166,6 +166,7 @@ class FailurePatternCorpus(StrictModel):
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("failure pattern ids must be unique")
         try:
+            _validate_json_compatible(self.metadata)
             json.dumps(self.metadata, sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("benchmark metadata must contain canonical JSON values") from exc
