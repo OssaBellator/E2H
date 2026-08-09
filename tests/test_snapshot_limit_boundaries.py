@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-import e2h.snapshot as snapshot
+import e2h.snapshot_source as snapshot_source
 from e2h.release_source import ReleaseSourceError, source_tree_sha256
 from e2h.snapshot import (
     DEFAULT_MAX_ENTRIES,
@@ -133,28 +132,27 @@ def test_snapshot_create_uses_detached_limits_during_traversal(
     root = tmp_path / "source"
     workspace(root)
     output = tmp_path / "source.e2hsnap"
-    limits = SnapshotLimits(max_entries=10, max_file_bytes=100, max_total_bytes=100)
-    original_iter = snapshot._iter_selected
+    caller_limits = SnapshotLimits(max_entries=10, max_file_bytes=100, max_total_bytes=100)
+    original_collect = snapshot_source.collect_snapshot_source
+    mutated = False
 
-    def mutating_iter(
-        current_root: Path,
-        includes: Iterable[str],
-        excludes: tuple[str, ...],
-        ignored_paths: set[Path],
-    ) -> Iterable[tuple[str, Path]]:
-        for index, item in enumerate(
-            original_iter(current_root, includes, excludes, ignored_paths)
-        ):
-            if index == 0:
-                limits.max_entries = 1
-                limits.max_file_bytes = 1
-                limits.max_total_bytes = 1
-            yield item
+    def mutating_collect(*args: Any, **kwargs: Any) -> Any:
+        nonlocal mutated
+        active_limits = kwargs["limits"]
+        assert isinstance(active_limits, SnapshotLimits)
+        assert active_limits is not caller_limits
+        if not mutated:
+            mutated = True
+            caller_limits.max_entries = 1
+            caller_limits.max_file_bytes = 1
+            caller_limits.max_total_bytes = 1
+        return original_collect(*args, **kwargs)
 
-    monkeypatch.setattr(snapshot, "_iter_selected", mutating_iter)
+    monkeypatch.setattr(snapshot_source, "collect_snapshot_source", mutating_collect)
 
-    manifest = create_snapshot(root, output, limits=limits)
+    manifest = create_snapshot(root, output, limits=caller_limits)
 
+    assert mutated is True
     assert output.is_file()
     assert len(manifest.core.entries) == 2
     assert manifest.core.total_bytes == 9
