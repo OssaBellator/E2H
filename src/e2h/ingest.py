@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -74,6 +74,26 @@ class TranscriptRole(StrEnum):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_InputModelT = TypeVar("_InputModelT", bound=BaseModel)
+
+
+def _revalidate_ingest_model(
+    value: BaseModel,
+    model_type: type[_InputModelT],
+    *,
+    noun: str,
+) -> _InputModelT:
+    if type(value) is not model_type:
+        raise EvidenceIngestError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise EvidenceIngestError(f"invalid {noun}: {exc}") from exc
 
 
 class SourceProvenance(StrictModel):
@@ -479,6 +499,16 @@ def import_transcript_document(
     redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize a validated canonical transcript into observable trace events."""
+    document = _revalidate_ingest_model(
+        document,
+        TranscriptDocument,
+        noun="transcript document",
+    )
+    provenance = _revalidate_ingest_model(
+        provenance,
+        SourceProvenance,
+        noun="source provenance",
+    )
     selected_capsule = capsule_id or document.capsule_id
     context = TraceContext(
         run_id=document.id,
@@ -886,6 +916,11 @@ def import_otlp_data(
     redaction_policy: RedactionPolicy | None = None,
 ) -> IngestionBundle:
     """Normalize an OTLP/HTTP JSON trace export into one E2H trace per trace ID."""
+    provenance = _revalidate_ingest_model(
+        provenance,
+        SourceProvenance,
+        noun="source provenance",
+    )
     try:
         _ensure_json(data, "OTLP data")
     except ValueError as exc:
