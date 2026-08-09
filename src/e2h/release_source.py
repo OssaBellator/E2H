@@ -73,19 +73,38 @@ def _resolve_source_root(root: Path) -> tuple[Path, os.stat_result]:
     return resolved_root, resolved_info
 
 
-def _source_root_path_must_be_stable(root: Path, expected: os.stat_result) -> None:
+def _requested_source_root_must_be_stable(
+    requested_root: Path,
+    expected: os.stat_result,
+) -> None:
     try:
-        current = root.stat(follow_symlinks=False)
+        current_root = requested_root.resolve(strict=True)
+        current = current_root.stat(follow_symlinks=False)
     except OSError as exc:
         raise ReleaseSourceError(f"unable to restat release source root: {exc}") from exc
     if not stat.S_ISDIR(current.st_mode) or _stat_identity(current) != _stat_identity(expected):
         raise ReleaseSourceError("release source root changed during traversal")
 
 
+def _source_root_path_must_be_stable(
+    root: Path,
+    expected: os.stat_result,
+    requested_root: Path,
+) -> None:
+    try:
+        current = root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseSourceError(f"unable to restat release source root: {exc}") from exc
+    if not stat.S_ISDIR(current.st_mode) or _stat_identity(current) != _stat_identity(expected):
+        raise ReleaseSourceError("release source root changed during traversal")
+    _requested_source_root_must_be_stable(requested_root, expected)
+
+
 def _source_root_descriptor_must_be_stable(
     root: Path,
     descriptor: int,
     opened: os.stat_result,
+    requested_root: Path,
 ) -> None:
     try:
         after = os.fstat(descriptor)
@@ -99,6 +118,7 @@ def _source_root_descriptor_must_be_stable(
         or _stat_identity(current) != _stat_identity(opened)
     ):
         raise ReleaseSourceError("release source root changed during traversal")
+    _requested_source_root_must_be_stable(requested_root, opened)
 
 
 def _resolve_under_root(root: Path, path: Path, relative: str) -> Path:
@@ -212,18 +232,19 @@ def _hash_regular_file_path(
 def _source_tree_sha256_path(
     root: Path,
     root_info: os.stat_result,
+    requested_root: Path,
     *,
     patterns: tuple[str, ...],
     limits: SnapshotLimits,
 ) -> str:
     children = _list_source_directory_path(root, root, ".", root_info)
-    _source_root_path_must_be_stable(root, root_info)
+    _source_root_path_must_be_stable(root, root_info, requested_root)
 
     stack = list(reversed(children))
     entries: list[SnapshotEntry] = []
     total_bytes = 0
     while stack:
-        _source_root_path_must_be_stable(root, root_info)
+        _source_root_path_must_be_stable(root, root_info, requested_root)
         current = stack.pop()
         try:
             relative = current.relative_to(root).as_posix()
@@ -245,7 +266,7 @@ def _source_tree_sha256_path(
         if stat.S_ISDIR(entry.st_mode):
             entries.append(SnapshotEntry(path=relative, kind="directory"))
             descendants = _list_source_directory_path(root, current, relative, entry)
-            _source_root_path_must_be_stable(root, root_info)
+            _source_root_path_must_be_stable(root, root_info, requested_root)
             stack.extend(reversed(descendants))
             continue
         if not stat.S_ISREG(entry.st_mode):
@@ -257,7 +278,7 @@ def _source_tree_sha256_path(
             entry,
             limits=limits,
         )
-        _source_root_path_must_be_stable(root, root_info)
+        _source_root_path_must_be_stable(root, root_info, requested_root)
         total_bytes += size_bytes
         if total_bytes > limits.max_total_bytes:
             raise ReleaseSourceError("release source tree exceeds max_total_bytes")
@@ -271,7 +292,7 @@ def _source_tree_sha256_path(
             )
         )
 
-    _source_root_path_must_be_stable(root, root_info)
+    _source_root_path_must_be_stable(root, root_info, requested_root)
     core = SnapshotCore(
         entries=sorted(entries, key=lambda entry: entry.path),
         total_bytes=total_bytes,
@@ -410,6 +431,7 @@ def _hash_regular_file_at(
 def _source_tree_sha256_descriptor(
     root: Path,
     root_info: os.stat_result,
+    requested_root: Path,
     *,
     patterns: tuple[str, ...],
     limits: SnapshotLimits,
@@ -417,6 +439,12 @@ def _source_tree_sha256_descriptor(
     root_descriptor, root_opened = _open_source_root(root, root_info)
     stack: list[_SourceDirectoryFrame] = []
     try:
+        _source_root_descriptor_must_be_stable(
+            root,
+            root_descriptor,
+            root_opened,
+            requested_root,
+        )
         root_names = _list_source_directory_at(root_descriptor, ".", root_opened)
         stack.append(
             _SourceDirectoryFrame(
@@ -505,7 +533,12 @@ def _source_tree_sha256_descriptor(
                 )
             )
 
-        _source_root_descriptor_must_be_stable(root, root_descriptor, root_opened)
+        _source_root_descriptor_must_be_stable(
+            root,
+            root_descriptor,
+            root_opened,
+            requested_root,
+        )
         core = SnapshotCore(
             entries=sorted(entries, key=lambda entry: entry.path),
             total_bytes=total_bytes,
@@ -528,18 +561,21 @@ def source_tree_sha256(
 ) -> str:
     """Return the canonical snapshot-core SHA-256 for one release source tree."""
     limits = revalidate_snapshot_limits(limits, error_type=ReleaseSourceError)
+    requested_root = root.absolute()
     root, root_info = _resolve_source_root(root)
     patterns = tuple(excludes)
     if _SOURCE_DIR_FD_SUPPORTED:
         return _source_tree_sha256_descriptor(
             root,
             root_info,
+            requested_root,
             patterns=patterns,
             limits=limits,
         )
     return _source_tree_sha256_path(
         root,
         root_info,
+        requested_root,
         patterns=patterns,
         limits=limits,
     )
