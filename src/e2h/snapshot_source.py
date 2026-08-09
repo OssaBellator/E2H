@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import stat
@@ -81,8 +82,6 @@ def _include_parts(value: str) -> tuple[str, ...]:
 
 
 def _matches_exclude(relative: str, patterns: Iterable[str]) -> bool:
-    import fnmatch
-
     return any(fnmatch.fnmatchcase(relative, pattern) for pattern in patterns)
 
 
@@ -258,6 +257,14 @@ def _guards_must_be_stable(guards: list[_SourceDirectoryFrame]) -> None:
         _frame_must_be_stable(guard)
 
 
+def _ensure_entry_capacity(
+    selected: dict[str, SnapshotEntry],
+    limits: SnapshotLimits,
+) -> None:
+    if len(selected) >= limits.max_entries:
+        raise SnapshotError("snapshot exceeds max_entries")
+
+
 def _add_file(
     selected: dict[str, SnapshotEntry],
     blobs: dict[str, bytes],
@@ -270,8 +277,7 @@ def _add_file(
 ) -> int:
     if relative in selected:
         return total_bytes
-    if len(selected) >= limits.max_entries:
-        raise SnapshotError("snapshot exceeds max_entries")
+    _ensure_entry_capacity(selected, limits)
     total_bytes += len(data)
     if total_bytes > limits.max_total_bytes:
         raise SnapshotError("snapshot exceeds max_total_bytes")
@@ -295,8 +301,7 @@ def _add_directory(
 ) -> bool:
     if relative in selected:
         return False
-    if len(selected) >= limits.max_entries:
-        raise SnapshotError("snapshot exceeds max_entries")
+    _ensure_entry_capacity(selected, limits)
     selected[relative] = SnapshotEntry(path=relative, kind="directory")
     return True
 
@@ -361,6 +366,7 @@ def _process_descriptor_frame(
         raise SnapshotError(f"unsupported filesystem entry: {relative}")
     if relative in selected:
         return total_bytes
+    _ensure_entry_capacity(selected, limits)
     data, executable = _read_file_at(
         frame.descriptor,
         name,
@@ -480,6 +486,7 @@ def _collect_descriptor(
                 if not stat.S_ISREG(entry.st_mode):
                     raise SnapshotError(f"unsupported filesystem entry: {relative}")
                 if relative not in selected:
+                    _ensure_entry_capacity(selected, limits)
                     data, executable = _read_file_at(
                         parent_descriptor,
                         parts[-1],
