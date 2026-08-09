@@ -23,6 +23,15 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-standard JSON constant: {value}")
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
 def _canonical_json(value: Any) -> str:
     try:
         return (
@@ -187,7 +196,11 @@ def canonicalize_cyclonedx_sbom_file(source: Path) -> str:
     except UnicodeDecodeError as exc:
         raise SbomCanonicalizationError("SBOM must be UTF-8") from exc
     try:
-        parsed = json.loads(text, parse_constant=_reject_json_constant)
+        parsed = json.loads(
+            text,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
     except (json.JSONDecodeError, ValueError) as exc:
         raise SbomCanonicalizationError(f"invalid SBOM JSON: {exc}") from exc
     if not isinstance(parsed, dict):
