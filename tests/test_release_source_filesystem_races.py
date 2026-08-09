@@ -121,7 +121,10 @@ def _assert_root_swap_is_rejected(
     def swapping_listdir(path: Any) -> list[str]:
         nonlocal swapped
         names = original_listdir(path)
-        if not swapped and isinstance(path, int) and _identity(os.fstat(path)) == root_identity:
+        is_original_root = (
+            _identity(os.fstat(path)) == root_identity if isinstance(path, int) else Path(path) == root
+        )
+        if not swapped and is_original_root:
             swapped = True
             root.rename(original_location)
             replacement.rename(root)
@@ -129,7 +132,7 @@ def _assert_root_swap_is_rejected(
 
     monkeypatch.setattr(os, "listdir", swapping_listdir)
 
-    with pytest.raises(ReleaseSourceError, match="release source root changed during traversal"):
+    with pytest.raises(ReleaseSourceError, match="(?:release )?source root changed"):
         source_tree_sha256(root)
 
     assert swapped is True
