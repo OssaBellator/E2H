@@ -298,26 +298,31 @@ def _restore_overwritten_output(
     backup_name: str,
     backup_identity: tuple[int, int],
     replacement_identity: tuple[int, int],
-) -> None:
+) -> bool:
     try:
         backup = _stat_entry(parent_descriptor, parent, backup_name)
         current = _stat_entry(parent_descriptor, parent, output_name)
     except OSError:
-        return
-    if (
-        not stat.S_ISREG(backup.st_mode)
-        or _inode_identity(backup) != backup_identity
-        or not stat.S_ISREG(current.st_mode)
-        or _inode_identity(current) != replacement_identity
-    ):
-        return
-    with suppress(OSError):
+        return False
+    if not stat.S_ISREG(backup.st_mode) or _inode_identity(backup) != backup_identity:
+        return False
+    if not stat.S_ISREG(current.st_mode):
+        return False
+    current_identity = _inode_identity(current)
+    if current_identity == backup_identity:
+        return True
+    if current_identity != replacement_identity:
+        return False
+    try:
         _replace_entry(
             parent_descriptor,
             parent,
             backup_name,
             output_name,
         )
+    except OSError:
+        return False
+    return True
 
 
 def _overwrite_existing(
@@ -388,10 +393,11 @@ def _overwrite_existing(
         if descriptor is not None:
             with suppress(OSError):
                 os.close(descriptor)
+        backup_can_be_removed = success
         if opened is not None:
             replacement_identity = _inode_identity(opened)
             if not success and backup_name is not None:
-                _restore_overwritten_output(
+                backup_can_be_removed = _restore_overwritten_output(
                     parent,
                     parent_descriptor,
                     output_name,
@@ -405,7 +411,7 @@ def _overwrite_existing(
                 temp_name,
                 replacement_identity,
             )
-        if backup_name is not None:
+        if backup_name is not None and backup_can_be_removed:
             _unlink_regular_entry_if_identity(
                 parent_descriptor,
                 parent,
