@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
 from e2h.privacy import (
     RedactionKind as RedactionKind,
 )
@@ -190,6 +191,7 @@ class _ParsedSpan:
 
 def _ensure_json(value: Any, noun: str) -> None:
     try:
+        _validate_json_compatible(value)
         json.dumps(value, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{noun} must be JSON-serializable") from exc
@@ -220,6 +222,8 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
 
 
 def _source_parent(path: Path) -> tuple[Path, Path, os.stat_result]:
+    if "\x00" in os.fspath(path):
+        raise EvidenceIngestError("evidence path must not contain NUL")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
