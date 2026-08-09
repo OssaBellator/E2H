@@ -147,6 +147,9 @@ def _open_staged(staged: Path) -> tuple[int, os.stat_result]:
             raise ParquetOutputError("Parquet staging file changed while opening")
         return descriptor, opened
     except OSError as exc:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
         raise ParquetOutputError(f"Parquet staging file changed while opening: {exc}") from exc
     except Exception:
         if descriptor is not None:
@@ -156,10 +159,10 @@ def _open_staged(staged: Path) -> tuple[int, os.stat_result]:
 
 
 def _copy_staged(
-    staged_descriptor: int,
-    staged_expected: os.stat_result,
+    staged: tuple[int, os.stat_result],
     descriptor: int,
 ) -> os.stat_result:
+    staged_descriptor, staged_expected = staged
     try:
         staged_before = os.fstat(staged_descriptor)
     except OSError as exc:
@@ -297,8 +300,7 @@ def _install_new(
     parent_descriptor: int,
     parent_opened: os.stat_result,
     output_name: str,
-    staged_descriptor: int,
-    staged_expected: os.stat_result,
+    staged: tuple[int, os.stat_result],
 ) -> None:
     temp_name = f".{output_name}.e2h-{secrets.token_hex(16)}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -312,7 +314,7 @@ def _install_new(
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode):
             raise ParquetOutputError("temporary Parquet output is not a regular file")
-        written = _copy_staged(staged_descriptor, staged_expected, descriptor)
+        written = _copy_staged(staged, descriptor)
         if _inode_identity(written) != _inode_identity(opened):
             raise ParquetOutputError("temporary Parquet output changed while writing")
         try:
@@ -373,8 +375,7 @@ def _overwrite_existing(
     parent_opened: os.stat_result,
     output_name: str,
     expected: os.stat_result,
-    staged_descriptor: int,
-    staged_expected: os.stat_result,
+    staged: tuple[int, os.stat_result],
 ) -> None:
     flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -417,7 +418,7 @@ def _overwrite_existing(
         )
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         modified = True
-        written = _copy_staged(staged_descriptor, staged_expected, descriptor)
+        written = _copy_staged(staged, descriptor)
         current = _stat_entry(parent_descriptor, parent, output_name)
         if (
             _inode_identity(written) != output_identity
@@ -457,8 +458,7 @@ def _overwrite_existing(
 
 def _install_staged(
     output: Path,
-    staged_descriptor: int,
-    staged_expected: os.stat_result,
+    staged: tuple[int, os.stat_result],
 ) -> None:
     if not output.name:
         raise ParquetOutputError("Parquet output must name a file")
@@ -503,8 +503,7 @@ def _install_staged(
                 parent_descriptor,
                 parent_opened,
                 output.name,
-                staged_descriptor,
-                staged_expected,
+                staged,
             )
         else:
             _overwrite_existing(
@@ -514,8 +513,7 @@ def _install_staged(
                 parent_opened,
                 output.name,
                 expected,
-                staged_descriptor,
-                staged_expected,
+                staged,
             )
     finally:
         with suppress(OSError):
@@ -532,7 +530,7 @@ def staged_parquet_output(output: Path) -> Iterator[Path]:
             staged_descriptor: int | None = None
             try:
                 staged_descriptor, staged_expected = _open_staged(staged)
-                _install_staged(output, staged_descriptor, staged_expected)
+                _install_staged(output, (staged_descriptor, staged_expected))
             finally:
                 if staged_descriptor is not None:
                     with suppress(OSError):
