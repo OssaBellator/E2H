@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
+
 _MAX_ARTIFACT_BYTES = 128 * 1024 * 1024
 _MAX_ARTIFACTS = 32
 _MAX_METADATA_BYTES = 1024 * 1024
@@ -144,6 +146,7 @@ def _validate_json_object_keys(value: Any, *, active: set[int] | None = None) ->
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         _validate_json_object_keys(value)
         rendered = json.dumps(
             value,
@@ -508,6 +511,8 @@ def _requested_manifest_parent_identity(requested_parent: Path) -> os.stat_resul
 
 
 def _read_release_manifest_bytes(path: Path) -> bytes:
+    if "\x00" in os.fspath(path):
+        raise ReleaseIntegrityError("release manifest path must not contain NUL")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
