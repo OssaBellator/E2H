@@ -58,6 +58,39 @@ def test_snapshot_parent_failure_restores_previous_output(
     assert not list(tmp_path.glob(f".{output.name}.rollback-*.bak"))
 
 
+@pytest.mark.skipif(
+    not snapshot._WRITE_DIR_FD_SUPPORTED,
+    reason="descriptor-relative snapshot publication is unavailable",
+)
+def test_snapshot_promotion_failure_restores_vanished_previous_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _workspace(tmp_path)
+    output = tmp_path / "snapshot.e2hsnap"
+    previous = b"previous snapshot bytes\n"
+    output.write_bytes(previous)
+    original_rename = snapshot_promotion.os.rename
+    state = {"failed": False}
+
+    def failing_rename(source: Any, destination: Any, *args: Any, **kwargs: Any) -> None:
+        if not state["failed"] and Path(source).name.endswith(".tmp"):
+            state["failed"] = True
+            if output.exists():
+                output.unlink()
+            raise OSError("simulated promotion failure")
+        original_rename(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(snapshot_promotion.os, "rename", failing_rename)
+
+    with pytest.raises(SnapshotError, match="unable to publish snapshot output"):
+        create_snapshot(root, output)
+
+    assert state["failed"] is True
+    assert output.read_bytes() == previous
+    assert not list(tmp_path.glob(f".{output.name}.rollback-*.bak"))
+
+
 def test_snapshot_fallback_parent_failure_restores_previous_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
