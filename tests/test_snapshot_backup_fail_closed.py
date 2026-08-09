@@ -21,7 +21,7 @@ def _open_directory(path: Path) -> tuple[int, os.stat_result]:
     return descriptor, os.fstat(descriptor)
 
 
-def test_snapshot_overwrite_fails_closed_without_hard_link_backup(
+def test_snapshot_overwrite_fails_closed_when_hard_link_backup_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -33,17 +33,22 @@ def test_snapshot_overwrite_fails_closed_without_hard_link_backup(
     temporary.write_bytes(b"replacement snapshot\n")
     descriptor, opened = _open_directory(parent)
     original_rename = os.rename
+    original_supports_dir_fd = os.supports_dir_fd
     rename_calls = 0
+
+    def failing_link(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated hard-link failure")
 
     def recording_rename(*args: object, **kwargs: object) -> None:
         nonlocal rename_calls
         rename_calls += 1
         original_rename(*args, **kwargs)
 
-    monkeypatch.setattr(os, "link", lambda *args, **kwargs: None)
+    monkeypatch.setattr(os, "link", failing_link)
+    monkeypatch.setattr(os, "supports_dir_fd", {*original_supports_dir_fd, failing_link})
     monkeypatch.setattr(os, "rename", recording_rename)
     try:
-        with pytest.raises(SnapshotError, match="hard-link backup unavailable"):
+        with pytest.raises(SnapshotError, match="simulated hard-link failure"):
             promote_snapshot_file(output, descriptor, opened, temporary.name)
     finally:
         os.close(descriptor)
