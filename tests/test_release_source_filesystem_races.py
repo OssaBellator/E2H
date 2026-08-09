@@ -121,9 +121,10 @@ def _assert_root_swap_is_rejected(
     def swapping_listdir(path: Any) -> list[str]:
         nonlocal swapped
         names = original_listdir(path)
-        is_original_root = (
-            _identity(os.fstat(path)) == root_identity if isinstance(path, int) else Path(path) == root
-        )
+        if isinstance(path, int):
+            is_original_root = _identity(os.fstat(path)) == root_identity
+        else:
+            is_original_root = Path(path) == root
         if not swapped and is_original_root:
             swapped = True
             root.rename(original_location)
