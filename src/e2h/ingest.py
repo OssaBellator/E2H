@@ -509,6 +509,11 @@ def import_transcript_document(
         SourceProvenance,
         noun="source provenance",
     )
+    if provenance.format is not EvidenceFormat.TRANSCRIPT_JSON:
+        raise EvidenceIngestError(
+            "invalid source provenance: expected format 'transcript-json', "
+            f"got {provenance.format.value!r}"
+        )
     selected_capsule = capsule_id or document.capsule_id
     context = TraceContext(
         run_id=document.id,
@@ -921,6 +926,11 @@ def import_otlp_data(
         SourceProvenance,
         noun="source provenance",
     )
+    if provenance.format is not EvidenceFormat.OTLP_JSON:
+        raise EvidenceIngestError(
+            "invalid source provenance: expected format 'otlp-json', "
+            f"got {provenance.format.value!r}"
+        )
     try:
         _ensure_json(data, "OTLP data")
     except ValueError as exc:
