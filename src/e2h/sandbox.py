@@ -17,7 +17,39 @@ class SandboxError(RuntimeError):
     """Raised when a container invocation cannot be constructed safely."""
 
 
+def _validated_capsule(capsule: TaskCapsule) -> TaskCapsule:
+    if type(capsule) is not TaskCapsule:
+        raise SandboxError(
+            f"invalid task capsule: expected TaskCapsule, got {type(capsule).__name__}"
+        )
+    try:
+        payload = capsule.model_dump(mode="python", warnings="none")
+        return TaskCapsule.model_validate(payload)
+    except ValueError as exc:
+        raise SandboxError(f"invalid task capsule: {exc}") from exc
+
+
+def _validated_check(check: CommandCheck) -> CommandCheck:
+    if type(check) is not CommandCheck:
+        raise SandboxError(
+            f"invalid command check: expected CommandCheck, got {type(check).__name__}"
+        )
+    try:
+        payload = check.model_dump(mode="python", warnings="none")
+        return CommandCheck.model_validate(payload)
+    except ValueError as exc:
+        raise SandboxError(f"invalid command check: {exc}") from exc
+
+
+def _validated_runtime_binary(runtime_binary: str) -> str:
+    if not runtime_binary or "\x00" in runtime_binary:
+        raise SandboxError("container runtime binary must be non-empty and contain no NUL")
+    return runtime_binary
+
+
 def _container_workdir(relative_cwd: str) -> str:
+    if "\x00" in relative_cwd:
+        raise SandboxError("container working directory must not contain NUL")
     path = PurePosixPath(relative_cwd)
     if path.is_absolute() or ".." in path.parts:
         raise SandboxError(f"unsafe container working directory: {relative_cwd}")
@@ -36,11 +68,19 @@ def build_container_argv(
     runtime_binary: str | None = None,
 ) -> list[str]:
     """Build a deterministic Docker invocation for one capsule check."""
+    capsule = _validated_capsule(capsule)
+    check = _validated_check(check)
     sandbox = capsule.sandbox
     if sandbox is None:
         raise SandboxError("container execution requires capsule.sandbox")
-    runtime = runtime_binary or sandbox.engine
-    mount = f"type=bind,src={workspace_root},dst={_CONTAINER_ROOT}"
+    runtime = _validated_runtime_binary(
+        sandbox.engine if runtime_binary is None else runtime_binary
+    )
+    workspace_text = str(workspace_root)
+    cidfile_text = str(cidfile)
+    if "\x00" in workspace_text or "\x00" in cidfile_text:
+        raise SandboxError("container filesystem arguments must not contain NUL")
+    mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
     if sandbox.workspace_access == "read_only":
         mount += ",readonly"
     argv = [
@@ -49,7 +89,7 @@ def build_container_argv(
         "--rm",
         "--init",
         "--cidfile",
-        str(cidfile),
+        cidfile_text,
         "--pull",
         sandbox.pull_policy,
         "--hostname",
@@ -87,10 +127,14 @@ def build_container_argv(
 def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
     """Best-effort force removal after the attached runtime process times out."""
     try:
+        runtime_binary = _validated_runtime_binary(runtime_binary)
+    except SandboxError as exc:
+        return str(exc)
+    try:
         container_id = cidfile.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return "container runtime timed out before writing a container ID"
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return f"unable to read container ID after timeout: {exc}"
     if not _CONTAINER_ID_PATTERN.fullmatch(container_id):
         return "container runtime wrote an invalid container ID"
@@ -102,7 +146,7 @@ def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
             timeout=_CLEANUP_TIMEOUT_SECONDS,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         return f"unable to force-remove timed-out container: {exc}"
     if completed.returncode != 0:
         stderr = completed.stderr.decode("utf-8", errors="replace").strip()
