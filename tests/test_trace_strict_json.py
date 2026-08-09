@@ -50,6 +50,33 @@ def test_trace_event_rejects_unordered_payload(value: object) -> None:
         )
 
 
+def test_trace_event_rejects_nested_non_string_object_key() -> None:
+    with pytest.raises(ValidationError, match="JSON-serializable"):
+        TraceEvent(
+            trace_id="trace",
+            sequence=0,
+            event_type=TraceEventType.RUN_STARTED,
+            timestamp=datetime(2026, 8, 9, 4, 0, tzinfo=UTC),
+            context=TraceContext(run_id="trace", capsule_id="capsule"),
+            payload={"nested": {1: "integer", "1": "string"}},
+        )
+
+
+def test_trace_event_rejects_recursive_container() -> None:
+    recursive: list[object] = []
+    recursive.append(recursive)
+
+    with pytest.raises(ValidationError, match="JSON-serializable"):
+        TraceEvent(
+            trace_id="trace",
+            sequence=0,
+            event_type=TraceEventType.RUN_STARTED,
+            timestamp=datetime(2026, 8, 9, 4, 0, tzinfo=UTC),
+            context=TraceContext(run_id="trace", capsule_id="capsule"),
+            payload={"recursive": recursive},
+        )
+
+
 def test_trace_event_rejects_nonfinite_context_metadata() -> None:
     with pytest.raises(ValidationError, match="JSON-serializable"):
         TraceEvent(
@@ -80,6 +107,30 @@ def test_writer_rejects_unordered_value_added_after_validation(tmp_path: Path) -
     output = tmp_path / "traces.jsonl"
 
     with pytest.raises(ValueError, match="unordered set"):
+        write_traces_jsonl(output, [trace])
+
+    assert not output.exists()
+
+
+def test_writer_rejects_non_string_object_key_added_after_validation(tmp_path: Path) -> None:
+    trace = Trace(trace_id="trace", events=[_event(0), _event(1)])
+    trace.events[0].payload["nested"] = {1: "integer", "1": "string"}
+    output = tmp_path / "traces.jsonl"
+
+    with pytest.raises(ValueError, match="non-string object key"):
+        write_traces_jsonl(output, [trace])
+
+    assert not output.exists()
+
+
+def test_writer_rejects_recursive_container_added_after_validation(tmp_path: Path) -> None:
+    trace = Trace(trace_id="trace", events=[_event(0), _event(1)])
+    recursive: list[object] = []
+    recursive.append(recursive)
+    trace.events[0].payload["recursive"] = recursive
+    output = tmp_path / "traces.jsonl"
+
+    with pytest.raises(ValueError, match="recursive container"):
         write_traces_jsonl(output, [trace])
 
     assert not output.exists()
