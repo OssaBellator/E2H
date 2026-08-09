@@ -80,6 +80,38 @@ def _unlink_entry(parent_descriptor: int, parent: Path, name: str) -> None:
         (parent / name).unlink()
 
 
+def _unlink_regular_entry_if_identity(
+    parent_descriptor: int,
+    parent: Path,
+    name: str,
+    expected_identity: tuple[int, int],
+) -> None:
+    try:
+        current = _stat_entry(parent_descriptor, parent, name)
+    except OSError:
+        return
+    if not stat.S_ISREG(current.st_mode) or _inode_identity(current) != expected_identity:
+        return
+    descriptor: int | None = None
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = _open_entry(parent_descriptor, parent, name, flags)
+        opened = os.fstat(descriptor)
+        current = _stat_entry(parent_descriptor, parent, name)
+        if (
+            stat.S_ISREG(opened.st_mode)
+            and _inode_identity(opened) == expected_identity
+            and _inode_identity(current) == expected_identity
+        ):
+            _unlink_entry(parent_descriptor, parent, name)
+    except OSError:
+        return
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
 def _copy_staged(staged: Path, descriptor: int) -> os.stat_result:
     observed = 0
     os.ftruncate(descriptor, 0)
@@ -125,6 +157,16 @@ def _install_new(
         written = _copy_staged(staged, descriptor)
         if _inode_identity(written) != _inode_identity(opened):
             raise ParquetOutputError("temporary Parquet output changed while writing")
+        try:
+            current_temporary = _stat_entry(parent_descriptor, parent, temp_name)
+        except OSError as exc:
+            raise ParquetOutputError(
+                f"unable to restat temporary Parquet output: {exc}"
+            ) from exc
+        if not stat.S_ISREG(current_temporary.st_mode) or _inode_identity(
+            current_temporary
+        ) != _inode_identity(opened):
+            raise ParquetOutputError("temporary Parquet output changed before installation")
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         try:
             if _EXPORT_DIR_FD_SUPPORTED:
@@ -157,8 +199,13 @@ def _install_new(
             if current is not None and _inode_identity(current) == _inode_identity(opened):
                 with suppress(OSError):
                     _unlink_entry(parent_descriptor, parent, output_name)
-        with suppress(OSError):
-            _unlink_entry(parent_descriptor, parent, temp_name)
+        if opened is not None:
+            _unlink_regular_entry_if_identity(
+                parent_descriptor,
+                parent,
+                temp_name,
+                _inode_identity(opened),
+            )
 
 
 def _overwrite_existing(
