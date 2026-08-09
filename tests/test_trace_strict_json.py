@@ -10,6 +10,10 @@ from pydantic import ValidationError
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType, write_traces_jsonl
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(value)
+
+
 def _event(sequence: int) -> TraceEvent:
     return TraceEvent(
         trace_id="trace",
@@ -65,6 +69,5 @@ def test_writer_emits_strict_json(tmp_path: Path) -> None:
 
     lines = output.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
-    assert json.loads(lines[0], parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))[
-        "payload"
-    ]["value"] == 1.25
+    payload = json.loads(lines[0], parse_constant=_reject_json_constant)
+    assert payload["payload"]["value"] == 1.25
