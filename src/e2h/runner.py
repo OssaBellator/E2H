@@ -63,7 +63,7 @@ class ExecutionBackend(StrEnum):
 
 
 class CommandResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     id: str
     argv: list[str]
@@ -80,7 +80,7 @@ class CommandResult(BaseModel):
 
 
 class RunResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     capsule_id: str
     status: RunStatus

@@ -44,7 +44,7 @@ def _matrix_run_id(experiment_id: str, variant_id: str, repetition: int) -> str:
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class ExperimentError(RuntimeError):
