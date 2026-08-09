@@ -147,12 +147,16 @@ def _read_artifact_bytes(path: Path) -> bytes:
 def read_artifact(path: Path) -> tuple[bytes, dict[str, Any]]:
     raw = _read_artifact_bytes(path)
     try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ArtifactError(f"artifact is not valid UTF-8 JSON: {exc}") from exc
+    try:
         payload = json.loads(
-            raw,
+            text,
             parse_constant=_reject_json_constant,
             object_pairs_hook=_unique_json_object,
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ArtifactError(f"artifact is not valid UTF-8 JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise ArtifactError("artifact root must be a JSON object")
