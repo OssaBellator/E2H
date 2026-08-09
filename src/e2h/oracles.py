@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
 from e2h.models import CommandCheck
 
 MAX_ORACLE_DOCUMENT_BYTES = 20 * 1024 * 1024
@@ -35,6 +36,8 @@ class StrictModel(BaseModel):
 
 
 def _safe_relative_path(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("path must not contain NUL")
     path = PurePosixPath(value)
     if path.is_absolute():
         raise ValueError("path must be relative")
@@ -131,6 +134,7 @@ class JsonOracle(StrictModel):
     @model_validator(mode="after")
     def expected_must_be_json(self) -> JsonOracle:
         try:
+            _validate_json_compatible(self.expected)
             _validate_json_object_keys(self.expected)
             rendered = json.dumps(self.expected, allow_nan=False, sort_keys=True)
         except (TypeError, ValueError) as exc:
@@ -201,8 +205,11 @@ def oracle_mutation_operator(template: OracleTemplate) -> str:
 
 
 def _revalidate_oracle_template(template: OracleTemplate) -> OracleTemplate:
+    if type(template) not in {FileOracle, JsonOracle, ArtifactOracle}:
+        raise ValueError(f"invalid oracle template type: {type(template).__name__}")
     try:
         payload = template.model_dump(mode="python", warnings="none")
+        _validate_json_compatible(payload)
         _validate_json_object_keys(payload)
         return ORACLE_ADAPTER.validate_python(payload)
     except ValueError as exc:
@@ -241,10 +248,12 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
 
 
 def _resolve_oracle_root(root: Path) -> tuple[Path, os.stat_result]:
+    if "\x00" in os.fspath(root):
+        raise OracleError("oracle root must not contain NUL")
     try:
         resolved = root.resolve(strict=True)
         expected = resolved.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise OracleError(f"unable to inspect oracle root: {exc}") from exc
     if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
         raise OracleError("oracle root must resolve to a real directory")
@@ -261,7 +270,10 @@ def _oracle_root_must_be_stable(root: Path, expected: os.stat_result) -> None:
 
 
 def _resolve_from_root(root: Path, root_info: os.stat_result, relative: str) -> Path:
-    candidate = (root / relative).resolve()
+    try:
+        candidate = (root / relative).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise OracleError(f"unable to resolve oracle path {relative!r}: {exc}") from exc
     try:
         candidate.relative_to(root)
     except ValueError as exc:
@@ -562,6 +574,7 @@ def evaluate_oracle(
     expected: Any = None
     observed: Any = None
     try:
+        template = _revalidate_oracle_template(template)
         template = _mutate(template, mutation_operator)
         resolved_root, root_info = _resolve_oracle_root(root)
         path = _resolve_from_root(resolved_root, root_info, template.path)
