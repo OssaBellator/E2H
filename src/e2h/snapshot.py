@@ -800,6 +800,7 @@ def create_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Create a deterministic snapshot archive and return its manifest."""
+    from e2h.snapshot_promotion import promote_snapshot_file
     from e2h.snapshot_source import (
         _root_path_must_be_stable,
         collect_snapshot_source,
@@ -865,14 +866,28 @@ def create_snapshot(
                 noun="snapshot output",
             )
             if _WRITE_DIR_FD_SUPPORTED:
-                os.rename(
+                promote_snapshot_file(
+                    output,
+                    parent_descriptor,
+                    parent_info,
                     temporary_name,
-                    output.name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
                 )
             else:
+                temporary_info = temporary_path.stat(follow_symlinks=False)
+                temporary_identity = (temporary_info.st_dev, temporary_info.st_ino)
                 os.replace(temporary_path, output)
+                current = output.stat(follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(current.st_mode)
+                    or (current.st_dev, current.st_ino) != temporary_identity
+                ):
+                    raise SnapshotError("snapshot output changed during publication")
+                _snapshot_write_parent_must_be_stable(
+                    output,
+                    parent_descriptor,
+                    parent_info,
+                    noun="snapshot output",
+                )
             temporary_name = None
             temporary_path = None
         except (OSError, zipfile.BadZipFile) as exc:
@@ -986,6 +1001,8 @@ def restore_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Verify and atomically restore a snapshot into a new or empty directory."""
+    from e2h.snapshot_promotion import promote_restore_tree
+
     limits = revalidate_snapshot_limits(limits)
     destination, parent_descriptor, parent_info = _open_snapshot_write_parent(
         destination,
@@ -1079,20 +1096,32 @@ def restore_snapshot(
             parent_info,
             noun="restore destination",
         )
-        if destination_exists:
-            if _WRITE_DIR_FD_SUPPORTED:
-                os.rmdir(destination.name, dir_fd=parent_descriptor)
-            else:
-                destination.rmdir()
         if _WRITE_DIR_FD_SUPPORTED:
-            os.rename(
+            promote_restore_tree(
+                destination,
+                parent_descriptor,
+                parent_info,
                 staging_name,
-                destination.name,
-                src_dir_fd=parent_descriptor,
-                dst_dir_fd=parent_descriptor,
             )
         else:
+            if destination_exists:
+                destination.rmdir()
+            staging_info = staging_path.stat(follow_symlinks=False)
+            staging_identity = (staging_info.st_dev, staging_info.st_ino)
             os.replace(staging_path, destination)
+            current = destination.stat(follow_symlinks=False)
+            if (
+                stat.S_ISLNK(current.st_mode)
+                or not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino) != staging_identity
+            ):
+                raise SnapshotError("restore destination changed during publication")
+            _snapshot_write_parent_must_be_stable(
+                destination,
+                parent_descriptor,
+                parent_info,
+                noun="restore destination",
+            )
         staging_name = None
         staging_path = None
     except SnapshotError:
