@@ -9,6 +9,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from e2h.document import _validate_json_compatible
+
 _MAX_SBOM_BYTES = 8 * 1024 * 1024
 _SUPPORTED_SPEC_VERSION = "1.5"
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
@@ -34,6 +36,7 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _canonical_json(value: Any) -> str:
     try:
+        _validate_json_compatible(value)
         return (
             json.dumps(
                 value,
@@ -68,6 +71,8 @@ def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
 
 
 def _read_sbom_bytes(source: Path) -> bytes:
+    if "\x00" in os.fspath(source):
+        raise SbomCanonicalizationError("SBOM path must not contain NUL")
     requested_parent = source.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
