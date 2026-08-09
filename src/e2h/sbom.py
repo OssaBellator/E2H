@@ -43,9 +43,18 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
 
 
-def _read_sbom_bytes(source: Path) -> bytes:
+def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
     try:
-        parent = source.parent.resolve(strict=True)
+        current_parent = requested_parent.resolve(strict=True)
+        return current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SbomCanonicalizationError(f"unable to read SBOM: {exc}") from exc
+
+
+def _read_sbom_bytes(source: Path) -> bytes:
+    requested_parent = source.parent.absolute()
+    try:
+        parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise SbomCanonicalizationError(f"unable to read SBOM: {exc}") from exc
@@ -59,7 +68,11 @@ def _read_sbom_bytes(source: Path) -> bytes:
     descriptor: int | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        if _stat_identity(parent_opened) != _stat_identity(parent_expected):
+        requested_opened = _requested_parent_identity(requested_parent)
+        if (
+            _stat_identity(parent_opened) != _stat_identity(parent_expected)
+            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
+        ):
             raise SbomCanonicalizationError("SBOM parent changed while opening")
         try:
             expected = (
@@ -104,7 +117,7 @@ def _read_sbom_bytes(source: Path) -> bytes:
             else (parent / source.name).stat(follow_symlinks=False)
         )
         parent_after = os.fstat(parent_descriptor)
-        parent_current = parent.stat(follow_symlinks=False)
+        parent_current = _requested_parent_identity(requested_parent)
         if len(raw) > _MAX_SBOM_BYTES:
             raise SbomCanonicalizationError(f"SBOM exceeds {_MAX_SBOM_BYTES} bytes")
         if (
