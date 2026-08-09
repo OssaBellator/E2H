@@ -33,7 +33,9 @@ class TraceEventType(StrEnum):
 
 
 def _validate_python_json_values(value: Any, *, active: set[int] | None = None) -> None:
-    if isinstance(value, float):
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is float:
         if not math.isfinite(value):
             raise ValueError("trace event contains a non-finite number")
         return
@@ -41,7 +43,7 @@ def _validate_python_json_values(value: Any, *, active: set[int] | None = None) 
         raise ValueError("trace event contains an unordered set")
     if active is None:
         active = set()
-    if isinstance(value, dict):
+    if type(value) is dict:
         identity = id(value)
         if identity in active:
             raise ValueError("trace event contains a recursive container")
@@ -54,7 +56,7 @@ def _validate_python_json_values(value: Any, *, active: set[int] | None = None) 
         finally:
             active.remove(identity)
         return
-    if isinstance(value, (list, tuple)):
+    if type(value) is list:
         identity = id(value)
         if identity in active:
             raise ValueError("trace event contains a recursive container")
@@ -64,6 +66,10 @@ def _validate_python_json_values(value: Any, *, active: set[int] | None = None) 
                 _validate_python_json_values(item, active=active)
         finally:
             active.remove(identity)
+        return
+    if type(value) is tuple:
+        raise ValueError("trace event contains a non-JSON tuple")
+    raise ValueError(f"trace event contains unsupported value type {type(value).__name__}")
 
 
 class TraceContext(BaseModel):
@@ -77,6 +83,15 @@ class TraceContext(BaseModel):
     variant_id: str | None = None
     repetition: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_must_be_json_serializable(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            _validate_python_json_values(value)
+        except ValueError as exc:
+            raise ValueError("trace context metadata must be JSON-serializable") from exc
+        return value
 
 
 class TraceEvent(BaseModel):
@@ -103,7 +118,9 @@ class TraceEvent(BaseModel):
     @model_validator(mode="after")
     def payload_must_be_json_serializable(self) -> TraceEvent:
         try:
-            _validate_python_json_values(self.model_dump(mode="python"))
+            _validate_python_json_values(self.context.metadata)
+            _validate_python_json_values(self.attributes)
+            _validate_python_json_values(self.payload)
             json.dumps(self.model_dump(mode="json"), sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("trace event must be JSON-serializable") from exc
@@ -138,8 +155,11 @@ def _revalidate_trace_for_write(value: Trace) -> Trace:
     if type(value) is not Trace:
         raise ValueError(f"invalid trace: expected Trace, got {type(value).__name__}")
     try:
+        for event in value.events:
+            _validate_python_json_values(event.context.metadata)
+            _validate_python_json_values(event.attributes)
+            _validate_python_json_values(event.payload)
         payload = value.model_dump(mode="python", warnings="none")
-        _validate_python_json_values(payload)
         return Trace.model_validate(payload)
     except ValueError as exc:
         raise ValueError(f"invalid trace: {exc}") from exc
