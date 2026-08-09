@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -19,27 +22,138 @@ CheckRow: TypeAlias = tuple[Any, ...]
 SummaryRow: TypeAlias = tuple[Any, ...]
 FailureRow: TypeAlias = tuple[Any, ...]
 
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_ARTIFACT_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD
+
 
 class ArtifactError(ValueError):
     """Raised when a replay artifact is invalid or internally ambiguous."""
 
 
-def read_artifact(path: Path) -> tuple[bytes, dict[str, Any]]:
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _read_artifact_bytes(path: Path) -> bytes:
     try:
-        size = path.stat().st_size
+        parent = path.parent.resolve(strict=True)
+        parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
-        raise ArtifactError(f"unable to stat artifact: {exc}") from exc
-    if size > MAX_ARTIFACT_BYTES:
-        raise ArtifactError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes")
+        raise ArtifactError(f"unable to inspect artifact parent: {exc}") from exc
+    if stat.S_ISLNK(parent_expected.st_mode) or not stat.S_ISDIR(parent_expected.st_mode):
+        raise ArtifactError("artifact parent must be a real directory")
+
+    parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        raw = path.read_bytes()
+        parent_descriptor = os.open(parent, parent_flags)
+    except OSError as exc:
+        raise ArtifactError(f"unable to open artifact parent: {exc}") from exc
+
+    descriptor: int | None = None
+    try:
+        parent_opened = os.fstat(parent_descriptor)
+        if not stat.S_ISDIR(parent_opened.st_mode) or _stat_identity(
+            parent_opened
+        ) != _stat_identity(parent_expected):
+            raise ArtifactError("artifact parent changed while opening")
+
+        try:
+            expected = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _ARTIFACT_DIR_FD_SUPPORTED
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+        except OSError as exc:
+            raise ArtifactError(f"unable to stat artifact: {exc}") from exc
+        if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+            raise ArtifactError("artifact must be a regular file")
+        if expected.st_size > MAX_ARTIFACT_BYTES:
+            raise ArtifactError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes")
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = (
+                os.open(path.name, flags, dir_fd=parent_descriptor)
+                if _ARTIFACT_DIR_FD_SUPPORTED
+                else os.open(parent / path.name, flags)
+            )
+        except OSError as exc:
+            raise ArtifactError(f"unable to open artifact: {exc}") from exc
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise ArtifactError("artifact changed while opening")
+        if opened.st_size > MAX_ARTIFACT_BYTES:
+            raise ArtifactError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes")
+
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(MAX_ARTIFACT_BYTES + 1)
+        if len(raw) > MAX_ARTIFACT_BYTES:
+            raise ArtifactError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes")
+
+        after = os.fstat(descriptor)
+        try:
+            current = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _ARTIFACT_DIR_FD_SUPPORTED
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+            parent_current = parent.stat(follow_symlinks=False)
+            parent_after = os.fstat(parent_descriptor)
+        except OSError as exc:
+            raise ArtifactError(f"unable to restat artifact after reading: {exc}") from exc
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(raw) != opened.st_size
+        ):
+            raise ArtifactError("artifact changed while being read")
+        if (
+            _stat_identity(parent_after) != _stat_identity(parent_opened)
+            or _stat_identity(parent_current) != _stat_identity(parent_opened)
+        ):
+            raise ArtifactError("artifact parent changed while being read")
+        return raw
     except OSError as exc:
         raise ArtifactError(f"unable to read artifact: {exc}") from exc
-    if len(raw) != size:
-        raise ArtifactError("artifact changed while being read")
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+
+
+def read_artifact(path: Path) -> tuple[bytes, dict[str, Any]]:
+    raw = _read_artifact_bytes(path)
     try:
-        payload = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        payload = json.loads(
+            raw,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ArtifactError(f"artifact is not valid UTF-8 JSON: {exc}") from exc
     if not isinstance(payload, dict):
         raise ArtifactError("artifact root must be a JSON object")
