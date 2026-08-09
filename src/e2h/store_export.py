@@ -365,7 +365,10 @@ def _overwrite_existing(
         modified = True
         written = _copy_staged(staged, descriptor)
         current = _stat_entry(parent_descriptor, parent, output_name)
-        if _inode_identity(written) != output_identity or _inode_identity(current) != output_identity:
+        if (
+            _inode_identity(written) != output_identity
+            or _inode_identity(current) != output_identity
+        ):
             raise ParquetOutputError("Parquet output destination changed while writing")
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         success = True
@@ -383,14 +386,17 @@ def _overwrite_existing(
         if rollback_descriptor is not None:
             with suppress(OSError):
                 os.close(rollback_descriptor)
-        if rollback_name is not None and rollback_identity is not None:
-            if success or not modified or restored:
-                _unlink_regular_entry_if_identity(
-                    parent_descriptor,
-                    parent,
-                    rollback_name,
-                    rollback_identity,
-                )
+        if (
+            rollback_name is not None
+            and rollback_identity is not None
+            and (success or not modified or restored)
+        ):
+            _unlink_regular_entry_if_identity(
+                parent_descriptor,
+                parent,
+                rollback_name,
+                rollback_identity,
+            )
         with suppress(OSError):
             os.close(descriptor)
 
