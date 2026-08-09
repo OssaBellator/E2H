@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -7,7 +8,9 @@ from pydantic import ValidationError
 
 from e2h.compiler import CapsuleCompileError, CompilerSpec, GoalSelector, GoalStrategy, compile_proposal
 from e2h.ingest import EvidenceFormat, IngestionBundle, SourceProvenance
-from e2h.trace import Trace
+from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
+
+NOW = datetime(2026, 8, 9, 13, 0, tzinfo=UTC)
 
 
 def _spec(metadata: dict[str, Any] | None = None) -> CompilerSpec:
@@ -20,6 +23,7 @@ def _spec(metadata: dict[str, Any] | None = None) -> CompilerSpec:
 
 
 def _bundle() -> IngestionBundle:
+    context = TraceContext(run_id="trace", capsule_id="source")
     return IngestionBundle(
         provenance=SourceProvenance(
             format=EvidenceFormat.TRANSCRIPT_JSON,
@@ -28,7 +32,27 @@ def _bundle() -> IngestionBundle:
             size_bytes=1,
             redaction_enabled=True,
         ),
-        traces=[Trace(trace_id="trace", events=[])],
+        traces=[
+            Trace(
+                trace_id="trace",
+                events=[
+                    TraceEvent(
+                        trace_id="trace",
+                        sequence=0,
+                        event_type=TraceEventType.RUN_STARTED,
+                        timestamp=NOW,
+                        context=context,
+                    ),
+                    TraceEvent(
+                        trace_id="trace",
+                        sequence=1,
+                        event_type=TraceEventType.RUN_COMPLETED,
+                        timestamp=NOW + timedelta(seconds=1),
+                        context=context,
+                    ),
+                ],
+            )
+        ],
     )
 
 
