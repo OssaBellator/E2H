@@ -131,9 +131,7 @@ def _install_new(
             else:
                 os.link(parent / temp_name, parent / output_name, follow_symlinks=False)
         except FileExistsError as exc:
-            raise ParquetOutputError(
-                "Parquet output destination appeared while exporting"
-            ) from exc
+            raise ParquetOutputError("Parquet output destination appeared while exporting") from exc
         installed = True
         current = _stat_entry(parent_descriptor, parent, output_name)
         if _inode_identity(current) != _inode_identity(written):
@@ -176,10 +174,9 @@ def _overwrite_existing(
         _parent_must_be_stable(parent, parent_descriptor, parent_opened)
         written = _copy_staged(staged, descriptor)
         current = _stat_entry(parent_descriptor, parent, output_name)
-        if (
-            _inode_identity(written) != _inode_identity(opened)
-            or _inode_identity(current) != _inode_identity(opened)
-        ):
+        if _inode_identity(written) != _inode_identity(opened) or _inode_identity(
+            current
+        ) != _inode_identity(opened):
             raise ParquetOutputError("Parquet output destination changed while writing")
         _parent_must_be_stable(parent, parent_descriptor, parent_opened)
     finally:
@@ -205,10 +202,9 @@ def _install_staged(output: Path, staged: Path) -> None:
         raise ParquetOutputError(f"unable to open Parquet output parent: {exc}") from exc
     try:
         parent_opened = os.fstat(parent_descriptor)
-        if (
-            not stat.S_ISDIR(parent_opened.st_mode)
-            or _inode_identity(parent_opened) != _inode_identity(parent_expected)
-        ):
+        if not stat.S_ISDIR(parent_opened.st_mode) or _inode_identity(
+            parent_opened
+        ) != _inode_identity(parent_expected):
             raise ParquetOutputError("Parquet output parent changed while opening")
         try:
             expected = _stat_entry(parent_descriptor, parent, output.name)
