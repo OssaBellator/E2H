@@ -120,6 +120,8 @@ def _validate_json_compatible(
 
 
 def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> bytes:
+    if "\x00" in os.fspath(path):
+        raise ValueError(f"unable to read {noun}: path must not contain NUL")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
