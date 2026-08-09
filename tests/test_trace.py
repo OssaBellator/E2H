@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import e2h.atomic_write as atomic_write
 from e2h.runner import CheckStatus, CommandResult, RunResult, RunStatus
 from e2h.trace import (
     Trace,
@@ -133,14 +134,16 @@ def test_write_json_atomic_replaces_existing_file(tmp_path: Path) -> None:
 
 
 def test_write_json_atomic_cleans_temporary_file_on_replace_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output = tmp_path / "result.json"
+    monkeypatch.setattr(atomic_write, "_ATOMIC_DIR_FD_SUPPORTED", False)
 
     def fail_replace(source: Path, destination: Path) -> None:
         raise OSError(f"cannot replace {source} with {destination}")
 
-    monkeypatch.setattr("e2h.trace.os.replace", fail_replace)
+    monkeypatch.setattr(atomic_write.os, "replace", fail_replace)
     with pytest.raises(OSError, match="cannot replace"):
         write_json_atomic(output, "payload")
     assert not output.exists()
