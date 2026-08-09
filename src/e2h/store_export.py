@@ -102,6 +102,7 @@ def _install_new(
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor: int | None = None
     opened: os.stat_result | None = None
+    current: os.stat_result | None = None
     installed = False
     success = False
     try:
