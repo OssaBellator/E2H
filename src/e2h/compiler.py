@@ -12,6 +12,7 @@ from typing import Any, Literal, TypeVar
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
 from e2h.ingest import IngestionBundle, SourceProvenance
 from e2h.models import (
     AllowedActions,
@@ -326,12 +327,13 @@ class VerificationReport(StrictModel):
 
 def _ensure_json(value: Any, noun: str) -> None:
     try:
-        json.dumps(value, sort_keys=True, allow_nan=False)
-    except (TypeError, ValueError) as exc:
+        _validate_json_compatible(value)
+    except ValueError as exc:
         raise ValueError(f"{noun} must be JSON-serializable") from exc
 
 
 def _canonical_json(value: Any) -> bytes:
+    _validate_json_compatible(value)
     return json.dumps(
         value,
         sort_keys=True,
