@@ -23,9 +23,7 @@ from e2h.snapshot import (
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 _LISTDIR_SUPPORTS_FD = os.listdir in os.supports_fd
-_SOURCE_DIR_FD_SUPPORTED = (
-    _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD and _LISTDIR_SUPPORTS_FD
-)
+_SOURCE_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD and _LISTDIR_SUPPORTS_FD
 
 
 class ReleaseSourceError(ValueError):
@@ -450,6 +448,7 @@ def _source_tree_sha256_descriptor(
                     f"symbolic links are not supported in release source: {relative}"
                 )
             if stat.S_ISDIR(entry.st_mode):
+                entries.append(SnapshotEntry(path=relative, kind="directory"))
                 child_descriptor, child_opened = _open_bound_source_directory_at(
                     frame.descriptor,
                     name,
@@ -466,7 +465,6 @@ def _source_tree_sha256_descriptor(
                     with suppress(OSError):
                         os.close(child_descriptor)
                     raise
-                entries.append(SnapshotEntry(path=relative, kind="directory"))
                 stack.append(
                     _SourceDirectoryFrame(
                         descriptor=child_descriptor,
