@@ -13,9 +13,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import load_mapping_document
 from e2h.trace import Trace
 
 _MAX_POLICY_BYTES = 256 * 1024
@@ -217,8 +217,13 @@ def _validated_privacy_inputs(
 
 def redaction_policy_sha256(policy: RedactionPolicy) -> str:
     """Return the digest of the canonical policy document."""
+    validated = _revalidate_privacy_model(
+        policy,
+        RedactionPolicy,
+        noun="redaction policy",
+    )
     payload = json.dumps(
-        policy.model_dump(mode="json"),
+        validated.model_dump(mode="json"),
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
@@ -226,37 +231,17 @@ def redaction_policy_sha256(policy: RedactionPolicy) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
-
-
 def load_redaction_policy(path: Path) -> RedactionPolicy:
     """Load a strict JSON or YAML redaction policy."""
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise RedactionPolicyError(f"unable to read redaction policy: {exc}") from exc
-    if len(raw) > _MAX_POLICY_BYTES:
-        raise RedactionPolicyError(f"redaction policy exceeds {_MAX_POLICY_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise RedactionPolicyError("redaction policy must be UTF-8") from exc
-    suffix = path.suffix.lower()
-    try:
-        if suffix == ".json":
-            data = json.loads(text, parse_constant=_reject_json_constant)
-        elif suffix in {".yaml", ".yml"}:
-            data = yaml.safe_load(text)
-        else:
-            raise RedactionPolicyError("redaction policy must use .json, .yaml, or .yml")
-        if not isinstance(data, dict):
-            raise RedactionPolicyError("redaction policy root must be an object")
+        data = load_mapping_document(
+            path,
+            noun="redaction policy",
+            max_bytes=_MAX_POLICY_BYTES,
+        )
         return RedactionPolicy.model_validate(data)
-    except RedactionPolicyError:
-        raise
-    except (ValueError, yaml.YAMLError) as exc:
-        raise RedactionPolicyError(f"invalid redaction policy: {exc}") from exc
+    except ValueError as exc:
+        raise RedactionPolicyError(str(exc)) from exc
 
 
 def _pointer_child(location: str, key: str) -> str:
