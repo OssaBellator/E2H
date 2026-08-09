@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
+
 _MAX_DETAILS_BYTES = 4096
 _FORBIDDEN_DETAIL_KEYS = frozenset({"stdout", "stderr", "output_text", "raw_output"})
 
@@ -104,6 +106,10 @@ class FailureRecord(StrictModel):
     @field_validator("details")
     @classmethod
     def details_must_be_bounded_json(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            _validate_json_compatible(value)
+        except ValueError as exc:
+            raise ValueError("failure details must contain canonical JSON values") from exc
         _validate_detail_value(value)
         rendered = json.dumps(
             value,
