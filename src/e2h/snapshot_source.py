@@ -30,8 +30,15 @@ class _SourceDirectoryFrame:
     index: int = 0
 
 
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
 
 
 def resolve_snapshot_source_root(root: Path) -> tuple[Path, os.stat_result]:
