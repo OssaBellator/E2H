@@ -333,6 +333,18 @@ def skipped_failure(blocked_by_check_id: str) -> FailureRecord:
     )
 
 
+def _revalidate_failure_record(failure: FailureRecord) -> FailureRecord:
+    if type(failure) is not FailureRecord:
+        raise ValueError(
+            f"invalid failure record: expected FailureRecord, got {type(failure).__name__}"
+        )
+    try:
+        payload = failure.model_dump(mode="python", warnings="none")
+        return FailureRecord.model_validate(payload)
+    except ValueError as exc:
+        raise ValueError(f"invalid failure record: {exc}") from exc
+
+
 def summarize_failures(
     records: Iterable[tuple[str, FailureRecord | None]],
 ) -> FailureSummary:
@@ -340,7 +352,7 @@ def summarize_failures(
     present: list[tuple[int, str, FailureRecord]] = []
     for index, (check_id, failure) in enumerate(records):
         if failure is not None:
-            present.append((index, check_id, failure))
+            present.append((index, check_id, _revalidate_failure_record(failure)))
     if not present:
         return FailureSummary()
     category_counts: Counter[str] = Counter(failure.category.value for _, _, failure in present)
