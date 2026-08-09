@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 STORE_SCHEMA_VERSION = "2"
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
@@ -44,6 +44,24 @@ class IngestResult(StrictModel):
     checks: int = Field(ge=0)
     summaries: int = Field(ge=0)
     failures: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def row_counts_must_match_ingest_state(self) -> IngestResult:
+        counts = (self.runs, self.checks, self.summaries, self.failures)
+        if not self.inserted:
+            if any(counts):
+                raise ValueError("non-inserted ingests must report zero inserted rows")
+            return self
+        if self.runs < 1:
+            raise ValueError("inserted ingests must contain at least one run")
+        if self.kind == "run":
+            if self.runs != 1:
+                raise ValueError("standalone run ingests must contain exactly one run")
+            if self.summaries != 0:
+                raise ValueError("standalone run ingests must not contain variant summaries")
+        elif self.summaries < 1:
+            raise ValueError("experiment ingests must contain at least one variant summary")
+        return self
 
 
 class StoreInfo(StrictModel):
