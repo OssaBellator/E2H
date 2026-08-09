@@ -9,10 +9,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.document import _validate_json_compatible
+from e2h.document import _validate_json_compatible, load_mapping_document
 from e2h.ingest import IngestionBundle, SourceProvenance
 from e2h.models import (
     AllowedActions,
@@ -637,29 +636,11 @@ def materialize_capsule(
     return proposal.core.capsule.model_copy(deep=True)
 
 
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
-
-
 def _read_document(path: Path) -> Any:
     try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise CapsuleCompileError(f"unable to read document: {exc}") from exc
-    if len(raw) > _MAX_DOCUMENT_BYTES:
-        raise CapsuleCompileError(f"document exceeds {_MAX_DOCUMENT_BYTES} bytes")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CapsuleCompileError("document must be UTF-8") from exc
-    try:
-        if path.suffix.lower() == ".json":
-            return json.loads(text, parse_constant=_reject_json_constant)
-        if path.suffix.lower() in {".yaml", ".yml"}:
-            return yaml.safe_load(text)
-    except (json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
-        raise CapsuleCompileError(f"invalid document syntax: {exc}") from exc
-    raise CapsuleCompileError("document must use .json, .yaml, or .yml")
+        return load_mapping_document(path, noun="document", max_bytes=_MAX_DOCUMENT_BYTES)
+    except ValueError as exc:
+        raise CapsuleCompileError(str(exc)) from exc
 
 
 def _load_model(path: Path, model: type[BaseModel], noun: str) -> BaseModel:
