@@ -84,10 +84,14 @@ def test_scan_materialized_environment_rejects_list_failure(
     root = tmp_path / "materialized"
     root.mkdir()
     descriptor = _directory_descriptor(root)
+    expected_identity = benchmark_env._directory_identity(os.fstat(descriptor))
     original_listdir = os.listdir
 
     def failing_listdir(path: Any) -> list[str]:
-        if path == descriptor:
+        if (
+            isinstance(path, int)
+            and benchmark_env._directory_identity(os.fstat(path)) == expected_identity
+        ):
             raise PermissionError("blocked list")
         return original_listdir(path)
 
@@ -170,7 +174,7 @@ def test_descriptor_copy_cleans_source_file_open_failure(
 
     with pytest.raises(
         BenchmarkEnvironmentError,
-        match="unable to open environment file .* for materialization",
+        match=r"unable to open environment file .* for materialization",
     ):
         benchmark_env._copy_environment_tree(source, destination)
 
