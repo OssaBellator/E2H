@@ -43,6 +43,34 @@ def _safe_relative_path(value: str) -> str:
     return value
 
 
+def _validate_json_object_keys(value: Any, *, active: set[int] | None = None) -> None:
+    if active is None:
+        active = set()
+    if isinstance(value, dict):
+        identity = id(value)
+        if identity in active:
+            raise ValueError("JSON value contains a recursive container")
+        active.add(identity)
+        try:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError("JSON objects must use string keys")
+                _validate_json_object_keys(item, active=active)
+        finally:
+            active.remove(identity)
+        return
+    if isinstance(value, (list, tuple)):
+        identity = id(value)
+        if identity in active:
+            raise ValueError("JSON value contains a recursive container")
+        active.add(identity)
+        try:
+            for item in value:
+                _validate_json_object_keys(item, active=active)
+        finally:
+            active.remove(identity)
+
+
 class FileOracle(StrictModel):
     """Check file presence, text content, or a content digest."""
 
@@ -103,6 +131,7 @@ class JsonOracle(StrictModel):
     @model_validator(mode="after")
     def expected_must_be_json(self) -> JsonOracle:
         try:
+            _validate_json_object_keys(self.expected)
             rendered = json.dumps(self.expected, allow_nan=False, sort_keys=True)
         except (TypeError, ValueError) as exc:
             raise ValueError("expected must be JSON-serializable") from exc
@@ -171,7 +200,17 @@ def oracle_mutation_operator(template: OracleTemplate) -> str:
     return "digest_mismatch"
 
 
+def _revalidate_oracle_template(template: OracleTemplate) -> OracleTemplate:
+    try:
+        payload = template.model_dump(mode="python", warnings="none")
+        _validate_json_object_keys(payload)
+        return ORACLE_ADAPTER.validate_python(payload)
+    except ValueError as exc:
+        raise ValueError(f"invalid oracle template: {exc}") from exc
+
+
 def compile_oracle(template: OracleTemplate) -> CommandCheck:
+    template = _revalidate_oracle_template(template)
     payload = json.dumps(
         template.model_dump(mode="json"),
         sort_keys=True,
@@ -190,8 +229,15 @@ def compile_oracle(template: OracleTemplate) -> CommandCheck:
     )
 
 
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
 
 
 def _resolve_oracle_root(root: Path) -> tuple[Path, os.stat_result]:
