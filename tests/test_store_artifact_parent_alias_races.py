@@ -42,6 +42,30 @@ def _retarget_on_read(
     return state
 
 
+def _rewrite_on_read(
+    source: Path,
+    replacement_text: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[os.stat_result, dict[str, bool]]:
+    before = source.stat(follow_symlinks=False)
+    original_fdopen = os.fdopen
+    state = {"rewritten": False}
+
+    def rewriting_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        if not state["rewritten"]:
+            state["rewritten"] = True
+            source.write_text(replacement_text, encoding="utf-8")
+            os.utime(
+                source,
+                ns=(before.st_atime_ns, before.st_mtime_ns),
+                follow_symlinks=False,
+            )
+        return original_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(store_rows.os, "fdopen", rewriting_fdopen)
+    return before, state
+
+
 @pytest.mark.skipif(
     not store_rows._ARTIFACT_DIR_FD_SUPPORTED,
     reason="descriptor-relative artifact reads are unavailable",
@@ -77,3 +101,50 @@ def test_fallback_artifact_read_rejects_parent_alias_retarget(
     assert alias.resolve() == replacement
     assert (replacement / "marker.txt").read_text(encoding="utf-8") == "replacement\n"
     assert (original / artifact.name).read_text(encoding="utf-8") == '{"value":1}\n'
+
+
+@pytest.mark.skipif(
+    not store_rows._ARTIFACT_DIR_FD_SUPPORTED,
+    reason="descriptor-relative artifact reads are unavailable",
+)
+def test_descriptor_artifact_read_rejects_same_inode_rewrite_with_restored_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "artifact.json"
+    original_text = '{"value":1}\n'
+    replacement_text = '{"value":2}\n'
+    artifact.write_text(original_text, encoding="utf-8")
+    before, state = _rewrite_on_read(artifact, replacement_text, monkeypatch)
+
+    with pytest.raises(ArtifactError, match="artifact changed while being read"):
+        read_artifact(artifact)
+
+    assert state["rewritten"] is True
+    after = artifact.stat(follow_symlinks=False)
+    assert after.st_ino == before.st_ino
+    assert after.st_size == before.st_size
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert after.st_ctime_ns != before.st_ctime_ns
+
+
+def test_fallback_artifact_read_rejects_same_inode_rewrite_with_restored_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "artifact.json"
+    original_text = '{"value":1}\n'
+    replacement_text = '{"value":2}\n'
+    artifact.write_text(original_text, encoding="utf-8")
+    monkeypatch.setattr(store_rows, "_ARTIFACT_DIR_FD_SUPPORTED", False)
+    before, state = _rewrite_on_read(artifact, replacement_text, monkeypatch)
+
+    with pytest.raises(ArtifactError, match="artifact changed while being read"):
+        read_artifact(artifact)
+
+    assert state["rewritten"] is True
+    after = artifact.stat(follow_symlinks=False)
+    assert after.st_ino == before.st_ino
+    assert after.st_size == before.st_size
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert after.st_ctime_ns != before.st_ctime_ns
