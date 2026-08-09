@@ -6,7 +6,7 @@ import math
 from datetime import datetime
 from enum import StrEnum
 from fractions import Fraction
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import Field, field_validator, model_validator
 
@@ -15,6 +15,7 @@ from e2h.promotion_evidence import (
     _SHA256_PATTERN,
     PairedEvaluationReport,
     PromotionCheck,
+    PromotionError,
     PromotionGatePolicy,
     PromotionProposal,
     StrictModel,
@@ -23,6 +24,25 @@ from e2h.promotion_evidence import (
     _validate_locator,
     _validate_metadata,
 )
+
+_PromotionDigestT = TypeVar("_PromotionDigestT", bound=StrictModel)
+
+
+def _validated_promotion_digest_model(
+    value: StrictModel,
+    model_type: type[_PromotionDigestT],
+    *,
+    noun: str,
+) -> _PromotionDigestT:
+    if type(value) is not model_type:
+        raise PromotionError(
+            f"invalid {noun}: expected {model_type.__name__}, got {type(value).__name__}"
+        )
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValueError as exc:
+        raise PromotionError(f"invalid {noun}: {exc}") from exc
 
 
 class PromotionDecisionKind(StrEnum):
@@ -243,36 +263,71 @@ class RollbackEvent(StrictModel):
 
 def variant_prediction_sha256(document: VariantPredictionDocument) -> str:
     """Return the canonical identity of one variant prediction document."""
+    document = _validated_promotion_digest_model(
+        document,
+        VariantPredictionDocument,
+        noun="variant prediction document",
+    )
     return _model_sha256(document)
 
 
 def paired_evaluation_sha256(report: PairedEvaluationReport) -> str:
     """Return the canonical identity of aggregate paired evidence."""
+    report = _validated_promotion_digest_model(
+        report,
+        PairedEvaluationReport,
+        noun="paired evaluation report",
+    )
     return _model_sha256(report)
 
 
 def promotion_policy_sha256(policy: PromotionGatePolicy) -> str:
     """Return the canonical identity of one promotion policy."""
+    policy = _validated_promotion_digest_model(
+        policy,
+        PromotionGatePolicy,
+        noun="promotion policy",
+    )
     return _model_sha256(policy)
 
 
 def promotion_proposal_sha256(proposal: PromotionProposal) -> str:
     """Return the canonical identity of one promotion proposal."""
+    proposal = _validated_promotion_digest_model(
+        proposal,
+        PromotionProposal,
+        noun="promotion proposal",
+    )
     return _model_sha256(proposal)
 
 
 def promotion_decision_sha256(decision: PromotionDecision) -> str:
     """Return the canonical identity of one promotion decision."""
+    decision = _validated_promotion_digest_model(
+        decision,
+        PromotionDecision,
+        noun="promotion decision",
+    )
     return _model_sha256(decision)
 
 
 def rollback_plan_sha256(plan: RollbackPlan) -> str:
     """Return the canonical identity of one rollback plan."""
+    plan = _validated_promotion_digest_model(
+        plan,
+        RollbackPlan,
+        noun="rollback plan",
+    )
     return _model_sha256(plan)
 
 
 def promotion_receipt_sha256(receipt: PromotionReceipt) -> str:
     """Return the canonical identity of one materialized promotion."""
+    receipt = _validated_promotion_digest_model(
+        receipt,
+        PromotionReceipt,
+        noun="promotion receipt",
+    )
     return _model_sha256(receipt)
 
 
