@@ -127,10 +127,28 @@ class ExperimentResult(StrictModel):
 
     @model_validator(mode="after")
     def summaries_must_match_runs(self) -> ExperimentResult:
+        if self.started_at.tzinfo is None or self.started_at.utcoffset() is None:
+            raise ValueError("experiment started_at must be timezone-aware")
+        if self.finished_at.tzinfo is None or self.finished_at.utcoffset() is None:
+            raise ValueError("experiment finished_at must be timezone-aware")
         if self.finished_at < self.started_at:
             raise ValueError("experiment finished_at must not precede started_at")
+        run_ids = [run.run_id for run in self.runs]
+        if len(run_ids) != len(set(run_ids)):
+            raise ValueError("experiment run ids must be unique")
+        trace_ids = [run.trace_id for run in self.runs]
+        if len(trace_ids) != len(set(trace_ids)):
+            raise ValueError("experiment trace ids must be unique")
+        matrix_cells = [(run.variant_id, run.repetition) for run in self.runs]
+        if len(matrix_cells) != len(set(matrix_cells)):
+            raise ValueError("experiment variant/repetition cells must be unique")
         if any(run.result.capsule_id != self.capsule_id for run in self.runs):
             raise ValueError("experiment runs must use the declared capsule_id")
+        if any(
+            run.result.started_at < self.started_at or run.result.finished_at > self.finished_at
+            for run in self.runs
+        ):
+            raise ValueError("experiment run intervals must fall within the experiment interval")
         summary_ids = [summary.variant_id for summary in self.summaries]
         if len(summary_ids) != len(set(summary_ids)):
             raise ValueError("experiment summary variant ids must be unique")
