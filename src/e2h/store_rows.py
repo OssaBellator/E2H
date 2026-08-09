@@ -64,6 +64,8 @@ def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
 
 
 def _read_artifact_bytes(path: Path) -> bytes:
+    if "\x00" in os.fspath(path):
+        raise ArtifactError("artifact path must not contain NUL")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
