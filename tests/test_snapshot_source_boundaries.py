@@ -9,6 +9,11 @@ import pytest
 import e2h.snapshot_source as source
 from e2h.snapshot import SnapshotError, SnapshotLimits
 
+pytestmark = pytest.mark.skipif(
+    not source._SOURCE_DIR_FD_SUPPORTED,
+    reason="requires descriptor-relative snapshot source traversal",
+)
+
 _LIMITS = SnapshotLimits(
     max_entries=100,
     max_file_bytes=10_000,
