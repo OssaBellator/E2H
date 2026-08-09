@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -17,6 +21,9 @@ ORACLE_MUTATION_ENV = "E2H_ORACLE_MUTATION"
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _MUTATION_DIGEST = "0" * 64
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_ORACLE_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD
 
 
 class OracleError(ValueError):
@@ -183,35 +190,211 @@ def compile_oracle(template: OracleTemplate) -> CommandCheck:
     )
 
 
-def _resolve(root: Path, relative: str) -> Path:
-    root = root.resolve()
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _resolve_oracle_root(root: Path) -> tuple[Path, os.stat_result]:
+    try:
+        resolved = root.resolve(strict=True)
+        expected = resolved.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise OracleError(f"unable to inspect oracle root: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        raise OracleError("oracle root must resolve to a real directory")
+    return resolved, expected
+
+
+def _oracle_root_must_be_stable(root: Path, expected: os.stat_result) -> None:
+    try:
+        current = root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise OracleError(f"unable to restat oracle root: {exc}") from exc
+    if not stat.S_ISDIR(current.st_mode) or _stat_identity(current) != _stat_identity(expected):
+        raise OracleError("oracle root changed while evaluating")
+
+
+def _resolve_from_root(root: Path, root_info: os.stat_result, relative: str) -> Path:
     candidate = (root / relative).resolve()
     try:
         candidate.relative_to(root)
     except ValueError as exc:
         raise OracleError(f"path escapes oracle root: {relative}") from exc
+    _oracle_root_must_be_stable(root, root_info)
     return candidate
 
 
-def _read_bytes(path: Path) -> bytes:
+def _resolve(root: Path, relative: str) -> Path:
+    resolved_root, root_info = _resolve_oracle_root(root)
+    return _resolve_from_root(resolved_root, root_info, relative)
+
+
+@contextmanager
+def _open_regular_file(
+    root: Path,
+    root_info: os.stat_result,
+    path: Path,
+) -> Iterator[tuple[int, os.stat_result] | None]:
+    parent_descriptor: int | None = None
+    descriptor: int | None = None
+    parent = path.parent
     try:
-        data = path.read_bytes()
+        try:
+            parent.relative_to(root)
+        except ValueError as exc:
+            raise OracleError(f"path escapes oracle root: {path}") from exc
+        try:
+            parent_expected = parent.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            yield None
+            return
+        except OSError as exc:
+            raise OracleError(f"unable to inspect oracle file parent {parent}: {exc}") from exc
+        if stat.S_ISLNK(parent_expected.st_mode) or not stat.S_ISDIR(parent_expected.st_mode):
+            yield None
+            return
+        _oracle_root_must_be_stable(root, root_info)
+        if _ORACLE_DIR_FD_SUPPORTED:
+            parent_flags = (
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            )
+            parent_descriptor = os.open(parent, parent_flags)
+            parent_opened = os.fstat(parent_descriptor)
+            if _stat_identity(parent_opened) != _stat_identity(parent_expected):
+                raise OracleError(f"oracle file parent changed while opening: {parent}")
+            try:
+                expected = os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                yield None
+                return
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+                yield None
+                return
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
+        else:
+            try:
+                expected = path.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                yield None
+                return
+            if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+                yield None
+                return
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            parent_opened = parent_expected
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise OracleError(f"oracle file changed while opening: {path}")
+        _oracle_root_must_be_stable(root, root_info)
+        yield descriptor, opened
+        after = os.fstat(descriptor)
+        current = (
+            os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if parent_descriptor is not None
+            else path.stat(follow_symlinks=False)
+        )
+        parent_after = (
+            os.fstat(parent_descriptor)
+            if parent_descriptor is not None
+            else parent.stat(follow_symlinks=False)
+        )
+        parent_current = parent.stat(follow_symlinks=False)
+        if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
+            current
+        ) != _stat_identity(opened):
+            raise OracleError(f"oracle file changed while reading: {path}")
+        if _stat_identity(parent_after) != _stat_identity(parent_opened) or _stat_identity(
+            parent_current
+        ) != _stat_identity(parent_opened):
+            raise OracleError(f"oracle file parent changed while reading: {parent}")
+        _oracle_root_must_be_stable(root, root_info)
     except OSError as exc:
-        raise OracleError(f"unable to read {path}: {exc}") from exc
-    if len(data) > MAX_ORACLE_DOCUMENT_BYTES:
-        raise OracleError(f"document exceeds {MAX_ORACLE_DOCUMENT_BYTES} bytes")
+        raise OracleError(f"unable to access oracle file {path}: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        if parent_descriptor is not None:
+            with suppress(OSError):
+                os.close(parent_descriptor)
+
+
+def _regular_file_info(
+    root: Path,
+    root_info: os.stat_result,
+    path: Path,
+) -> os.stat_result | None:
+    with _open_regular_file(root, root_info, path) as opened:
+        if opened is None:
+            return None
+        _, info = opened
+        return info
+
+
+def _read_bound_bytes(
+    root: Path,
+    root_info: os.stat_result,
+    path: Path,
+) -> bytes | None:
+    with _open_regular_file(root, root_info, path) as opened:
+        if opened is None:
+            return None
+        descriptor, info = opened
+        if info.st_size > MAX_ORACLE_DOCUMENT_BYTES:
+            raise OracleError(f"document exceeds {MAX_ORACLE_DOCUMENT_BYTES} bytes")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            data = handle.read(MAX_ORACLE_DOCUMENT_BYTES + 1)
+        if len(data) > MAX_ORACLE_DOCUMENT_BYTES:
+            raise OracleError(f"document exceeds {MAX_ORACLE_DOCUMENT_BYTES} bytes")
+        return data
+
+
+def _hash_bound_file(
+    root: Path,
+    root_info: os.stat_result,
+    path: Path,
+) -> tuple[str, int] | None:
+    with _open_regular_file(root, root_info, path) as opened:
+        if opened is None:
+            return None
+        descriptor, info = opened
+        digest = hashlib.sha256()
+        observed = 0
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            while chunk := handle.read(1024 * 1024):
+                observed += len(chunk)
+                digest.update(chunk)
+        if observed != info.st_size:
+            raise OracleError(f"oracle file changed while hashing: {path}")
+        return digest.hexdigest(), observed
+
+
+def _read_bytes(path: Path) -> bytes:
+    root, root_info = _resolve_oracle_root(path.parent)
+    resolved = _resolve_from_root(root, root_info, path.name)
+    data = _read_bound_bytes(root, root_info, resolved)
+    if data is None:
+        raise OracleError(f"unable to read {path}: file does not exist")
     return data
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as handle:
-            while chunk := handle.read(1024 * 1024):
-                digest.update(chunk)
-    except OSError as exc:
-        raise OracleError(f"unable to hash {path}: {exc}") from exc
-    return digest.hexdigest()
+    root, root_info = _resolve_oracle_root(path.parent)
+    resolved = _resolve_from_root(root, root_info, path.name)
+    hashed = _hash_bound_file(root, root_info, resolved)
+    if hashed is None:
+        raise OracleError(f"unable to hash {path}: file does not exist")
+    return hashed[0]
 
 
 def _decode_pointer(pointer: str) -> list[str]:
@@ -255,20 +438,48 @@ def _lookup_pointer(document: Any, pointer: str) -> tuple[bool, Any]:
     return True, value
 
 
-def _load_json(path: Path) -> Any:
-    data = _read_bytes(path)
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _load_bound_json(
+    root: Path,
+    root_info: os.stat_result,
+    path: Path,
+) -> Any | None:
+    data = _read_bound_bytes(root, root_info, path)
+    if data is None:
+        return None
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise OracleError("JSON document must be UTF-8") from exc
-
-    def reject_constant(value: str) -> None:
-        raise ValueError(f"non-standard JSON constant: {value}")
-
     try:
-        return json.loads(text, parse_constant=reject_constant)
+        return json.loads(
+            text,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
     except (json.JSONDecodeError, ValueError) as exc:
         raise OracleError(f"invalid JSON document: {exc}") from exc
+
+
+def _load_json(path: Path) -> Any:
+    root, root_info = _resolve_oracle_root(path.parent)
+    resolved = _resolve_from_root(root, root_info, path.name)
+    document = _load_bound_json(root, root_info, resolved)
+    if document is None:
+        raise OracleError(f"unable to read {path}: file does not exist")
+    return document
 
 
 def _mutate(template: OracleTemplate, operator: str | None) -> OracleTemplate:
@@ -306,28 +517,28 @@ def evaluate_oracle(
     observed: Any = None
     try:
         template = _mutate(template, mutation_operator)
-        path = _resolve(root, template.path)
+        resolved_root, root_info = _resolve_oracle_root(root)
+        path = _resolve_from_root(resolved_root, root_info, template.path)
         if isinstance(template, FileOracle):
             expected = template.expected if template.expected is not None else template.mode
-            if template.mode == "exists":
-                observed = path.is_file()
-                passed = observed is True
-            elif template.mode == "absent":
-                observed = path.exists()
-                passed = observed is False
-            elif not path.is_file():
-                return OracleEvaluation(
-                    id=template.id,
-                    kind=template.kind,
-                    path=template.path,
-                    passed=False,
-                    expected=expected,
-                    observed=None,
-                    error="file does not exist",
-                )
+            if template.mode in {"exists", "absent"}:
+                info = _regular_file_info(resolved_root, root_info, path)
+                observed = info is not None
+                passed = observed if template.mode == "exists" else not observed
             elif template.mode in {"text_equals", "text_contains"}:
+                raw = _read_bound_bytes(resolved_root, root_info, path)
+                if raw is None:
+                    return OracleEvaluation(
+                        id=template.id,
+                        kind=template.kind,
+                        path=template.path,
+                        passed=False,
+                        expected=expected,
+                        observed=None,
+                        error="file does not exist",
+                    )
                 try:
-                    observed = _read_bytes(path).decode("utf-8")
+                    observed = raw.decode("utf-8")
                 except UnicodeDecodeError as exc:
                     raise OracleError("text oracle requires UTF-8 content") from exc
                 assert template.expected is not None
@@ -337,10 +548,22 @@ def evaluate_oracle(
                     else template.expected in observed
                 )
             else:
-                observed = _sha256(path)
+                hashed = _hash_bound_file(resolved_root, root_info, path)
+                if hashed is None:
+                    return OracleEvaluation(
+                        id=template.id,
+                        kind=template.kind,
+                        path=template.path,
+                        passed=False,
+                        expected=expected,
+                        observed=None,
+                        error="file does not exist",
+                    )
+                observed, _ = hashed
                 passed = observed == template.expected
         elif isinstance(template, JsonOracle):
-            if not path.is_file():
+            document = _load_bound_json(resolved_root, root_info, path)
+            if document is None:
                 return OracleEvaluation(
                     id=template.id,
                     kind=template.kind,
@@ -350,7 +573,7 @@ def evaluate_oracle(
                     observed=None,
                     error="JSON file does not exist",
                 )
-            found, value = _lookup_pointer(_load_json(path), template.pointer)
+            found, value = _lookup_pointer(document, template.pointer)
             observed = {"found": found, "value": value if found else None}
             expected = template.expected if template.mode == "equals" else template.mode
             if template.mode == "exists":
@@ -365,18 +588,35 @@ def evaluate_oracle(
                 "min_bytes": template.min_bytes,
                 "max_bytes": template.max_bytes,
             }
-            if not path.is_file():
-                return OracleEvaluation(
-                    id=template.id,
-                    kind=template.kind,
-                    path=template.path,
-                    passed=False,
-                    expected=expected,
-                    observed=None,
-                    error="artifact does not exist",
-                )
-            size = path.stat().st_size
-            digest = _sha256(path) if template.sha256 is not None else None
+            digest: str | None
+            size: int
+            if template.sha256 is not None:
+                hashed = _hash_bound_file(resolved_root, root_info, path)
+                if hashed is None:
+                    return OracleEvaluation(
+                        id=template.id,
+                        kind=template.kind,
+                        path=template.path,
+                        passed=False,
+                        expected=expected,
+                        observed=None,
+                        error="artifact does not exist",
+                    )
+                digest, size = hashed
+            else:
+                info = _regular_file_info(resolved_root, root_info, path)
+                if info is None:
+                    return OracleEvaluation(
+                        id=template.id,
+                        kind=template.kind,
+                        path=template.path,
+                        passed=False,
+                        expected=expected,
+                        observed=None,
+                        error="artifact does not exist",
+                    )
+                digest = None
+                size = info.st_size
             observed = {"sha256": digest, "bytes": size}
             passed = True
             if template.sha256 is not None:
