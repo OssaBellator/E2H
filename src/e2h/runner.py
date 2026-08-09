@@ -135,6 +135,15 @@ class RunnerError(RuntimeError):
     """Raised when a replay cannot be safely started."""
 
 
+def _resolve_workspace(workspace: Path) -> Path:
+    if "\x00" in os.fspath(workspace):
+        raise RunnerError("workspace path must not contain NUL")
+    try:
+        return workspace.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RunnerError(f"unable to resolve workspace: {exc}") from exc
+
+
 class _BoundedCapture:
     """Drain a byte stream while retaining only enough data for a bounded text report."""
 
@@ -187,7 +196,10 @@ class _ProcessOutcome:
 
 
 def _safe_child(root: Path, relative: str) -> Path:
-    candidate = (root / relative).resolve()
+    try:
+        candidate = (root / relative).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RunnerError(f"unable to resolve workspace path {relative!r}: {exc}") from exc
     try:
         candidate.relative_to(root)
     except ValueError as exc:
@@ -404,7 +416,7 @@ def run_capsule(
     capsule = _validated_capsule(capsule)
     started_at = datetime.now(UTC)
     started_clock = monotonic()
-    workspace_root = workspace.resolve()
+    workspace_root = _resolve_workspace(workspace)
     if not workspace_root.is_dir():
         raise RunnerError(f"workspace is not a directory: {workspace}")
 
