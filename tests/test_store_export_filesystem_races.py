@@ -193,10 +193,12 @@ def test_staged_parquet_output_path_fallback_installs_new_file(
 def test_staged_parquet_output_does_not_install_when_body_fails(tmp_path: Path) -> None:
     output = tmp_path / "result.parquet"
 
-    with pytest.raises(RuntimeError, match="injected"):
-        with staged_parquet_output(output) as staged:
-            staged.write_bytes(b"partial")
-            raise RuntimeError("injected")
+    with (
+        pytest.raises(RuntimeError, match="injected"),
+        staged_parquet_output(output) as staged,
+    ):
+        staged.write_bytes(b"partial")
+        raise RuntimeError("injected")
 
     assert not output.exists()
 
@@ -204,8 +206,10 @@ def test_staged_parquet_output_does_not_install_when_body_fails(tmp_path: Path) 
 def test_staged_parquet_output_requires_staging_file(tmp_path: Path) -> None:
     output = tmp_path / "result.parquet"
 
-    with pytest.raises(ParquetOutputError, match="did not produce a regular staging file"):
-        with staged_parquet_output(output):
-            pass
+    with (
+        pytest.raises(ParquetOutputError, match="did not produce a regular staging file"),
+        staged_parquet_output(output),
+    ):
+        pass
 
     assert not output.exists()
