@@ -478,40 +478,15 @@ def _remove_restore_tree_at(parent_descriptor: int, name: str, path: Path) -> No
     if not _WRITE_DIR_FD_SUPPORTED:
         shutil.rmtree(path, ignore_errors=True)
         return
+    from e2h.snapshot_promotion import _remove_tree_by_identity_at
+
     try:
         expected = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
     except OSError:
         return
     if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
-        with suppress(OSError):
-            os.unlink(name, dir_fd=parent_descriptor)
         return
-    descriptor: int | None = None
-    try:
-        descriptor = _open_bound_child_directory(
-            parent_descriptor,
-            name,
-            expected,
-            noun="restore staging directory",
-        )
-        for child_name in os.listdir(descriptor):
-            try:
-                child = os.stat(child_name, dir_fd=descriptor, follow_symlinks=False)
-            except OSError:
-                continue
-            if stat.S_ISDIR(child.st_mode) and not stat.S_ISLNK(child.st_mode):
-                _remove_restore_tree_at(descriptor, child_name, path / child_name)
-            else:
-                with suppress(OSError):
-                    os.unlink(child_name, dir_fd=descriptor)
-    except SnapshotError:
-        return
-    finally:
-        if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
-    with suppress(OSError):
-        os.rmdir(name, dir_fd=parent_descriptor)
+    _remove_tree_by_identity_at(parent_descriptor, (expected.st_dev, expected.st_ino))
 
 
 @contextmanager
