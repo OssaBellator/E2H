@@ -188,6 +188,24 @@ class ExperimentExecution(StrictModel):
     result: ExperimentResult
     traces: list[Trace]
 
+    @model_validator(mode="after")
+    def traces_must_match_result_runs(self) -> ExperimentExecution:
+        if len(self.traces) != len(self.result.runs):
+            raise ValueError("experiment traces must align one-to-one with result runs")
+        for run, trace in zip(self.result.runs, self.traces, strict=True):
+            if trace.trace_id != run.trace_id:
+                raise ValueError("experiment trace ids must match result run trace ids")
+            context = trace.events[0].context
+            if context.experiment_id != self.result.experiment_id:
+                raise ValueError("experiment trace context must match experiment_id")
+            if context.capsule_id != self.result.capsule_id:
+                raise ValueError("experiment trace context must match capsule_id")
+            if context.variant_id != run.variant_id:
+                raise ValueError("experiment trace context must match run variant_id")
+            if context.repetition != run.repetition:
+                raise ValueError("experiment trace context must match run repetition")
+        return self
+
 
 def _revalidate_experiment_input(
     value: BaseModel,
