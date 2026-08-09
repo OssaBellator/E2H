@@ -193,6 +193,14 @@ def test_read_artifact_rejects_non_standard_json_constants(
         read_artifact(path)
 
 
+def test_read_artifact_rejects_non_utf8_json(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.json"
+    path.write_bytes('{"value":1}'.encode("utf-16"))
+
+    with pytest.raises(ArtifactError, match="artifact is not valid UTF-8 JSON"):
+        read_artifact(path)
+
+
 def test_read_artifact_enforces_size_limit_before_reading(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
