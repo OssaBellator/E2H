@@ -304,7 +304,9 @@ def _open_regular_file(
             else path.stat(follow_symlinks=False)
         )
         parent_after = (
-            os.fstat(parent_descriptor) if parent_descriptor is not None else parent.stat(follow_symlinks=False)
+            os.fstat(parent_descriptor)
+            if parent_descriptor is not None
+            else parent.stat(follow_symlinks=False)
         )
         parent_current = parent.stat(follow_symlinks=False)
         if _stat_identity(after) != _stat_identity(opened) or _stat_identity(
