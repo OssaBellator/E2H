@@ -46,7 +46,23 @@ def resolve_snapshot_source_root(root: Path) -> tuple[Path, os.stat_result]:
     return resolved, expected
 
 
+def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
+    return (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode))
+
+
 def _root_path_must_be_stable(root: Path, expected: os.stat_result) -> None:
+    try:
+        current = root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise SnapshotError(f"unable to restat snapshot root: {exc}") from exc
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or _directory_identity(current) != _directory_identity(expected)
+    ):
+        raise SnapshotError("snapshot root changed during traversal")
+
+
+def _root_path_contents_must_be_stable(root: Path, expected: os.stat_result) -> None:
     try:
         current = root.stat(follow_symlinks=False)
     except OSError as exc:
@@ -531,7 +547,7 @@ def _collect_path(
     blobs: dict[str, bytes] = {}
     total_bytes = 0
     for relative, path in snapshot._iter_selected(root, includes, patterns, ignored_paths):
-        _root_path_must_be_stable(root, root_info)
+        _root_path_contents_must_be_stable(root, root_info)
         if len(entries) >= limits.max_entries:
             raise SnapshotError("snapshot exceeds max_entries")
         snapshot._resolve_under_root(root, path, relative)
@@ -543,12 +559,12 @@ def _collect_path(
             raise SnapshotError(f"symbolic links are not supported: {relative}")
         if stat.S_ISDIR(entry.st_mode):
             entries.append(SnapshotEntry(path=relative, kind="directory"))
-            _root_path_must_be_stable(root, root_info)
+            _root_path_contents_must_be_stable(root, root_info)
             continue
         if not stat.S_ISREG(entry.st_mode):
             raise SnapshotError(f"unsupported filesystem entry: {relative}")
         data = snapshot._read_file(root, path, relative, limits, entry)
-        _root_path_must_be_stable(root, root_info)
+        _root_path_contents_must_be_stable(root, root_info)
         total_bytes += len(data)
         if total_bytes > limits.max_total_bytes:
             raise SnapshotError("snapshot exceeds max_total_bytes")
@@ -563,7 +579,7 @@ def _collect_path(
             )
         )
         blobs.setdefault(digest, data)
-    _root_path_must_be_stable(root, root_info)
+    _root_path_contents_must_be_stable(root, root_info)
     return entries, blobs, total_bytes
 
 
