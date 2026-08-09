@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
+import stat
 from collections import defaultdict
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -40,6 +43,9 @@ _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$"
 _HEX_TRACE_ID = re.compile(r"^[0-9a-fA-F]{32}$")
 _HEX_SPAN_ID = re.compile(r"^[0-9a-fA-F]{16}$")
 _INTEGER_TEXT = re.compile(r"^-?\d+$")
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_SOURCE_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD
 
 
 class EvidenceIngestError(ValueError):
@@ -193,24 +199,142 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-standard JSON constant: {value}")
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
+
+
+def _read_source_bytes(path: Path) -> bytes:
+    try:
+        parent = path.parent.resolve(strict=True)
+        parent_expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+    if not stat.S_ISDIR(parent_expected.st_mode):
+        raise EvidenceIngestError("evidence parent must be a directory")
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        parent_descriptor = os.open(parent, directory_flags)
+    except OSError as exc:
+        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+
+    descriptor: int | None = None
+    try:
+        parent_opened = os.fstat(parent_descriptor)
+        if not stat.S_ISDIR(parent_opened.st_mode) or _stat_identity(
+            parent_opened
+        ) != _stat_identity(parent_expected):
+            raise EvidenceIngestError("evidence parent changed while opening")
+
+        try:
+            expected = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _SOURCE_DIR_FD_SUPPORTED
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+        except OSError as exc:
+            raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+        if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+            raise EvidenceIngestError("evidence must be a regular file")
+        if expected.st_size > _MAX_SOURCE_BYTES:
+            raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = (
+                os.open(path.name, flags, dir_fd=parent_descriptor)
+                if _SOURCE_DIR_FD_SUPPORTED
+                else os.open(parent / path.name, flags)
+            )
+        except OSError as exc:
+            raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise EvidenceIngestError("evidence must be a regular file")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise EvidenceIngestError("evidence changed while opening")
+        if opened.st_size > _MAX_SOURCE_BYTES:
+            raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(_MAX_SOURCE_BYTES + 1)
+
+        after = os.fstat(descriptor)
+        try:
+            current = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _SOURCE_DIR_FD_SUPPORTED
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+            parent_after = os.fstat(parent_descriptor)
+            parent_current = parent.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+
+        if len(raw) > _MAX_SOURCE_BYTES:
+            raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(raw) != opened.st_size
+        ):
+            raise EvidenceIngestError("evidence changed while reading")
+        if _stat_identity(parent_after) != _stat_identity(parent_opened) or _stat_identity(
+            parent_current
+        ) != _stat_identity(parent_opened):
+            raise EvidenceIngestError("evidence parent changed while reading")
+        return raw
+    except OSError as exc:
+        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
+
+
 def _load_json(
     path: Path,
     source_format: EvidenceFormat,
     redact: bool,
     redaction_policy: RedactionPolicy | None = None,
 ) -> _LoadedSource:
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
-    if len(raw) > _MAX_SOURCE_BYTES:
-        raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+    raw = _read_source_bytes(path)
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise EvidenceIngestError("evidence must be UTF-8") from exc
     try:
-        data = json.loads(text, parse_constant=_reject_json_constant)
+        data = json.loads(
+            text,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
     except (json.JSONDecodeError, ValueError) as exc:
         raise EvidenceIngestError(f"invalid evidence JSON: {exc}") from exc
     if not isinstance(data, dict):
