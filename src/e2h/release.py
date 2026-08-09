@@ -114,8 +114,37 @@ class _PackageIdentity(StrictModel):
     version: str
 
 
+def _validate_json_object_keys(value: Any, *, active: set[int] | None = None) -> None:
+    if active is None:
+        active = set()
+    if isinstance(value, dict):
+        identity = id(value)
+        if identity in active:
+            raise ValueError("JSON value contains a recursive container")
+        active.add(identity)
+        try:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError("JSON objects must use string keys")
+                _validate_json_object_keys(item, active=active)
+        finally:
+            active.remove(identity)
+        return
+    if isinstance(value, (list, tuple)):
+        identity = id(value)
+        if identity in active:
+            raise ValueError("JSON value contains a recursive container")
+        active.add(identity)
+        try:
+            for item in value:
+                _validate_json_object_keys(item, active=active)
+        finally:
+            active.remove(identity)
+
+
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_object_keys(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
@@ -140,8 +169,15 @@ def _artifact_kind(filename: str) -> ReleaseArtifactKind:
     raise ReleaseIntegrityError(f"unsupported release artifact: {filename}")
 
 
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
 
 
 def _open_release_directory(directory: Path) -> tuple[int, os.stat_result]:
@@ -463,9 +499,18 @@ def verify_release_artifacts(
     )
 
 
-def _read_release_manifest_bytes(path: Path) -> bytes:
+def _requested_manifest_parent_identity(requested_parent: Path) -> os.stat_result:
     try:
-        parent = path.parent.resolve(strict=True)
+        current_parent = requested_parent.resolve(strict=True)
+        return current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
+
+
+def _read_release_manifest_bytes(path: Path) -> bytes:
+    requested_parent = path.parent.absolute()
+    try:
+        parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
@@ -479,7 +524,11 @@ def _read_release_manifest_bytes(path: Path) -> bytes:
     descriptor: int | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        if _stat_identity(parent_opened) != _stat_identity(parent_expected):
+        requested_opened = _requested_manifest_parent_identity(requested_parent)
+        if (
+            _stat_identity(parent_opened) != _stat_identity(parent_expected)
+            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
+        ):
             raise ReleaseIntegrityError("release manifest parent changed while opening")
         try:
             expected = (
@@ -524,7 +573,7 @@ def _read_release_manifest_bytes(path: Path) -> bytes:
             else (parent / path.name).stat(follow_symlinks=False)
         )
         parent_after = os.fstat(parent_descriptor)
-        parent_current = parent.stat(follow_symlinks=False)
+        parent_current = _requested_manifest_parent_identity(requested_parent)
         if len(raw) > _MAX_MANIFEST_BYTES:
             raise ReleaseIntegrityError(f"release manifest exceeds {_MAX_MANIFEST_BYTES} bytes")
         if (
@@ -548,6 +597,19 @@ def _read_release_manifest_bytes(path: Path) -> bytes:
             os.close(parent_descriptor)
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
 def load_release_manifest(path: Path) -> ReleaseManifest:
     """Load a bounded strict JSON release manifest."""
     if path.suffix.lower() != ".json":
@@ -558,7 +620,11 @@ def load_release_manifest(path: Path) -> ReleaseManifest:
     except UnicodeDecodeError as exc:
         raise ReleaseIntegrityError("release manifest must be UTF-8") from exc
     try:
-        data = json.loads(text, parse_constant=_reject_json_constant)
+        data = json.loads(
+            text,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
     except (json.JSONDecodeError, ValueError) as exc:
         raise ReleaseIntegrityError(f"invalid release manifest JSON: {exc}") from exc
     if not isinstance(data, dict):
@@ -567,7 +633,3 @@ def load_release_manifest(path: Path) -> ReleaseManifest:
         return ReleaseManifest.model_validate(data)
     except ValueError as exc:
         raise ReleaseIntegrityError(f"invalid release manifest: {exc}") from exc
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-standard JSON constant: {value}")
