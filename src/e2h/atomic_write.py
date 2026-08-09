@@ -134,12 +134,11 @@ def _remove_regular_file_by_identity_at(
             ):
                 os.unlink(name, dir_fd=parent_descriptor)
         except OSError:
-            return
+            continue
         finally:
             if descriptor is not None:
                 with suppress(OSError):
                     os.close(descriptor)
-        return
 
 
 def _create_temporary_at(parent_descriptor: int, output_name: str) -> tuple[int, str]:
