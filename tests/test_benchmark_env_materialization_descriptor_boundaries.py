@@ -111,6 +111,81 @@ def test_descriptor_copy_rejects_destination_creation_failure(
     assert not destination.exists()
 
 
+def test_descriptor_copy_rejects_nested_directory_creation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _source(tmp_path)
+    nested = source / "nested"
+    nested.mkdir()
+    (nested / "child.txt").write_text("child\n", encoding="utf-8")
+    destination = tmp_path / "materialized"
+    original_mkdir = os.mkdir
+
+    def failing_mkdir(
+        path: Any,
+        mode: int = 0o777,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if path == nested.name and kwargs.get("dir_fd") is not None:
+            raise PermissionError("blocked nested mkdir")
+        original_mkdir(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", failing_mkdir)
+
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="unable to create materialized environment directory nested",
+    ):
+        benchmark_env._copy_environment_tree(source, destination)
+
+    assert not destination.exists()
+
+
+def test_descriptor_copy_rejects_final_root_replacement_without_deleting_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _source(tmp_path)
+    destination = tmp_path / "materialized"
+    renamed_original = tmp_path / "original-materialized"
+    original_stability_check = benchmark_env._materialization_parent_must_be_stable
+    checks = 0
+
+    def swapping_stability_check(
+        checked_destination: Path,
+        descriptor: int,
+        opened: os.stat_result,
+    ) -> None:
+        nonlocal checks
+        checks += 1
+        original_stability_check(checked_destination, descriptor, opened)
+        if checks == 3:
+            destination.rename(renamed_original)
+            destination.mkdir()
+            (destination / "replacement.txt").write_text(
+                "replacement\n",
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(
+        benchmark_env,
+        "_materialization_parent_must_be_stable",
+        swapping_stability_check,
+    )
+
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="environment materialization destination changed while writing",
+    ):
+        benchmark_env._copy_environment_tree(source, destination)
+
+    assert checks == 3
+    assert (destination / "replacement.txt").read_text(encoding="utf-8") == "replacement\n"
+    assert not renamed_original.exists()
+
+
 def test_open_materialized_directory_rejects_missing_without_create(tmp_path: Path) -> None:
     root = tmp_path / "materialized"
     root.mkdir()
