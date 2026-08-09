@@ -580,31 +580,25 @@ def _backup_snapshot_output_path(
             raise SnapshotError(
                 f"unable to preserve existing snapshot output safely: {exc}"
             ) from exc
-        backup_identity: tuple[int, int] | None = None
         try:
             backup_current = backup.stat(follow_symlinks=False)
-            backup_identity = _inode_identity(backup_current)
-            output_current = plain_output.stat(follow_symlinks=False)
-            if (
-                not stat.S_ISREG(backup_current.st_mode)
-                or backup_identity != expected_identity
-                or not stat.S_ISREG(output_current.st_mode)
-                or _inode_identity(output_current) != expected_identity
-            ):
-                raise SnapshotError("snapshot output changed while preserving it")
-            return backup, expected_identity
-        except Exception:
-            if backup_identity is None:
-                try:
-                    backup_current = backup.stat(follow_symlinks=False)
-                except OSError:
-                    pass
-                else:
-                    if stat.S_ISREG(backup_current.st_mode):
-                        backup_identity = _inode_identity(backup_current)
-            if backup_identity is not None:
+        except OSError as exc:
+            raise SnapshotError(f"unable to verify snapshot output rollback path: {exc}") from exc
+        backup_identity = _inode_identity(backup_current)
+        if not stat.S_ISREG(backup_current.st_mode) or backup_identity != expected_identity:
+            if stat.S_ISREG(backup_current.st_mode):
                 _remove_regular_path_if_identity(backup, backup_identity)
-            raise
+            raise SnapshotError("snapshot output changed while preserving it")
+        try:
+            output_current = plain_output.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to revalidate snapshot output: {exc}") from exc
+        if (
+            not stat.S_ISREG(output_current.st_mode)
+            or _inode_identity(output_current) != expected_identity
+        ):
+            raise SnapshotError("snapshot output changed while preserving it")
+        return backup, expected_identity
     raise SnapshotError("unable to allocate snapshot output rollback path")
 
 
