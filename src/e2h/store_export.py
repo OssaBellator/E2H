@@ -14,6 +14,7 @@ _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 _LINK_SUPPORTS_DIR_FD = os.link in os.supports_dir_fd
 _UNLINK_SUPPORTS_DIR_FD = os.unlink in os.supports_dir_fd
+_RENAME_SUPPORTS_DIR_FD = os.rename in os.supports_dir_fd
 _EXPORT_DIR_FD_SUPPORTED = (
     _OPEN_SUPPORTS_DIR_FD
     and _STAT_SUPPORTS_DIR_FD
@@ -78,6 +79,45 @@ def _unlink_entry(parent_descriptor: int, parent: Path, name: str) -> None:
         os.unlink(name, dir_fd=parent_descriptor)
     else:
         (parent / name).unlink()
+
+
+def _link_entry(
+    parent_descriptor: int,
+    parent: Path,
+    source_name: str,
+    destination_name: str,
+) -> None:
+    if _EXPORT_DIR_FD_SUPPORTED:
+        os.link(
+            source_name,
+            destination_name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    else:
+        os.link(
+            parent / source_name,
+            parent / destination_name,
+            follow_symlinks=False,
+        )
+
+
+def _replace_entry(
+    parent_descriptor: int,
+    parent: Path,
+    source_name: str,
+    destination_name: str,
+) -> None:
+    if _RENAME_SUPPORTS_DIR_FD:
+        os.rename(
+            source_name,
+            destination_name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+    else:
+        os.replace(parent / source_name, parent / destination_name)
 
 
 def _unlink_regular_entry_if_identity(
@@ -169,16 +209,12 @@ def _install_new(
             raise ParquetOutputError("temporary Parquet output changed before installation")
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         try:
-            if _EXPORT_DIR_FD_SUPPORTED:
-                os.link(
-                    temp_name,
-                    output_name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
-                    follow_symlinks=False,
-                )
-            else:
-                os.link(parent / temp_name, parent / output_name, follow_symlinks=False)
+            _link_entry(
+                parent_descriptor,
+                parent,
+                temp_name,
+                output_name,
+            )
         except FileExistsError as exc:
             raise ParquetOutputError("Parquet output destination appeared while exporting") from exc
         installed = True
@@ -208,6 +244,82 @@ def _install_new(
             )
 
 
+def _create_rollback_link(
+    parent: Path,
+    parent_descriptor: int,
+    output_name: str,
+    expected_identity: tuple[int, int],
+) -> str:
+    for _ in range(128):
+        backup_name = f".{output_name}.e2h-rollback-{secrets.token_hex(16)}.bak"
+        try:
+            _link_entry(
+                parent_descriptor,
+                parent,
+                output_name,
+                backup_name,
+            )
+        except FileExistsError:
+            continue
+        except OSError as exc:
+            raise ParquetOutputError(f"unable to preserve existing Parquet output: {exc}") from exc
+        try:
+            backup = _stat_entry(parent_descriptor, parent, backup_name)
+            current = _stat_entry(parent_descriptor, parent, output_name)
+        except OSError as exc:
+            _unlink_regular_entry_if_identity(
+                parent_descriptor,
+                parent,
+                backup_name,
+                expected_identity,
+            )
+            raise ParquetOutputError(f"unable to verify preserved Parquet output: {exc}") from exc
+        if (
+            stat.S_ISREG(backup.st_mode)
+            and stat.S_ISREG(current.st_mode)
+            and _inode_identity(backup) == expected_identity
+            and _inode_identity(current) == expected_identity
+        ):
+            return backup_name
+        _unlink_regular_entry_if_identity(
+            parent_descriptor,
+            parent,
+            backup_name,
+            expected_identity,
+        )
+        raise ParquetOutputError("Parquet output destination changed while preserving it")
+    raise ParquetOutputError("unable to allocate Parquet output rollback entry")
+
+
+def _restore_overwritten_output(
+    parent: Path,
+    parent_descriptor: int,
+    output_name: str,
+    backup_name: str,
+    backup_identity: tuple[int, int],
+    replacement_identity: tuple[int, int],
+) -> None:
+    try:
+        backup = _stat_entry(parent_descriptor, parent, backup_name)
+        current = _stat_entry(parent_descriptor, parent, output_name)
+    except OSError:
+        return
+    if (
+        not stat.S_ISREG(backup.st_mode)
+        or _inode_identity(backup) != backup_identity
+        or not stat.S_ISREG(current.st_mode)
+        or _inode_identity(current) != replacement_identity
+    ):
+        return
+    with suppress(OSError):
+        _replace_entry(
+            parent_descriptor,
+            parent,
+            backup_name,
+            output_name,
+        )
+
+
 def _overwrite_existing(
     parent: Path,
     requested_parent: Path,
@@ -217,26 +329,89 @@ def _overwrite_existing(
     expected: os.stat_result,
     staged: Path,
 ) -> None:
-    flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    temp_name = f".{output_name}.e2h-{secrets.token_hex(16)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    opened: os.stat_result | None = None
+    backup_name: str | None = None
+    success = False
     try:
-        descriptor = _open_entry(parent_descriptor, parent, output_name, flags)
-    except OSError as exc:
-        raise ParquetOutputError(f"unable to open existing Parquet output: {exc}") from exc
-    try:
+        descriptor = _open_entry(
+            parent_descriptor,
+            parent,
+            temp_name,
+            flags,
+            0o666,
+        )
         opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _inode_identity(opened) != _inode_identity(expected):
-            raise ParquetOutputError("Parquet output destination changed while opening")
-        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ParquetOutputError("temporary Parquet output is not a regular file")
         written = _copy_staged(staged, descriptor)
-        current = _stat_entry(parent_descriptor, parent, output_name)
-        if _inode_identity(written) != _inode_identity(opened) or _inode_identity(
-            current
-        ) != _inode_identity(opened):
-            raise ParquetOutputError("Parquet output destination changed while writing")
+        replacement_identity = _inode_identity(opened)
+        if _inode_identity(written) != replacement_identity:
+            raise ParquetOutputError("temporary Parquet output changed while writing")
+        current_temporary = _stat_entry(parent_descriptor, parent, temp_name)
+        if (
+            not stat.S_ISREG(current_temporary.st_mode)
+            or _inode_identity(current_temporary) != replacement_identity
+        ):
+            raise ParquetOutputError("temporary Parquet output changed before installation")
+        current_output = _stat_entry(parent_descriptor, parent, output_name)
+        expected_identity = _inode_identity(expected)
+        if (
+            not stat.S_ISREG(current_output.st_mode)
+            or _inode_identity(current_output) != expected_identity
+        ):
+            raise ParquetOutputError("Parquet output destination changed before overwrite")
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
+        backup_name = _create_rollback_link(
+            parent,
+            parent_descriptor,
+            output_name,
+            expected_identity,
+        )
+        _replace_entry(
+            parent_descriptor,
+            parent,
+            temp_name,
+            output_name,
+        )
+        current_output = _stat_entry(parent_descriptor, parent, output_name)
+        if (
+            not stat.S_ISREG(current_output.st_mode)
+            or _inode_identity(current_output) != replacement_identity
+        ):
+            raise ParquetOutputError("Parquet output destination changed while overwriting")
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
+        success = True
     finally:
-        with suppress(OSError):
-            os.close(descriptor)
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        if opened is not None:
+            replacement_identity = _inode_identity(opened)
+            if not success and backup_name is not None:
+                _restore_overwritten_output(
+                    parent,
+                    parent_descriptor,
+                    output_name,
+                    backup_name,
+                    _inode_identity(expected),
+                    replacement_identity,
+                )
+            _unlink_regular_entry_if_identity(
+                parent_descriptor,
+                parent,
+                temp_name,
+                replacement_identity,
+            )
+        if backup_name is not None:
+            _unlink_regular_entry_if_identity(
+                parent_descriptor,
+                parent,
+                backup_name,
+                _inode_identity(expected),
+            )
 
 
 def _install_staged(output: Path, staged: Path) -> None:
