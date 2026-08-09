@@ -200,6 +200,7 @@ def _backup_existing_snapshot_output(
     expected_identity = _inode_identity(current)
     for _ in range(128):
         backup_name = f".{output.name}.rollback-{secrets.token_hex(16)}.bak"
+        moved = True
         if os.link in os.supports_dir_fd:
             try:
                 os.link(
@@ -211,10 +212,11 @@ def _backup_existing_snapshot_output(
                 )
             except FileExistsError:
                 continue
-            except OSError as exc:
-                raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
-            moved = False
-        else:
+            except (OSError, NotImplementedError):
+                pass
+            else:
+                moved = False
+        if moved:
             try:
                 os.rename(
                     output.name,
@@ -226,7 +228,6 @@ def _backup_existing_snapshot_output(
                 continue
             except OSError as exc:
                 raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
-            moved = True
         try:
             backup = _stat_entry(parent_descriptor, backup_name)
             if not stat.S_ISREG(backup.st_mode) or _inode_identity(backup) != expected_identity:
@@ -262,7 +263,7 @@ def _restore_snapshot_output_backup(
     backup: tuple[str, tuple[int, int], bool],
     promoted_identity: tuple[int, int] | None,
 ) -> None:
-    backup_name, backup_identity, moved = backup
+    backup_name, backup_identity, _ = backup
     try:
         backup_current = _stat_entry(parent_descriptor, backup_name)
     except OSError:
@@ -279,14 +280,13 @@ def _restore_snapshot_output_backup(
     except OSError:
         return
     if output_current is None:
-        if moved:
-            with suppress(OSError):
-                os.rename(
-                    backup_name,
-                    output.name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
-                )
+        with suppress(OSError):
+            os.rename(
+                backup_name,
+                output.name,
+                src_dir_fd=parent_descriptor,
+                dst_dir_fd=parent_descriptor,
+            )
         return
     current_identity = _inode_identity(output_current)
     if promoted_identity is not None and current_identity == promoted_identity:
