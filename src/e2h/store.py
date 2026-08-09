@@ -27,10 +27,17 @@ class StoreError(RuntimeError):
     """Raised when an experiment store operation fails safely."""
 
 
+def _validate_store_path(path: Path, *, noun: str) -> None:
+    if "\x00" in str(path):
+        raise StoreError(f"{noun} path must not contain NUL")
+
+
 def _connection(database: Path) -> duckdb.DuckDBPyConnection:
-    database = database.resolve()
-    database.parent.mkdir(parents=True, exist_ok=True)
+    _validate_store_path(database, noun="store database")
+    connection: duckdb.DuckDBPyConnection | None = None
     try:
+        database = database.resolve()
+        database.parent.mkdir(parents=True, exist_ok=True)
         connection = duckdb.connect(str(database))
         connection.execute(SCHEMA_SQL)
         existing = connection.execute(
@@ -50,11 +57,18 @@ def _connection(database: Path) -> duckdb.DuckDBPyConnection:
                 )
             elif actual != STORE_SCHEMA_VERSION:
                 connection.close()
+                connection = None
                 raise StoreError(
                     f"unsupported store schema version {actual!r}; expected {STORE_SCHEMA_VERSION}"
                 )
         return connection
+    except OSError as exc:
+        if connection is not None:
+            connection.close()
+        raise StoreError(f"unable to prepare experiment store: {exc}") from exc
     except duckdb.Error as exc:
+        if connection is not None:
+            connection.close()
         raise StoreError(f"unable to open experiment store: {exc}") from exc
 
 
@@ -97,6 +111,7 @@ def ingest_artifact(
     kind: ArtifactKind = ArtifactKind.AUTO,
 ) -> IngestResult:
     """Atomically ingest one standalone run or replay-matrix result."""
+    _validate_store_path(artifact_path, noun="artifact")
     try:
         selected_kind = ArtifactKind(kind)
         raw, payload = read_artifact(artifact_path)
@@ -244,6 +259,7 @@ def export_parquet(
         selected = QueryView(view)
     except ValueError as exc:
         raise StoreError(f"unknown query view: {view}") from exc
+    _validate_store_path(output, noun="Parquet output")
     sql = VIEW_SQL[selected]
     connection = _connection(database)
     try:
