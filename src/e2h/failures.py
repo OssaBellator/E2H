@@ -171,10 +171,10 @@ class FailureSummary(StrictModel):
 
     @model_validator(mode="after")
     def counts_must_be_consistent(self) -> FailureSummary:
-        if any(count < 0 for count in self.by_category.values()):
-            raise ValueError("failure category counts must be non-negative")
-        if any(count < 0 for count in self.by_code.values()):
-            raise ValueError("failure code counts must be non-negative")
+        if any(count <= 0 for count in self.by_category.values()):
+            raise ValueError("failure category counts must be positive")
+        if any(count <= 0 for count in self.by_code.values()):
+            raise ValueError("failure code counts must be positive")
         impacts = self.evaluation_failures + self.infrastructure_errors + self.not_evaluated
         if impacts != self.total:
             raise ValueError("failure impact counts must sum to total")
@@ -182,12 +182,23 @@ class FailureSummary(StrictModel):
             raise ValueError("failure category counts must sum to total")
         if sum(self.by_code.values()) != self.total:
             raise ValueError("failure code counts must sum to total")
+        try:
+            code_counts = {FailureCode(code): count for code, count in self.by_code.items()}
+        except ValueError as exc:
+            raise ValueError("failure code counts must use known failure codes") from exc
+        expected_categories: Counter[str] = Counter()
+        for code, count in code_counts.items():
+            expected_categories[_CODE_CATEGORY[code].value] += count
+        if self.by_category != dict(sorted(expected_categories.items())):
+            raise ValueError("failure category counts must match failure code taxonomy")
         if (self.primary_check_id is None) != (self.primary_code is None):
             raise ValueError("primary_check_id and primary_code must be set together")
         if self.total == 0 and self.primary_check_id is not None:
             raise ValueError("empty failure summaries must not define a primary failure")
         if self.total > 0 and self.primary_check_id is None:
             raise ValueError("non-empty failure summaries require a primary failure")
+        if self.primary_code is not None and self.primary_code.value not in self.by_code:
+            raise ValueError("primary failure code must appear in failure code counts")
         return self
 
 
