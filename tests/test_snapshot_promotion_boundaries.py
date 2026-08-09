@@ -174,7 +174,7 @@ def test_promote_restore_tree_rejects_final_replacement_without_deleting_replace
     assert not moved.exists()
 
 
-def test_promote_restore_tree_atomically_replaces_existing_empty_destination(tmp_path: Path) -> None:
+def test_promote_restore_tree_replaces_existing_empty_destination(tmp_path: Path) -> None:
     parent = tmp_path / "restore-parent"
     parent.mkdir()
     destination = parent / "restored"
