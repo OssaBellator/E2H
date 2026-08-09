@@ -38,6 +38,40 @@ def test_snapshot_fallback_backup_failure_preserves_existing_output(
     assert not list(tmp_path.glob(f".{output.name}.rollback-*.bak"))
 
 
+def test_snapshot_fallback_backup_race_keeps_known_good_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "snapshot.e2hsnap"
+    attacker = tmp_path / "attacker.e2hsnap"
+    previous = b"previous snapshot\n"
+    attacker_bytes = b"attacker snapshot\n"
+    output.write_bytes(previous)
+    attacker.write_bytes(attacker_bytes)
+    expected_identity = snapshot_module._inode_identity(output.stat(follow_symlinks=False))
+    original_link = os.link
+    swapped = False
+
+    def swapping_link(*args: Any, **kwargs: Any) -> None:
+        nonlocal swapped
+        original_link(*args, **kwargs)
+        if not swapped:
+            swapped = True
+            output.unlink()
+            attacker.rename(output)
+
+    monkeypatch.setattr(snapshot_module.os, "link", swapping_link)
+
+    with pytest.raises(SnapshotError, match="changed while preserving"):
+        snapshot_module._backup_snapshot_output_path(output, expected_identity)
+
+    assert swapped is True
+    assert output.read_bytes() == attacker_bytes
+    backups = list(tmp_path.glob(f".{output.name}.rollback-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == previous
+
+
 def test_restore_fallback_failure_preserves_existing_empty_destination(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
