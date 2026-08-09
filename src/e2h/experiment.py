@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from statistics import fmean
@@ -21,6 +22,8 @@ _InputModelT = TypeVar("_InputModelT", bound=BaseModel)
 
 
 def _validate_relative_path(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("path must not contain NUL")
     path = PurePosixPath(value)
     if path.is_absolute():
         raise ValueError("path must be relative")
@@ -139,6 +142,10 @@ def _revalidate_experiment_input(
 
 def resolve_under_root(root: Path, relative: str) -> Path:
     """Resolve a declared path and reject filesystem or symlink escape."""
+    if "\x00" in os.fspath(root):
+        raise ValueError("experiment root must not contain NUL")
+    if "\x00" in relative:
+        raise ValueError("path must not contain NUL")
     root_path = root.resolve()
     candidate = (root_path / relative).resolve()
     try:
