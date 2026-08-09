@@ -15,7 +15,7 @@ from threading import Thread
 from time import monotonic, sleep
 from typing import BinaryIO
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from e2h.failures import (
     FailureCode,
@@ -78,6 +78,15 @@ class CommandResult(BaseModel):
     error: str | None = None
     failure: FailureRecord | None = None
 
+    @model_validator(mode="after")
+    def failure_must_match_status(self) -> CommandResult:
+        if self.status is CheckStatus.PASSED:
+            if self.failure is not None:
+                raise ValueError("passed command results must not define a failure")
+        elif self.failure is None:
+            raise ValueError("non-passed command results require a failure")
+        return self
+
 
 class RunResult(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -89,6 +98,37 @@ class RunResult(BaseModel):
     duration_seconds: float = Field(ge=0)
     checks: list[CommandResult]
     failure_summary: FailureSummary = Field(default_factory=FailureSummary)
+
+    @model_validator(mode="after")
+    def result_must_be_consistent(self) -> RunResult:
+        if self.started_at.tzinfo is None or self.started_at.utcoffset() is None:
+            raise ValueError("run started_at must be timezone-aware")
+        if self.finished_at.tzinfo is None or self.finished_at.utcoffset() is None:
+            raise ValueError("run finished_at must be timezone-aware")
+        if self.finished_at < self.started_at:
+            raise ValueError("run finished_at must not precede started_at")
+        check_ids = [check.id for check in self.checks]
+        if len(check_ids) != len(set(check_ids)):
+            raise ValueError("run check ids must be unique")
+        expected_summary = summarize_failures((check.id, check.failure) for check in self.checks)
+        if self.failure_summary != expected_summary:
+            raise ValueError("run failure_summary must match check failures")
+        has_infrastructure_error = any(
+            check.failure is not None
+            and check.failure.impact is FailureImpact.INFRASTRUCTURE_ERROR
+            for check in self.checks
+        )
+        has_failed_check = any(check.status is not CheckStatus.PASSED for check in self.checks)
+        expected_status = (
+            RunStatus.ERROR
+            if has_infrastructure_error
+            else RunStatus.FAILED
+            if has_failed_check
+            else RunStatus.PASSED
+        )
+        if self.status is not expected_status:
+            raise ValueError("run status must match check outcomes")
+        return self
 
 
 class RunnerError(RuntimeError):
