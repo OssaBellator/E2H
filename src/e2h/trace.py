@@ -32,19 +32,21 @@ class TraceEventType(StrEnum):
     RUN_COMPLETED = "run.completed"
 
 
-def _reject_non_finite_json_numbers(value: Any) -> None:
+def _validate_python_json_values(value: Any) -> None:
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("trace event contains a non-finite number")
         return
+    if isinstance(value, (set, frozenset)):
+        raise ValueError("trace event contains an unordered set")
     if isinstance(value, dict):
         for key, item in value.items():
-            _reject_non_finite_json_numbers(key)
-            _reject_non_finite_json_numbers(item)
+            _validate_python_json_values(key)
+            _validate_python_json_values(item)
         return
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, (list, tuple)):
         for item in value:
-            _reject_non_finite_json_numbers(item)
+            _validate_python_json_values(item)
 
 
 class TraceContext(BaseModel):
@@ -84,7 +86,7 @@ class TraceEvent(BaseModel):
     @model_validator(mode="after")
     def payload_must_be_json_serializable(self) -> TraceEvent:
         try:
-            _reject_non_finite_json_numbers(self.model_dump(mode="python"))
+            _validate_python_json_values(self.model_dump(mode="python"))
             json.dumps(self.model_dump(mode="json"), sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("trace event must be JSON-serializable") from exc
@@ -120,7 +122,7 @@ def _revalidate_trace_for_write(value: Trace) -> Trace:
         raise ValueError(f"invalid trace: expected Trace, got {type(value).__name__}")
     try:
         payload = value.model_dump(mode="python", warnings="none")
-        _reject_non_finite_json_numbers(payload)
+        _validate_python_json_values(payload)
         return Trace.model_validate(payload)
     except ValueError as exc:
         raise ValueError(f"invalid trace: {exc}") from exc
