@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
 from datetime import UTC, datetime
@@ -65,6 +66,21 @@ class ExperimentSpec(StrictModel):
     @classmethod
     def paths_must_be_safe(cls, value: str) -> str:
         return _validate_relative_path(value)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_must_be_canonical_json(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("experiment metadata must contain canonical JSON data") from exc
+        return value
 
     @model_validator(mode="after")
     def matrix_must_be_bounded_and_unique(self) -> ExperimentSpec:
