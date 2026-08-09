@@ -218,31 +218,25 @@ def _backup_existing_snapshot_output(
             raise SnapshotError(
                 f"unable to preserve existing snapshot output safely: {exc}"
             ) from exc
-        backup_identity: tuple[int, int] | None = None
         try:
             backup = _stat_entry(parent_descriptor, backup_name)
-            backup_identity = _inode_identity(backup)
-            output_current = _stat_entry(parent_descriptor, output.name)
-            if (
-                not stat.S_ISREG(backup.st_mode)
-                or backup_identity != expected_identity
-                or not stat.S_ISREG(output_current.st_mode)
-                or _inode_identity(output_current) != expected_identity
-            ):
-                raise SnapshotError("existing snapshot output changed while preserving it")
-            return backup_name, expected_identity, False
-        except Exception:
-            if backup_identity is None:
-                try:
-                    backup_current = _stat_entry(parent_descriptor, backup_name)
-                except OSError:
-                    pass
-                else:
-                    if stat.S_ISREG(backup_current.st_mode):
-                        backup_identity = _inode_identity(backup_current)
-            if backup_identity is not None:
+        except OSError as exc:
+            raise SnapshotError(f"unable to verify snapshot output rollback entry: {exc}") from exc
+        backup_identity = _inode_identity(backup)
+        if not stat.S_ISREG(backup.st_mode) or backup_identity != expected_identity:
+            if stat.S_ISREG(backup.st_mode):
                 _remove_regular_file_at(parent_descriptor, backup_name, backup_identity)
-            raise
+            raise SnapshotError("existing snapshot output changed while preserving it")
+        try:
+            output_current = _stat_entry(parent_descriptor, output.name)
+        except OSError as exc:
+            raise SnapshotError(f"unable to revalidate existing snapshot output: {exc}") from exc
+        if (
+            not stat.S_ISREG(output_current.st_mode)
+            or _inode_identity(output_current) != expected_identity
+        ):
+            raise SnapshotError("existing snapshot output changed while preserving it")
+        return backup_name, expected_identity, False
     raise SnapshotError("unable to allocate snapshot output rollback entry")
 
 
