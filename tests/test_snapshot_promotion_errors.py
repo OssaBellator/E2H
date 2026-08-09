@@ -98,7 +98,7 @@ def test_bound_directory_rejects_wrong_expected_identity(tmp_path: Path) -> None
         os.close(descriptor)
 
 
-def test_tree_cleanup_handles_missing_mismatch_non_directory_and_nested_tree(tmp_path: Path) -> None:
+def test_tree_cleanup_handles_boundary_cases(tmp_path: Path) -> None:
     parent = tmp_path / "parent"
     parent.mkdir()
     file_entry = parent / "file.txt"
