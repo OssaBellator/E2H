@@ -301,11 +301,21 @@ def dspy_dataset_payload(dataset: DSPyDatasetDocument) -> list[DSPyExamplePayloa
 
 def optimizer_adapter_sha256(document: OptimizerAdapterDocument) -> str:
     """Return the canonical identity of one optimizer adapter."""
+    document = _revalidate_optimizer_input(
+        document,
+        OptimizerAdapterDocument,
+        noun="optimizer adapter",
+    )
     return hashlib.sha256(_canonical_json_bytes(document.model_dump(mode="json"))).hexdigest()
 
 
 def optimizer_candidate_sha256(document: OptimizerCandidateDocument) -> str:
     """Return the canonical identity of one optimizer candidate."""
+    document = _revalidate_optimizer_input(
+        document,
+        OptimizerCandidateDocument,
+        noun="optimizer candidate",
+    )
     return hashlib.sha256(_canonical_json_bytes(document.model_dump(mode="json"))).hexdigest()
 
 
