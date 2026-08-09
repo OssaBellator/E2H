@@ -80,6 +80,8 @@ def capsule_sha256(capsule: TaskCapsule) -> str:
 
 
 def _validate_relative_path(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("path must not contain NUL")
     path = PurePosixPath(value)
     if path.is_absolute():
         raise ValueError("path must be relative")
