@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
-import tempfile
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -13,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.atomic_write import write_text_atomic
 from e2h.runner import RunResult
 
 
@@ -192,18 +191,7 @@ def trace_from_run_result(
 
 def write_json_atomic(path: Path, payload: str) -> None:
     """Atomically replace a UTF-8 text file on the same filesystem."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-    except BaseException:
-        temporary_path.unlink(missing_ok=True)
-        raise
+    write_text_atomic(path, payload)
 
 
 def write_traces_jsonl(path: Path, traces: list[Trace]) -> None:
