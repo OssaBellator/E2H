@@ -20,7 +20,7 @@ from e2h.anthropic_messages import (
     AnthropicMessageRecord,
     AnthropicMessagesDocument,
 )
-from e2h.document import load_mapping_document
+from e2h.document import _validate_json_compatible, load_mapping_document
 from e2h.models import TaskCapsule
 from e2h.runtime_validation import revalidate_runtime_inputs
 from e2h.variants import (
@@ -57,6 +57,7 @@ class StrictModel(BaseModel):
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
