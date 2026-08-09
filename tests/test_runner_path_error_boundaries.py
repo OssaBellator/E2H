@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,12 +25,18 @@ def test_runner_rejects_nul_workspace_before_filesystem_access() -> None:
         run_capsule(_capsule(), Path("bad\x00workspace"))
 
 
-def test_runner_wraps_workspace_child_resolution_failure(tmp_path: Path) -> None:
-    loop = tmp_path / "loop"
-    try:
-        loop.symlink_to("loop")
-    except OSError:
-        pytest.skip("symlink creation is unavailable")
+def test_runner_wraps_workspace_child_resolution_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_resolve = Path.resolve
+
+    def failing_resolve(path: Path, *args: Any, **kwargs: Any) -> Path:
+        if path.name == "broken":
+            raise OSError("injected resolution failure")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", failing_resolve)
 
     with pytest.raises(RunnerError, match="unable to resolve workspace path"):
-        run_capsule(_capsule(working_directory="loop"), tmp_path)
+        run_capsule(_capsule(working_directory="broken"), tmp_path)
