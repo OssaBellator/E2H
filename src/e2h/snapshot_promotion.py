@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import stat
 from contextlib import suppress
 from pathlib import Path
@@ -44,6 +45,37 @@ def _parent_must_be_stable(
         raise SnapshotError(f"{noun} parent changed during publication")
 
 
+def _remove_regular_file_at(
+    parent_descriptor: int,
+    name: str,
+    expected_identity: tuple[int, int],
+) -> None:
+    try:
+        entry = _stat_entry(parent_descriptor, name)
+    except OSError:
+        return
+    if _inode_identity(entry) != expected_identity or not stat.S_ISREG(entry.st_mode):
+        return
+    descriptor: int | None = None
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+        opened = os.fstat(descriptor)
+        current = _stat_entry(parent_descriptor, name)
+        if (
+            stat.S_ISREG(opened.st_mode)
+            and _inode_identity(opened) == expected_identity
+            and _inode_identity(current) == expected_identity
+        ):
+            os.unlink(name, dir_fd=parent_descriptor)
+    except OSError:
+        return
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
 def _remove_regular_file_by_identity_at(
     parent_descriptor: int,
     expected_identity: tuple[int, int],
@@ -59,24 +91,7 @@ def _remove_regular_file_by_identity_at(
             continue
         if _inode_identity(entry) != expected_identity or not stat.S_ISREG(entry.st_mode):
             continue
-        descriptor: int | None = None
-        try:
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(name, flags, dir_fd=parent_descriptor)
-            opened = os.fstat(descriptor)
-            current = _stat_entry(parent_descriptor, name)
-            if (
-                stat.S_ISREG(opened.st_mode)
-                and _inode_identity(opened) == expected_identity
-                and _inode_identity(current) == expected_identity
-            ):
-                os.unlink(name, dir_fd=parent_descriptor)
-        except OSError:
-            return
-        finally:
-            if descriptor is not None:
-                with suppress(OSError):
-                    os.close(descriptor)
+        _remove_regular_file_at(parent_descriptor, name, expected_identity)
         return
 
 
@@ -170,6 +185,123 @@ def _remove_tree_by_identity_at(
         return
 
 
+def _backup_existing_snapshot_output(
+    output: Path,
+    parent_descriptor: int,
+) -> tuple[str, tuple[int, int], bool] | None:
+    try:
+        current = _stat_entry(parent_descriptor, output.name)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise SnapshotError(f"unable to inspect existing snapshot output: {exc}") from exc
+    if not stat.S_ISREG(current.st_mode):
+        raise SnapshotError("snapshot output must remain a regular file")
+    expected_identity = _inode_identity(current)
+    for _ in range(128):
+        backup_name = f".{output.name}.rollback-{secrets.token_hex(16)}.bak"
+        if os.link in os.supports_dir_fd:
+            try:
+                os.link(
+                    output.name,
+                    backup_name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
+            moved = False
+        else:
+            try:
+                os.rename(
+                    output.name,
+                    backup_name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                )
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
+            moved = True
+        try:
+            backup = _stat_entry(parent_descriptor, backup_name)
+            if not stat.S_ISREG(backup.st_mode) or _inode_identity(backup) != expected_identity:
+                raise SnapshotError("existing snapshot output changed while preserving it")
+            if not moved:
+                output_current = _stat_entry(parent_descriptor, output.name)
+                if (
+                    not stat.S_ISREG(output_current.st_mode)
+                    or _inode_identity(output_current) != expected_identity
+                ):
+                    raise SnapshotError("existing snapshot output changed while preserving it")
+            return backup_name, expected_identity, moved
+        except Exception:
+            if moved:
+                try:
+                    os.rename(
+                        backup_name,
+                        output.name,
+                        src_dir_fd=parent_descriptor,
+                        dst_dir_fd=parent_descriptor,
+                    )
+                except OSError:
+                    pass
+            else:
+                _remove_regular_file_at(parent_descriptor, backup_name, expected_identity)
+            raise
+    raise SnapshotError("unable to allocate snapshot output rollback entry")
+
+
+def _restore_snapshot_output_backup(
+    output: Path,
+    parent_descriptor: int,
+    backup: tuple[str, tuple[int, int], bool],
+    promoted_identity: tuple[int, int] | None,
+) -> None:
+    backup_name, backup_identity, moved = backup
+    try:
+        backup_current = _stat_entry(parent_descriptor, backup_name)
+    except OSError:
+        return
+    if (
+        not stat.S_ISREG(backup_current.st_mode)
+        or _inode_identity(backup_current) != backup_identity
+    ):
+        return
+    try:
+        output_current = _stat_entry(parent_descriptor, output.name)
+    except FileNotFoundError:
+        output_current = None
+    except OSError:
+        return
+    if output_current is None:
+        if moved:
+            with suppress(OSError):
+                os.rename(
+                    backup_name,
+                    output.name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                )
+        return
+    current_identity = _inode_identity(output_current)
+    if promoted_identity is not None and current_identity == promoted_identity:
+        with suppress(OSError):
+            os.rename(
+                backup_name,
+                output.name,
+                src_dir_fd=parent_descriptor,
+                dst_dir_fd=parent_descriptor,
+            )
+        return
+    if current_identity == backup_identity:
+        _remove_regular_file_at(parent_descriptor, backup_name, backup_identity)
+
+
 def promote_snapshot_file(
     output: Path,
     parent_descriptor: int,
@@ -188,7 +320,9 @@ def promote_snapshot_file(
     temporary_identity = _inode_identity(temporary)
     if expected_identity is not None and temporary_identity != expected_identity:
         raise SnapshotError("snapshot temporary file changed before publication")
+    backup = _backup_existing_snapshot_output(output, parent_descriptor)
     promoted = False
+    success = False
     try:
         os.rename(
             temporary_name,
@@ -206,14 +340,33 @@ def promote_snapshot_file(
             parent_opened,
             noun="snapshot output",
         )
+        success = True
     except SnapshotError:
-        if promoted:
-            _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
+        if backup is not None:
+            _restore_snapshot_output_backup(
+                output,
+                parent_descriptor,
+                backup,
+                temporary_identity if promoted else None,
+            )
+        elif promoted:
+            _remove_regular_file_at(parent_descriptor, output.name, temporary_identity)
         raise
     except OSError as exc:
-        if promoted:
-            _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
+        if backup is not None:
+            _restore_snapshot_output_backup(
+                output,
+                parent_descriptor,
+                backup,
+                temporary_identity if promoted else None,
+            )
+        elif promoted:
+            _remove_regular_file_at(parent_descriptor, output.name, temporary_identity)
         raise SnapshotError(f"unable to publish snapshot output: {exc}") from exc
+    finally:
+        if success and backup is not None:
+            backup_name, backup_identity, _ = backup
+            _remove_regular_file_at(parent_descriptor, backup_name, backup_identity)
 
 
 def promote_restore_tree(
