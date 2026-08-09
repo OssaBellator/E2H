@@ -145,6 +145,18 @@ def _revalidate_trace_for_write(value: Trace) -> Trace:
         raise ValueError(f"invalid trace: {exc}") from exc
 
 
+def _revalidate_run_result_for_trace(result: RunResult) -> RunResult:
+    if type(result) is not RunResult:
+        raise ValueError(
+            f"invalid run result: expected RunResult, got {type(result).__name__}"
+        )
+    try:
+        payload = result.model_dump(mode="python", warnings="none")
+        return RunResult.model_validate(payload)
+    except ValueError as exc:
+        raise ValueError(f"invalid run result: {exc}") from exc
+
+
 def trace_from_run_result(
     result: RunResult,
     *,
@@ -155,6 +167,7 @@ def trace_from_run_result(
     metadata: dict[str, Any] | None = None,
 ) -> Trace:
     """Convert an observable replay result into a normalized event trace."""
+    result = _revalidate_run_result_for_trace(result)
     context = TraceContext(
         run_id=run_id,
         capsule_id=result.capsule_id,
