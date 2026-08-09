@@ -132,7 +132,10 @@ def _assert_root_swap_is_rejected(
 
     monkeypatch.setattr(os, "listdir", swapping_listdir)
 
-    with pytest.raises(ReleaseSourceError, match="(?:release )?source root changed"):
+    with pytest.raises(
+        ReleaseSourceError,
+        match=r"(?:release source root|source directory) changed",
+    ):
         source_tree_sha256(root)
 
     assert swapped is True
