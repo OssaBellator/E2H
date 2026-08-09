@@ -9,6 +9,7 @@ from typing import Any
 
 import duckdb
 
+from e2h.store_export import ParquetOutputError, staged_parquet_output
 from e2h.store_models import (
     MAX_QUERY_ROWS,
     SCHEMA_SQL,
@@ -243,18 +244,20 @@ def export_parquet(
         selected = QueryView(view)
     except ValueError as exc:
         raise StoreError(f"unknown query view: {view}") from exc
-    output = output.resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    escaped_output = str(output).replace("'", "''")
     sql = VIEW_SQL[selected]
     connection = _connection(database)
     try:
         count = _scalar_int(connection, f"SELECT count(*) FROM ({sql} LIMIT {limit})")
-        connection.execute(
-            f"COPY ({sql} LIMIT {limit}) TO '{escaped_output}' (FORMAT PARQUET, COMPRESSION ZSTD)"
-        )
+        with staged_parquet_output(output) as staged:
+            escaped_staged = str(staged).replace("'", "''")
+            connection.execute(
+                f"COPY ({sql} LIMIT {limit}) TO '{escaped_staged}' "
+                "(FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
         return count
     except duckdb.Error as exc:
         raise StoreError(f"unable to export Parquet: {exc}") from exc
+    except ParquetOutputError as exc:
+        raise StoreError(str(exc)) from exc
     finally:
         connection.close()
