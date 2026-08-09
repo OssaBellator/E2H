@@ -92,7 +92,6 @@ def _remove_regular_file_by_identity_at(
         if _inode_identity(entry) != expected_identity or not stat.S_ISREG(entry.st_mode):
             continue
         _remove_regular_file_at(parent_descriptor, name, expected_identity)
-        return
 
 
 def _open_bound_directory(
