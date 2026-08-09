@@ -6,7 +6,13 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from e2h.compiler import CapsuleCompileError, CompilerSpec, GoalSelector, GoalStrategy, compile_proposal
+from e2h.compiler import (
+    CapsuleCompileError,
+    CompilerSpec,
+    GoalSelector,
+    GoalStrategy,
+    compile_proposal,
+)
 from e2h.ingest import EvidenceFormat, IngestionBundle, SourceProvenance
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
