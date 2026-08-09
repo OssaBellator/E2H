@@ -48,14 +48,17 @@ _MKDIR_SUPPORTS_DIR_FD = os.mkdir in os.supports_dir_fd
 _RENAME_SUPPORTS_DIR_FD = os.rename in os.supports_dir_fd
 _RMDIR_SUPPORTS_DIR_FD = os.rmdir in os.supports_dir_fd
 _UNLINK_SUPPORTS_DIR_FD = os.unlink in os.supports_dir_fd
-_WRITE_DIR_FD_SUPPORTED = (
+_CLEANUP_DIR_FD_SUPPORTED = (
     _OPEN_SUPPORTS_DIR_FD
     and _STAT_SUPPORTS_DIR_FD
     and _LISTDIR_SUPPORTS_FD
-    and _MKDIR_SUPPORTS_DIR_FD
-    and _RENAME_SUPPORTS_DIR_FD
     and _RMDIR_SUPPORTS_DIR_FD
     and _UNLINK_SUPPORTS_DIR_FD
+)
+_WRITE_DIR_FD_SUPPORTED = (
+    _CLEANUP_DIR_FD_SUPPORTED
+    and _MKDIR_SUPPORTS_DIR_FD
+    and _RENAME_SUPPORTS_DIR_FD
 )
 
 
@@ -259,6 +262,10 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
         info.st_ctime_ns,
         info.st_mode,
     )
+
+
+def _inode_identity(info: os.stat_result) -> tuple[int, int]:
+    return (info.st_dev, info.st_ino)
 
 
 def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
@@ -516,19 +523,28 @@ def _write_restore_file_at(
             os.close(parent_descriptor)
 
 
-def _remove_restore_tree_at(parent_descriptor: int, name: str, path: Path) -> None:
-    if not _WRITE_DIR_FD_SUPPORTED:
-        shutil.rmtree(path, ignore_errors=True)
+def _remove_restore_tree_at(
+    parent_descriptor: int,
+    name: str,
+    path: Path,
+    *,
+    expected_identity: tuple[int, int] | None = None,
+) -> None:
+    if not _CLEANUP_DIR_FD_SUPPORTED:
+        if expected_identity is None:
+            shutil.rmtree(path, ignore_errors=True)
         return
     from e2h.snapshot_promotion import _remove_tree_by_identity_at
 
-    try:
-        expected = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
-    except OSError:
-        return
-    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
-        return
-    _remove_tree_by_identity_at(parent_descriptor, (expected.st_dev, expected.st_ino))
+    if expected_identity is None:
+        try:
+            expected = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except OSError:
+            return
+        if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+            return
+        expected_identity = _inode_identity(expected)
+    _remove_tree_by_identity_at(parent_descriptor, expected_identity)
 
 
 @contextmanager
@@ -824,7 +840,10 @@ def create_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Create a deterministic snapshot archive and return its manifest."""
-    from e2h.snapshot_promotion import promote_snapshot_file
+    from e2h.snapshot_promotion import (
+        _remove_regular_file_by_identity_at,
+        promote_snapshot_file,
+    )
     from e2h.snapshot_source import (
         _root_path_must_be_stable,
         collect_snapshot_source,
@@ -840,6 +859,7 @@ def create_snapshot(
     temporary_descriptor: int | None = None
     temporary_name: str | None = None
     temporary_path: Path | None = None
+    temporary_identity: tuple[int, int] | None = None
     try:
         try:
             output_info = _stat_snapshot_write_entry(parent_descriptor, output)
@@ -876,6 +896,10 @@ def create_snapshot(
                 parent_descriptor,
                 output,
             )
+            temporary_opened = os.fstat(temporary_descriptor)
+            if not stat.S_ISREG(temporary_opened.st_mode):
+                raise SnapshotError("snapshot temporary file is not a regular file")
+            temporary_identity = _inode_identity(temporary_opened)
             with os.fdopen(temporary_descriptor, "w+b") as handle:
                 temporary_descriptor = None
                 with zipfile.ZipFile(handle, "w") as archive:
@@ -895,15 +919,20 @@ def create_snapshot(
                     parent_descriptor,
                     parent_info,
                     temporary_name,
+                    expected_identity=temporary_identity,
                 )
             else:
                 temporary_info = temporary_path.stat(follow_symlinks=False)
-                temporary_identity = (temporary_info.st_dev, temporary_info.st_ino)
+                if (
+                    not stat.S_ISREG(temporary_info.st_mode)
+                    or _inode_identity(temporary_info) != temporary_identity
+                ):
+                    raise SnapshotError("snapshot temporary file changed before publication")
                 os.replace(temporary_path, output)
                 current = output.stat(follow_symlinks=False)
                 if (
                     not stat.S_ISREG(current.st_mode)
-                    or (current.st_dev, current.st_ino) != temporary_identity
+                    or _inode_identity(current) != temporary_identity
                 ):
                     raise SnapshotError("snapshot output changed during publication")
                 _snapshot_write_parent_must_be_stable(
@@ -921,12 +950,9 @@ def create_snapshot(
         if temporary_descriptor is not None:
             with suppress(OSError):
                 os.close(temporary_descriptor)
-        if temporary_name is not None:
-            if _WRITE_DIR_FD_SUPPORTED:
-                with suppress(OSError):
-                    os.unlink(temporary_name, dir_fd=parent_descriptor)
-            elif temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
+        if temporary_name is not None and temporary_identity is not None:
+            if _CLEANUP_DIR_FD_SUPPORTED:
+                _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
         with suppress(OSError):
             os.close(parent_descriptor)
 
@@ -1043,6 +1069,7 @@ def restore_snapshot(
     staging_name: str | None = None
     staging_path: Path | None = None
     staging_descriptor: int | None = None
+    staging_identity: tuple[int, int] | None = None
     try:
         _restore_destination_is_empty(parent_descriptor, destination)
         _snapshot_write_parent_must_be_stable(
@@ -1055,8 +1082,11 @@ def restore_snapshot(
             parent_descriptor,
             destination,
         )
+        staging_expected = _stat_snapshot_write_entry(parent_descriptor, staging_path)
+        if stat.S_ISLNK(staging_expected.st_mode) or not stat.S_ISDIR(staging_expected.st_mode):
+            raise SnapshotError("restore staging entry is not a directory")
+        staging_identity = _inode_identity(staging_expected)
         if _WRITE_DIR_FD_SUPPORTED:
-            staging_expected = _stat_snapshot_write_entry(parent_descriptor, staging_path)
             staging_descriptor = _open_bound_child_directory(
                 parent_descriptor,
                 staging_name,
@@ -1128,24 +1158,31 @@ def restore_snapshot(
             parent_info,
             noun="restore destination",
         )
+        assert staging_identity is not None
         if _WRITE_DIR_FD_SUPPORTED:
             promote_restore_tree(
                 destination,
                 parent_descriptor,
                 parent_info,
                 staging_name,
+                expected_identity=staging_identity,
             )
         else:
+            staging_info = staging_path.stat(follow_symlinks=False)
+            if (
+                stat.S_ISLNK(staging_info.st_mode)
+                or not stat.S_ISDIR(staging_info.st_mode)
+                or _inode_identity(staging_info) != staging_identity
+            ):
+                raise SnapshotError("restore staging directory changed before publication")
             if destination_exists:
                 destination.rmdir()
-            staging_info = staging_path.stat(follow_symlinks=False)
-            staging_identity = (staging_info.st_dev, staging_info.st_ino)
             os.replace(staging_path, destination)
             current = destination.stat(follow_symlinks=False)
             if (
                 stat.S_ISLNK(current.st_mode)
                 or not stat.S_ISDIR(current.st_mode)
-                or (current.st_dev, current.st_ino) != staging_identity
+                or _inode_identity(current) != staging_identity
             ):
                 raise SnapshotError("restore destination changed during publication")
             _snapshot_write_parent_must_be_stable(
@@ -1165,7 +1202,12 @@ def restore_snapshot(
             with suppress(OSError):
                 os.close(staging_descriptor)
         if staging_name is not None and staging_path is not None:
-            _remove_restore_tree_at(parent_descriptor, staging_name, staging_path)
+            _remove_restore_tree_at(
+                parent_descriptor,
+                staging_name,
+                staging_path,
+                expected_identity=staging_identity,
+            )
         with suppress(OSError):
             os.close(parent_descriptor)
     return manifest

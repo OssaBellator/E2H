@@ -175,8 +175,10 @@ def promote_snapshot_file(
     parent_descriptor: int,
     parent_opened: os.stat_result,
     temporary_name: str,
+    *,
+    expected_identity: tuple[int, int] | None = None,
 ) -> None:
-    """Promote one temporary archive and bind success to its final identity."""
+    """Promote one temporary archive and bind success to its original identity."""
     try:
         temporary = _stat_entry(parent_descriptor, temporary_name)
     except OSError as exc:
@@ -184,6 +186,8 @@ def promote_snapshot_file(
     if not stat.S_ISREG(temporary.st_mode):
         raise SnapshotError("snapshot temporary file is not a regular file")
     temporary_identity = _inode_identity(temporary)
+    if expected_identity is not None and temporary_identity != expected_identity:
+        raise SnapshotError("snapshot temporary file changed before publication")
     promoted = False
     try:
         os.rename(
@@ -217,8 +221,10 @@ def promote_restore_tree(
     parent_descriptor: int,
     parent_opened: os.stat_result,
     staging_name: str,
+    *,
+    expected_identity: tuple[int, int] | None = None,
 ) -> None:
-    """Promote one verified restore tree and bind success to its final identity."""
+    """Promote one verified restore tree and bind success to its original identity."""
     try:
         staging = _stat_entry(parent_descriptor, staging_name)
     except OSError as exc:
@@ -226,6 +232,8 @@ def promote_restore_tree(
     if stat.S_ISLNK(staging.st_mode) or not stat.S_ISDIR(staging.st_mode):
         raise SnapshotError("restore staging entry is not a directory")
     staging_identity = _inode_identity(staging)
+    if expected_identity is not None and staging_identity != expected_identity:
+        raise SnapshotError("restore staging directory changed before publication")
     promoted = False
     try:
         os.rename(
