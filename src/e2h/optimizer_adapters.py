@@ -285,8 +285,7 @@ class OptimizerFeedback(StrictModel):
     checks: list[OptimizerCheckFeedback]
 
 
-def dspy_example_payload(example: DSPyExample) -> DSPyExamplePayload:
-    """Return data consumable by ``dspy.Example(**values).with_inputs(...)``."""
+def _dspy_example_payload_validated(example: DSPyExample) -> DSPyExamplePayload:
     values = {**example.inputs, **example.outputs}
     return DSPyExamplePayload(
         values={key: values[key] for key in sorted(values)},
@@ -294,9 +293,24 @@ def dspy_example_payload(example: DSPyExample) -> DSPyExamplePayload:
     )
 
 
+def dspy_example_payload(example: DSPyExample) -> DSPyExamplePayload:
+    """Return data consumable by ``dspy.Example(**values).with_inputs(...)``."""
+    example = _revalidate_optimizer_input(
+        example,
+        DSPyExample,
+        noun="DSPy example",
+    )
+    return _dspy_example_payload_validated(example)
+
+
 def dspy_dataset_payload(dataset: DSPyDatasetDocument) -> list[DSPyExamplePayload]:
     """Return deterministic SDK-neutral payloads for every dataset record."""
-    return [dspy_example_payload(example) for example in dataset.examples]
+    dataset = _revalidate_optimizer_input(
+        dataset,
+        DSPyDatasetDocument,
+        noun="DSPy dataset",
+    )
+    return [_dspy_example_payload_validated(example) for example in dataset.examples]
 
 
 def optimizer_adapter_sha256(document: OptimizerAdapterDocument) -> str:
@@ -526,6 +540,11 @@ def feedback_from_run_result(result: RunResult) -> OptimizerFeedback:
 
 def gepa_prediction_payload(feedback: OptimizerFeedback) -> dict[str, float | str]:
     """Return kwargs for ``dspy.Prediction(score=..., feedback=...)``."""
+    feedback = _revalidate_optimizer_input(
+        feedback,
+        OptimizerFeedback,
+        noun="optimizer feedback",
+    )
     return {"score": feedback.score, "feedback": feedback.feedback}
 
 
