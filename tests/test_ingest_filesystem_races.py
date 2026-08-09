@@ -147,9 +147,50 @@ def test_evidence_read_path_fallback_preserves_valid_ingestion(
     assert bundle.provenance.size_bytes == len(raw)
 
 
-def test_evidence_json_rejects_duplicate_object_keys(tmp_path: Path) -> None:
+def test_evidence_read_path_fallback_rejects_parent_replacement_before_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "evidence"
+    parent.mkdir()
+    source = parent / "conversation.json"
+    source.write_bytes(_transcript_bytes("conversation-a"))
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    (replacement / source.name).write_bytes(_transcript_bytes("conversation-b"))
+    moved = tmp_path / "original"
+    original_open = os.open
+    swapped = False
+    monkeypatch.setattr(ingest, "_SOURCE_DIR_FD_SUPPORTED", False)
+
+    def swapping_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        nonlocal swapped
+        if not swapped and Path(path) == source:
+            swapped = True
+            parent.rename(moved)
+            replacement.rename(parent)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(ingest.os, "open", swapping_open)
+
+    with pytest.raises(EvidenceIngestError, match="changed while opening"):
+        ingest_transcript_file(source, redact=False)
+
+    assert swapped is True
+    assert (moved / source.name).read_bytes() == _transcript_bytes("conversation-a")
+    assert (parent / source.name).read_bytes() == _transcript_bytes("conversation-b")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"id":"conversation-a","id":"conversation-b","messages":[]}',
+        b'{"id":"conversation-a","messages":[],"metadata":{"x":1,"x":2}}',
+    ],
+)
+def test_evidence_json_rejects_duplicate_object_keys(tmp_path: Path, raw: bytes) -> None:
     source = tmp_path / "conversation.json"
-    source.write_bytes(b'{"id":"conversation-a","id":"conversation-b","messages":[]}')
+    source.write_bytes(raw)
 
     with pytest.raises(EvidenceIngestError, match="duplicate object key"):
         ingest_transcript_file(source, redact=False)
