@@ -131,7 +131,10 @@ def test_new_install_rejects_temp_substitute_before_link(
 
     monkeypatch.setattr(store_export, "_copy_staged", swapping_copy)
 
-    with pytest.raises(ParquetOutputError, match="temporary Parquet output changed before installation"):
+    with pytest.raises(
+        ParquetOutputError,
+        match="temporary Parquet output changed before installation",
+    ):
         _stage_bytes(output, b"safe")
 
     temporary = state["temporary"]
