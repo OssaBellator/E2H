@@ -135,7 +135,7 @@ def test_parquet_parent_failure_restores_previous_output(
 
     def fail_after_replacement(*args: Any, **kwargs: Any) -> None:
         state["calls"] += 1
-        if state["calls"] >= 3:
+        if state["calls"] >= 4:
             raise ParquetOutputError("Parquet output parent changed while exporting")
         original_parent_check(*args, **kwargs)
 
@@ -145,19 +145,56 @@ def test_parquet_parent_failure_restores_previous_output(
         with staged_parquet_output(output) as staged:
             staged.write_bytes(replacement)
 
-    assert state["calls"] >= 3
+    assert state["calls"] >= 4
     assert output.read_bytes() == previous
     assert not list(tmp_path.glob(f".{output.name}.e2h-rollback-*.bak"))
-    assert not list(tmp_path.glob(f".{output.name}.e2h-*.tmp"))
 
 
-def test_parquet_overwrite_replaces_existing_output_without_leftovers(tmp_path: Path) -> None:
+def test_parquet_overwrite_preserves_inode_and_cleans_rollback(tmp_path: Path) -> None:
     output = tmp_path / "export.parquet"
     output.write_bytes(b"previous\n")
+    previous_inode = output.stat().st_ino
 
     with staged_parquet_output(output) as staged:
         staged.write_bytes(b"replacement\n")
 
     assert output.read_bytes() == b"replacement\n"
+    assert output.stat().st_ino == previous_inode
     assert not list(tmp_path.glob(f".{output.name}.e2h-rollback-*.bak"))
-    assert not list(tmp_path.glob(f".{output.name}.e2h-*.tmp"))
+
+
+def test_parquet_substituted_output_is_preserved_and_rollback_is_kept(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "export.parquet"
+    moved = tmp_path / "moved-export.parquet"
+    attacker = tmp_path / "attacker.parquet"
+    previous = b"previous parquet bytes\n"
+    replacement = b"replacement parquet bytes\n"
+    attacker_bytes = b"attacker bytes\n"
+    output.write_bytes(previous)
+    attacker.write_bytes(attacker_bytes)
+    original_copy = store_export._copy_staged
+    state = {"swapped": False}
+
+    def swapping_copy(staged: Path, descriptor: int) -> Any:
+        written = original_copy(staged, descriptor)
+        if not state["swapped"]:
+            state["swapped"] = True
+            output.rename(moved)
+            attacker.rename(output)
+        return written
+
+    monkeypatch.setattr(store_export, "_copy_staged", swapping_copy)
+
+    with pytest.raises(ParquetOutputError, match="destination changed while writing"):
+        with staged_parquet_output(output) as staged:
+            staged.write_bytes(replacement)
+
+    assert state["swapped"] is True
+    assert output.read_bytes() == attacker_bytes
+    assert moved.read_bytes() == replacement
+    backups = list(tmp_path.glob(f".{output.name}.e2h-rollback-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == previous
