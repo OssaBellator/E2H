@@ -30,10 +30,15 @@ def _inode_identity(info: os.stat_result) -> tuple[int, int]:
     return (info.st_dev, info.st_ino)
 
 
-def _parent_must_be_stable(parent: Path, descriptor: int, opened: os.stat_result) -> None:
+def _parent_must_be_stable(
+    requested_parent: Path,
+    descriptor: int,
+    opened: os.stat_result,
+) -> None:
     try:
         after = os.fstat(descriptor)
-        current = parent.stat(follow_symlinks=False)
+        current_parent = requested_parent.resolve(strict=True)
+        current = current_parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise ParquetOutputError(f"unable to restat Parquet output parent: {exc}") from exc
     expected_identity = _inode_identity(opened)
@@ -93,6 +98,7 @@ def _copy_staged(staged: Path, descriptor: int) -> os.stat_result:
 
 def _install_new(
     parent: Path,
+    requested_parent: Path,
     parent_descriptor: int,
     parent_opened: os.stat_result,
     output_name: str,
@@ -119,7 +125,7 @@ def _install_new(
         written = _copy_staged(staged, descriptor)
         if _inode_identity(written) != _inode_identity(opened):
             raise ParquetOutputError("temporary Parquet output changed while writing")
-        _parent_must_be_stable(parent, parent_descriptor, parent_opened)
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         try:
             if _EXPORT_DIR_FD_SUPPORTED:
                 os.link(
@@ -137,7 +143,7 @@ def _install_new(
         current = _stat_entry(parent_descriptor, parent, output_name)
         if _inode_identity(current) != _inode_identity(written):
             raise ParquetOutputError("Parquet output destination changed while installing")
-        _parent_must_be_stable(parent, parent_descriptor, parent_opened)
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         success = True
     finally:
         if descriptor is not None:
@@ -157,6 +163,7 @@ def _install_new(
 
 def _overwrite_existing(
     parent: Path,
+    requested_parent: Path,
     parent_descriptor: int,
     parent_opened: os.stat_result,
     output_name: str,
@@ -172,14 +179,14 @@ def _overwrite_existing(
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode) or _inode_identity(opened) != _inode_identity(expected):
             raise ParquetOutputError("Parquet output destination changed while opening")
-        _parent_must_be_stable(parent, parent_descriptor, parent_opened)
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         written = _copy_staged(staged, descriptor)
         current = _stat_entry(parent_descriptor, parent, output_name)
         if _inode_identity(written) != _inode_identity(opened) or _inode_identity(
             current
         ) != _inode_identity(opened):
             raise ParquetOutputError("Parquet output destination changed while writing")
-        _parent_must_be_stable(parent, parent_descriptor, parent_opened)
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
     finally:
         with suppress(OSError):
             os.close(descriptor)
@@ -188,9 +195,10 @@ def _overwrite_existing(
 def _install_staged(output: Path, staged: Path) -> None:
     if not output.name:
         raise ParquetOutputError("Parquet output must name a file")
-    output.parent.mkdir(parents=True, exist_ok=True)
+    requested_parent = output.parent.absolute()
+    requested_parent.mkdir(parents=True, exist_ok=True)
     try:
-        parent = output.parent.resolve(strict=True)
+        parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise ParquetOutputError(f"unable to inspect Parquet output parent: {exc}") from exc
@@ -220,10 +228,11 @@ def _install_staged(output: Path, staged: Path) -> None:
             stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode)
         ):
             raise ParquetOutputError("Parquet output destination must be a regular file")
-        _parent_must_be_stable(parent, parent_descriptor, parent_opened)
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
         if expected is None:
             _install_new(
                 parent,
+                requested_parent,
                 parent_descriptor,
                 parent_opened,
                 output.name,
@@ -232,6 +241,7 @@ def _install_staged(output: Path, staged: Path) -> None:
         else:
             _overwrite_existing(
                 parent,
+                requested_parent,
                 parent_descriptor,
                 parent_opened,
                 output.name,
