@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -97,6 +98,15 @@ class VariantSummary(StrictModel):
     pass_rate: float = Field(ge=0, le=1)
     mean_duration_seconds: float = Field(ge=0)
 
+    @model_validator(mode="after")
+    def counts_and_rate_must_be_consistent(self) -> VariantSummary:
+        if self.passed + self.failed + self.errors != self.runs:
+            raise ValueError("variant summary status counts must sum to runs")
+        expected_rate = self.passed / self.runs
+        if not math.isclose(self.pass_rate, expected_rate, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValueError("variant summary pass_rate must equal passed / runs")
+        return self
+
 
 class ExperimentResult(StrictModel):
     """Structured output of a complete replay matrix."""
@@ -109,6 +119,40 @@ class ExperimentResult(StrictModel):
     duration_seconds: float = Field(ge=0)
     runs: list[ExperimentRun] = Field(min_length=1)
     summaries: list[VariantSummary] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def summaries_must_match_runs(self) -> ExperimentResult:
+        if self.finished_at < self.started_at:
+            raise ValueError("experiment finished_at must not precede started_at")
+        if any(run.result.capsule_id != self.capsule_id for run in self.runs):
+            raise ValueError("experiment runs must use the declared capsule_id")
+        summary_ids = [summary.variant_id for summary in self.summaries]
+        if len(summary_ids) != len(set(summary_ids)):
+            raise ValueError("experiment summary variant ids must be unique")
+        run_variant_ids = {run.variant_id for run in self.runs}
+        if set(summary_ids) != run_variant_ids:
+            raise ValueError("experiment summaries must cover exactly the run variants")
+        for summary in self.summaries:
+            variant_runs = [run for run in self.runs if run.variant_id == summary.variant_id]
+            passed = sum(run.result.status is RunStatus.PASSED for run in variant_runs)
+            failed = sum(run.result.status is RunStatus.FAILED for run in variant_runs)
+            errors = sum(run.result.status is RunStatus.ERROR for run in variant_runs)
+            if (
+                summary.runs != len(variant_runs)
+                or summary.passed != passed
+                or summary.failed != failed
+                or summary.errors != errors
+            ):
+                raise ValueError("experiment summary counts must match variant runs")
+            expected_mean = fmean(run.result.duration_seconds for run in variant_runs)
+            if not math.isclose(
+                summary.mean_duration_seconds,
+                expected_mean,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            ):
+                raise ValueError("experiment summary mean duration must match variant runs")
+        return self
 
     @property
     def all_passed(self) -> bool:
