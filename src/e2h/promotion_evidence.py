@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
 from e2h.partitions import PartitionRole
 
 _ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
@@ -31,6 +32,7 @@ class StrictModel(BaseModel):
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
