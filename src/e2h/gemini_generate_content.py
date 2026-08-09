@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
 from e2h.ingest import (
     EvidenceFormat,
     EvidenceIngestError,
@@ -43,6 +44,7 @@ class StrictModel(BaseModel):
 
 def _ensure_json(value: Any, noun: str) -> None:
     try:
+        _validate_json_compatible(value)
         json.dumps(value, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{noun} must contain canonical JSON values") from exc
