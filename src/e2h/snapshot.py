@@ -573,18 +573,32 @@ def _backup_snapshot_output_path(
         if not stat.S_ISREG(current.st_mode) or _inode_identity(current) != expected_identity:
             raise SnapshotError("snapshot output changed before publication")
         try:
-            os.replace(plain_output, backup)
-            moved = backup.stat(follow_symlinks=False)
-        except OSError as exc:
-            raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
-        if stat.S_ISREG(moved.st_mode) and _inode_identity(moved) == expected_identity:
-            return backup, expected_identity
+            os.link(plain_output, backup, follow_symlinks=False)
+        except FileExistsError:
+            continue
+        except (OSError, NotImplementedError) as exc:
+            raise SnapshotError(
+                f"unable to preserve existing snapshot output safely: {exc}"
+            ) from exc
         try:
-            plain_output.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            with suppress(OSError):
-                os.replace(backup, plain_output)
-        raise SnapshotError("snapshot output changed while preserving it")
+            backup_current = backup.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to verify snapshot output rollback path: {exc}") from exc
+        backup_identity = _inode_identity(backup_current)
+        if not stat.S_ISREG(backup_current.st_mode) or backup_identity != expected_identity:
+            if stat.S_ISREG(backup_current.st_mode):
+                _remove_regular_path_if_identity(backup, backup_identity)
+            raise SnapshotError("snapshot output changed while preserving it")
+        try:
+            output_current = plain_output.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to revalidate snapshot output: {exc}") from exc
+        if (
+            not stat.S_ISREG(output_current.st_mode)
+            or _inode_identity(output_current) != expected_identity
+        ):
+            raise SnapshotError("snapshot output changed while preserving it")
+        return backup, expected_identity
     raise SnapshotError("unable to allocate snapshot output rollback path")
 
 
@@ -1393,7 +1407,7 @@ def restore_snapshot(
             parent_info,
             noun="restore destination",
         )
-        destination_exists = _restore_destination_is_empty(parent_descriptor, destination)
+        _restore_destination_is_empty(parent_descriptor, destination)
         _snapshot_write_parent_must_be_stable(
             destination,
             parent_descriptor,
@@ -1417,8 +1431,6 @@ def restore_snapshot(
                 or _inode_identity(staging_info) != staging_identity
             ):
                 raise SnapshotError("restore staging directory changed before publication")
-            if destination_exists:
-                destination.rmdir()
             os.replace(staging_path, destination)
             current = destination.stat(follow_symlinks=False)
             if (

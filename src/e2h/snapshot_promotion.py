@@ -198,62 +198,45 @@ def _backup_existing_snapshot_output(
     if not stat.S_ISREG(current.st_mode):
         raise SnapshotError("snapshot output must remain a regular file")
     expected_identity = _inode_identity(current)
+    if os.link not in os.supports_dir_fd:
+        raise SnapshotError(
+            "unable to preserve existing snapshot output safely: hard-link backup unavailable"
+        )
     for _ in range(128):
         backup_name = f".{output.name}.rollback-{secrets.token_hex(16)}.bak"
-        moved = True
-        if os.link in os.supports_dir_fd:
-            try:
-                os.link(
-                    output.name,
-                    backup_name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
-                    follow_symlinks=False,
-                )
-            except FileExistsError:
-                continue
-            except (OSError, NotImplementedError):
-                pass
-            else:
-                moved = False
-        if moved:
-            try:
-                os.rename(
-                    output.name,
-                    backup_name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
-                )
-            except FileExistsError:
-                continue
-            except OSError as exc:
-                raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
+        try:
+            os.link(
+                output.name,
+                backup_name,
+                src_dir_fd=parent_descriptor,
+                dst_dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            continue
+        except (OSError, NotImplementedError) as exc:
+            raise SnapshotError(
+                f"unable to preserve existing snapshot output safely: {exc}"
+            ) from exc
         try:
             backup = _stat_entry(parent_descriptor, backup_name)
-            if not stat.S_ISREG(backup.st_mode) or _inode_identity(backup) != expected_identity:
-                raise SnapshotError("existing snapshot output changed while preserving it")
-            if not moved:
-                output_current = _stat_entry(parent_descriptor, output.name)
-                if (
-                    not stat.S_ISREG(output_current.st_mode)
-                    or _inode_identity(output_current) != expected_identity
-                ):
-                    raise SnapshotError("existing snapshot output changed while preserving it")
-            return backup_name, expected_identity, moved
-        except Exception:
-            if moved:
-                try:
-                    os.rename(
-                        backup_name,
-                        output.name,
-                        src_dir_fd=parent_descriptor,
-                        dst_dir_fd=parent_descriptor,
-                    )
-                except OSError:
-                    pass
-            else:
-                _remove_regular_file_at(parent_descriptor, backup_name, expected_identity)
-            raise
+        except OSError as exc:
+            raise SnapshotError(f"unable to verify snapshot output rollback entry: {exc}") from exc
+        backup_identity = _inode_identity(backup)
+        if not stat.S_ISREG(backup.st_mode) or backup_identity != expected_identity:
+            if stat.S_ISREG(backup.st_mode):
+                _remove_regular_file_at(parent_descriptor, backup_name, backup_identity)
+            raise SnapshotError("existing snapshot output changed while preserving it")
+        try:
+            output_current = _stat_entry(parent_descriptor, output.name)
+        except OSError as exc:
+            raise SnapshotError(f"unable to revalidate existing snapshot output: {exc}") from exc
+        if (
+            not stat.S_ISREG(output_current.st_mode)
+            or _inode_identity(output_current) != expected_identity
+        ):
+            raise SnapshotError("existing snapshot output changed while preserving it")
+        return backup_name, expected_identity, False
     raise SnapshotError("unable to allocate snapshot output rollback entry")
 
 
