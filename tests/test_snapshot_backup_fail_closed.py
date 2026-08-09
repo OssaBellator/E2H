@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,10 +37,10 @@ def test_snapshot_overwrite_fails_closed_when_hard_link_backup_fails(
     original_supports_dir_fd = os.supports_dir_fd
     rename_calls = 0
 
-    def failing_link(*args: object, **kwargs: object) -> None:
+    def failing_link(*args: Any, **kwargs: Any) -> None:
         raise OSError("simulated hard-link failure")
 
-    def recording_rename(*args: object, **kwargs: object) -> None:
+    def recording_rename(*args: Any, **kwargs: Any) -> None:
         nonlocal rename_calls
         rename_calls += 1
         original_rename(*args, **kwargs)
@@ -57,3 +58,46 @@ def test_snapshot_overwrite_fails_closed_when_hard_link_backup_fails(
     assert output.read_bytes() == b"previous snapshot\n"
     assert temporary.read_bytes() == b"replacement snapshot\n"
     assert not list(parent.glob(f".{output.name}.rollback-*.bak"))
+
+
+def test_snapshot_backup_race_keeps_known_good_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "output-parent"
+    parent.mkdir()
+    output = parent / "snapshot.e2hsnap"
+    temporary = parent / ".snapshot.tmp"
+    attacker = parent / "attacker.e2hsnap"
+    previous = b"previous snapshot\n"
+    attacker_bytes = b"attacker snapshot\n"
+    output.write_bytes(previous)
+    temporary.write_bytes(b"replacement snapshot\n")
+    attacker.write_bytes(attacker_bytes)
+    descriptor, opened = _open_directory(parent)
+    original_link = os.link
+    original_supports_dir_fd = os.supports_dir_fd
+    swapped = False
+
+    def swapping_link(*args: Any, **kwargs: Any) -> None:
+        nonlocal swapped
+        original_link(*args, **kwargs)
+        if not swapped:
+            swapped = True
+            output.unlink()
+            attacker.rename(output)
+
+    monkeypatch.setattr(os, "link", swapping_link)
+    monkeypatch.setattr(os, "supports_dir_fd", {*original_supports_dir_fd, swapping_link})
+    try:
+        with pytest.raises(SnapshotError, match="changed while preserving"):
+            promote_snapshot_file(output, descriptor, opened, temporary.name)
+    finally:
+        os.close(descriptor)
+
+    assert swapped is True
+    assert output.read_bytes() == attacker_bytes
+    assert temporary.read_bytes() == b"replacement snapshot\n"
+    backups = list(parent.glob(f".{output.name}.rollback-*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == previous
