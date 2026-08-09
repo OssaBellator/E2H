@@ -123,17 +123,72 @@ def _unlink_regular_entry_if_identity(
                 os.close(descriptor)
 
 
-def _copy_staged(staged: Path, descriptor: int) -> os.stat_result:
+def _open_staged(staged: Path) -> tuple[int, os.stat_result]:
+    try:
+        expected = staged.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ParquetOutputError(
+            "Parquet export did not produce a regular staging file"
+        ) from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+        raise ParquetOutputError("Parquet export did not produce a regular staging file")
+    descriptor: int | None = None
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(staged, flags)
+        opened = os.fstat(descriptor)
+        current = staged.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(current.st_mode)
+            or _stat_identity(opened) != _stat_identity(expected)
+            or _stat_identity(current) != _stat_identity(opened)
+        ):
+            raise ParquetOutputError("Parquet staging file changed while opening")
+        return descriptor, opened
+    except OSError as exc:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        raise ParquetOutputError(f"Parquet staging file changed while opening: {exc}") from exc
+    except Exception:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        raise
+
+
+def _copy_staged(
+    staged: tuple[int, os.stat_result],
+    descriptor: int,
+) -> os.stat_result:
+    staged_descriptor, staged_expected = staged
+    try:
+        staged_before = os.fstat(staged_descriptor)
+    except OSError as exc:
+        raise ParquetOutputError(f"unable to inspect Parquet staging file: {exc}") from exc
+    if (
+        not stat.S_ISREG(staged_before.st_mode)
+        or _stat_identity(staged_before) != _stat_identity(staged_expected)
+    ):
+        raise ParquetOutputError("Parquet staging file changed before installation")
     observed = 0
     os.ftruncate(descriptor, 0)
+    os.lseek(staged_descriptor, 0, os.SEEK_SET)
     os.lseek(descriptor, 0, os.SEEK_SET)
-    with staged.open("rb") as source, os.fdopen(descriptor, "wb", closefd=False) as target:
-        while chunk := source.read(1024 * 1024):
+    with os.fdopen(descriptor, "wb", closefd=False) as target:
+        while chunk := os.read(staged_descriptor, 1024 * 1024):
             target.write(chunk)
             observed += len(chunk)
         target.flush()
     os.fsync(descriptor)
+    staged_after = os.fstat(staged_descriptor)
     after = os.fstat(descriptor)
+    if (
+        _stat_identity(staged_after) != _stat_identity(staged_before)
+        or observed != staged_before.st_size
+    ):
+        raise ParquetOutputError("Parquet staging file changed while installing")
     if after.st_size != observed:
         raise ParquetOutputError("Parquet output changed while writing")
     return after
@@ -245,7 +300,7 @@ def _install_new(
     parent_descriptor: int,
     parent_opened: os.stat_result,
     output_name: str,
-    staged: Path,
+    staged: tuple[int, os.stat_result],
 ) -> None:
     temp_name = f".{output_name}.e2h-{secrets.token_hex(16)}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -320,7 +375,7 @@ def _overwrite_existing(
     parent_opened: os.stat_result,
     output_name: str,
     expected: os.stat_result,
-    staged: Path,
+    staged: tuple[int, os.stat_result],
 ) -> None:
     flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -401,7 +456,10 @@ def _overwrite_existing(
             os.close(descriptor)
 
 
-def _install_staged(output: Path, staged: Path) -> None:
+def _install_staged(
+    output: Path,
+    staged: tuple[int, os.stat_result],
+) -> None:
     if not output.name:
         raise ParquetOutputError("Parquet output must name a file")
     requested_parent = output.parent.absolute()
@@ -469,9 +527,14 @@ def staged_parquet_output(output: Path) -> Iterator[Path]:
         with tempfile.TemporaryDirectory(prefix="e2h-store-export-") as staging_directory:
             staged = Path(staging_directory) / "export.parquet"
             yield staged
-            if not staged.is_file():
-                raise ParquetOutputError("Parquet export did not produce a regular staging file")
-            _install_staged(output, staged)
+            staged_descriptor: int | None = None
+            try:
+                staged_descriptor, staged_expected = _open_staged(staged)
+                _install_staged(output, (staged_descriptor, staged_expected))
+            finally:
+                if staged_descriptor is not None:
+                    with suppress(OSError):
+                        os.close(staged_descriptor)
     except ParquetOutputError:
         raise
     except OSError as exc:
