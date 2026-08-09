@@ -219,15 +219,81 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def _read_source_bytes(path: Path) -> bytes:
+def _source_parent(path: Path) -> tuple[Path, os.stat_result]:
     try:
         parent = path.parent.resolve(strict=True)
-        parent_expected = parent.stat(follow_symlinks=False)
+        expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
-    if not stat.S_ISDIR(parent_expected.st_mode):
+    if not stat.S_ISDIR(expected.st_mode):
         raise EvidenceIngestError("evidence parent must be a directory")
+    return parent, expected
 
+
+def _read_source_bytes_path(
+    path: Path,
+    parent: Path,
+    parent_expected: os.stat_result,
+) -> bytes:
+    source = parent / path.name
+    try:
+        expected = source.stat(follow_symlinks=False)
+        parent_before_open = parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+        raise EvidenceIngestError("evidence must be a regular file")
+    if expected.st_size > _MAX_SOURCE_BYTES:
+        raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+    if _stat_identity(parent_before_open) != _stat_identity(parent_expected):
+        raise EvidenceIngestError("evidence parent changed while opening")
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(source, flags)
+    except OSError as exc:
+        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise EvidenceIngestError("evidence must be a regular file")
+        if _stat_identity(opened) != _stat_identity(expected):
+            raise EvidenceIngestError("evidence changed while opening")
+        if opened.st_size > _MAX_SOURCE_BYTES:
+            raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(_MAX_SOURCE_BYTES + 1)
+
+        after = os.fstat(descriptor)
+        try:
+            current = source.stat(follow_symlinks=False)
+            parent_current = parent.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+        if len(raw) > _MAX_SOURCE_BYTES:
+            raise EvidenceIngestError(f"evidence exceeds {_MAX_SOURCE_BYTES} bytes")
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or len(raw) != opened.st_size
+        ):
+            raise EvidenceIngestError("evidence changed while reading")
+        if _stat_identity(parent_current) != _stat_identity(parent_expected):
+            raise EvidenceIngestError("evidence parent changed while reading")
+        return raw
+    except OSError as exc:
+        raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
+
+
+def _read_source_bytes_descriptor(
+    path: Path,
+    parent: Path,
+    parent_expected: os.stat_result,
+) -> bytes:
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         parent_descriptor = os.open(parent, directory_flags)
@@ -243,14 +309,10 @@ def _read_source_bytes(path: Path) -> bytes:
             raise EvidenceIngestError("evidence parent changed while opening")
 
         try:
-            expected = (
-                os.stat(
-                    path.name,
-                    dir_fd=parent_descriptor,
-                    follow_symlinks=False,
-                )
-                if _SOURCE_DIR_FD_SUPPORTED
-                else (parent / path.name).stat(follow_symlinks=False)
+            expected = os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
             )
         except OSError as exc:
             raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
@@ -261,11 +323,7 @@ def _read_source_bytes(path: Path) -> bytes:
 
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
-            descriptor = (
-                os.open(path.name, flags, dir_fd=parent_descriptor)
-                if _SOURCE_DIR_FD_SUPPORTED
-                else os.open(parent / path.name, flags)
-            )
+            descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
         except OSError as exc:
             raise EvidenceIngestError(f"unable to read evidence: {exc}") from exc
         opened = os.fstat(descriptor)
@@ -281,14 +339,10 @@ def _read_source_bytes(path: Path) -> bytes:
 
         after = os.fstat(descriptor)
         try:
-            current = (
-                os.stat(
-                    path.name,
-                    dir_fd=parent_descriptor,
-                    follow_symlinks=False,
-                )
-                if _SOURCE_DIR_FD_SUPPORTED
-                else (parent / path.name).stat(follow_symlinks=False)
+            current = os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
             )
             parent_after = os.fstat(parent_descriptor)
             parent_current = parent.stat(follow_symlinks=False)
@@ -316,6 +370,13 @@ def _read_source_bytes(path: Path) -> bytes:
                 os.close(descriptor)
         with suppress(OSError):
             os.close(parent_descriptor)
+
+
+def _read_source_bytes(path: Path) -> bytes:
+    parent, parent_expected = _source_parent(path)
+    if _SOURCE_DIR_FD_SUPPORTED:
+        return _read_source_bytes_descriptor(path, parent, parent_expected)
+    return _read_source_bytes_path(path, parent, parent_expected)
 
 
 def _load_json(
