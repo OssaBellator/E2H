@@ -489,11 +489,21 @@ class VariantVerification(StrictModel):
 
 def variant_sha256(variant: HarnessVariant) -> str:
     """Return the canonical identity of one typed harness configuration."""
+    variant = _revalidate_variant_input(
+        variant,
+        HarnessVariant,
+        noun="harness variant",
+    )
     return hashlib.sha256(_canonical_json_bytes(variant.model_dump(mode="json"))).hexdigest()
 
 
 def variant_document_sha256(document: HarnessVariantDocument) -> str:
     """Return the canonical identity of one bound variant document."""
+    document = _revalidate_variant_input(
+        document,
+        HarnessVariantDocument,
+        noun="variant document",
+    )
     return hashlib.sha256(_canonical_json_bytes(document.model_dump(mode="json"))).hexdigest()
 
 
