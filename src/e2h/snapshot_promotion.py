@@ -121,10 +121,13 @@ def _remove_tree_at(
             except OSError:
                 continue
             if stat.S_ISDIR(child.st_mode) and not stat.S_ISLNK(child.st_mode):
-                _remove_tree_at(descriptor, child_name)
-            else:
-                with suppress(OSError):
-                    os.unlink(child_name, dir_fd=descriptor)
+                _remove_tree_at(
+                    descriptor,
+                    child_name,
+                    expected_identity=_inode_identity(child),
+                )
+            elif stat.S_ISREG(child.st_mode):
+                _remove_regular_file_by_identity_at(descriptor, _inode_identity(child))
     except OSError:
         return
     finally:
