@@ -61,6 +61,41 @@ def test_writer_rejects_nonfinite_value_added_after_validation(tmp_path: Path) -
     assert not output.exists()
 
 
+def test_writer_rejects_invalid_sequence_added_after_validation(tmp_path: Path) -> None:
+    trace = Trace(trace_id="trace", events=[_event(0), _event(1)])
+    trace.events[1].sequence = 7
+    output = tmp_path / "traces.jsonl"
+
+    with pytest.raises(ValueError, match="contiguous"):
+        write_traces_jsonl(output, [trace])
+
+    assert not output.exists()
+
+
+def test_writer_rejects_naive_timestamp_added_after_validation(tmp_path: Path) -> None:
+    trace = Trace(trace_id="trace", events=[_event(0), _event(1)])
+    trace.events[0].timestamp = datetime(2026, 8, 9, 4, 0)
+    output = tmp_path / "traces.jsonl"
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        write_traces_jsonl(output, [trace])
+
+    assert not output.exists()
+
+
+def test_writer_rejects_trace_subclass(tmp_path: Path) -> None:
+    class TraceSubclass(Trace):
+        pass
+
+    trace = TraceSubclass(trace_id="trace", events=[_event(0), _event(1)])
+    output = tmp_path / "traces.jsonl"
+
+    with pytest.raises(ValueError, match="expected Trace, got TraceSubclass"):
+        write_traces_jsonl(output, [trace])
+
+    assert not output.exists()
+
+
 def test_writer_emits_strict_json(tmp_path: Path) -> None:
     trace = Trace(trace_id="trace", events=[_event(0), _event(1)])
     trace.events[0].payload["value"] = 1.25

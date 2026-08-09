@@ -116,6 +116,17 @@ class Trace(BaseModel):
         return self
 
 
+def _revalidate_trace_for_write(value: Trace) -> Trace:
+    if type(value) is not Trace:
+        raise ValueError(f"invalid trace: expected Trace, got {type(value).__name__}")
+    try:
+        payload = value.model_dump(mode="python", warnings="none")
+        _reject_non_finite_json_numbers(payload)
+        return Trace.model_validate(payload)
+    except ValueError as exc:
+        raise ValueError(f"invalid trace: {exc}") from exc
+
+
 def trace_from_run_result(
     result: RunResult,
     *,
@@ -199,8 +210,8 @@ def write_traces_jsonl(path: Path, traces: list[Trace]) -> None:
     """Write normalized events as deterministic JSON Lines."""
     lines: list[str] = []
     for trace in traces:
-        for event in trace.events:
-            _reject_non_finite_json_numbers(event.model_dump(mode="python"))
+        normalized = _revalidate_trace_for_write(trace)
+        for event in normalized.events:
             lines.append(
                 json.dumps(
                     event.model_dump(mode="json"),
