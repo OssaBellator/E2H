@@ -287,6 +287,10 @@ def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
     return (info.st_dev, info.st_ino, info.st_mode)
 
 
+def _inode_identity(info: os.stat_result) -> tuple[int, int]:
+    return (info.st_dev, info.st_ino)
+
+
 def _open_materialization_parent(destination: Path) -> tuple[Path, int, os.stat_result]:
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -344,6 +348,31 @@ def _stat_materialization_entry(parent_descriptor: int, name: str) -> os.stat_re
     return os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
 
 
+def _materialization_root_must_be_stable(
+    parent_descriptor: int,
+    name: str,
+    root_descriptor: int,
+    expected: os.stat_result,
+) -> None:
+    try:
+        opened = os.fstat(root_descriptor)
+        current = _stat_materialization_entry(parent_descriptor, name)
+    except OSError as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to restat environment materialization destination: {exc}"
+        ) from exc
+    expected_identity = _inode_identity(expected)
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or _inode_identity(opened) != expected_identity
+        or _inode_identity(current) != expected_identity
+    ):
+        raise BenchmarkEnvironmentError(
+            "environment materialization destination changed while writing"
+        )
+
+
 def _open_bound_materialized_directory(
     parent_descriptor: int,
     name: str,
@@ -383,8 +412,18 @@ def _open_materialized_directory(
                     raise BenchmarkEnvironmentError(
                         f"materialized environment directory is missing: {part}"
                     ) from None
-                os.mkdir(part, 0o700, dir_fd=current)
-                expected = _stat_materialization_entry(current, part)
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current)
+                except OSError as exc:
+                    raise BenchmarkEnvironmentError(
+                        f"unable to create materialized environment directory {part}: {exc}"
+                    ) from exc
+                try:
+                    expected = _stat_materialization_entry(current, part)
+                except OSError as exc:
+                    raise BenchmarkEnvironmentError(
+                        f"unable to inspect materialized environment directory {part}: {exc}"
+                    ) from exc
             except OSError as exc:
                 raise BenchmarkEnvironmentError(
                     f"unable to inspect materialized environment directory {part}: {exc}"
@@ -408,14 +447,22 @@ def _open_materialized_directory(
         raise
 
 
-def _remove_materialized_tree_at(parent_descriptor: int, name: str) -> None:
+def _remove_materialized_tree_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    expected_identity: tuple[int, int] | None = None,
+) -> None:
     try:
         expected = _stat_materialization_entry(parent_descriptor, name)
     except OSError:
         return
+    if expected_identity is not None and _inode_identity(expected) != expected_identity:
+        return
     if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
-        with suppress(OSError):
-            os.unlink(name, dir_fd=parent_descriptor)
+        if expected_identity is None:
+            with suppress(OSError):
+                os.unlink(name, dir_fd=parent_descriptor)
         return
     descriptor: int | None = None
     try:
@@ -441,8 +488,41 @@ def _remove_materialized_tree_at(parent_descriptor: int, name: str) -> None:
         if descriptor is not None:
             with suppress(OSError):
                 os.close(descriptor)
+    try:
+        current = _stat_materialization_entry(parent_descriptor, name)
+    except OSError:
+        return
+    if _inode_identity(current) != _inode_identity(expected):
+        return
+    if expected_identity is not None and _inode_identity(current) != expected_identity:
+        return
     with suppress(OSError):
         os.rmdir(name, dir_fd=parent_descriptor)
+
+
+def _remove_materialized_tree_by_identity_at(
+    parent_descriptor: int,
+    expected_identity: tuple[int, int],
+) -> None:
+    try:
+        names = os.listdir(parent_descriptor)
+    except OSError:
+        return
+    for name in names:
+        try:
+            entry = _stat_materialization_entry(parent_descriptor, name)
+        except OSError:
+            continue
+        if _inode_identity(entry) != expected_identity:
+            continue
+        if stat.S_ISLNK(entry.st_mode) or not stat.S_ISDIR(entry.st_mode):
+            return
+        _remove_materialized_tree_at(
+            parent_descriptor,
+            name,
+            expected_identity=expected_identity,
+        )
+        return
 
 
 def _resolve_under_source(source: Path, path: Path, relative: str) -> Path:
@@ -1045,6 +1125,8 @@ def _copy_environment_tree_descriptor(
 ) -> _ScannedEnvironment:
     destination, parent_descriptor, parent_info = _open_materialization_parent(destination)
     root_descriptor: int | None = None
+    root_expected: os.stat_result | None = None
+    root_identity: tuple[int, int] | None = None
     created = False
     try:
         try:
@@ -1079,7 +1161,13 @@ def _copy_environment_tree_descriptor(
                 f"unable to create benchmark environment destination: {exc}"
             ) from exc
         created = True
-        root_expected = _stat_materialization_entry(parent_descriptor, destination.name)
+        try:
+            root_expected = _stat_materialization_entry(parent_descriptor, destination.name)
+        except OSError as exc:
+            raise BenchmarkEnvironmentError(
+                f"unable to inspect environment materialization destination after creation: {exc}"
+            ) from exc
+        root_identity = _inode_identity(root_expected)
         root_descriptor = _open_bound_materialized_directory(
             parent_descriptor,
             destination.name,
@@ -1172,14 +1260,20 @@ def _copy_environment_tree_descriptor(
             parent_descriptor,
             parent_info,
         )
+        _materialization_root_must_be_stable(
+            parent_descriptor,
+            destination.name,
+            root_descriptor,
+            root_expected,
+        )
         return scanned
     except BenchmarkEnvironmentError:
         if root_descriptor is not None:
             with suppress(OSError):
                 os.close(root_descriptor)
             root_descriptor = None
-        if created:
-            _remove_materialized_tree_at(parent_descriptor, destination.name)
+        if created and root_identity is not None:
+            _remove_materialized_tree_by_identity_at(parent_descriptor, root_identity)
         raise
     finally:
         if root_descriptor is not None:
