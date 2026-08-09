@@ -800,10 +800,14 @@ def create_snapshot(
     limits: SnapshotLimits | None = None,
 ) -> SnapshotManifest:
     """Create a deterministic snapshot archive and return its manifest."""
+    from e2h.snapshot_source import (
+        _root_path_must_be_stable,
+        collect_snapshot_source,
+        resolve_snapshot_source_root,
+    )
+
     limits = revalidate_snapshot_limits(limits)
-    root = root.resolve()
-    if not root.is_dir():
-        raise SnapshotError(f"snapshot root is not a directory: {root}")
+    root, root_info = resolve_snapshot_source_root(root)
     output, parent_descriptor, parent_info = _open_snapshot_write_parent(
         output,
         noun="snapshot output",
@@ -822,45 +826,20 @@ def create_snapshot(
             if stat.S_ISLNK(output_info.st_mode) or not stat.S_ISREG(output_info.st_mode):
                 raise SnapshotError("snapshot output must be a regular file")
         ignored = {output}
-        entries: list[SnapshotEntry] = []
-        blobs: dict[str, bytes] = {}
-        total_bytes = 0
-        for relative, path in _iter_selected(root, includes, tuple(excludes), ignored):
-            if len(entries) >= limits.max_entries:
-                raise SnapshotError("snapshot exceeds max_entries")
-            _resolve_under_root(root, path, relative)
-            try:
-                entry = path.stat(follow_symlinks=False)
-            except OSError as exc:
-                raise SnapshotError(f"unable to stat {relative}: {exc}") from exc
-            if stat.S_ISLNK(entry.st_mode):
-                raise SnapshotError(f"symbolic links are not supported: {relative}")
-            if stat.S_ISDIR(entry.st_mode):
-                entries.append(SnapshotEntry(path=relative, kind="directory"))
-                continue
-            if not stat.S_ISREG(entry.st_mode):
-                raise SnapshotError(f"unsupported filesystem entry: {relative}")
-            data = _read_file(root, path, relative, limits, entry)
-            total_bytes += len(data)
-            if total_bytes > limits.max_total_bytes:
-                raise SnapshotError("snapshot exceeds max_total_bytes")
-            digest = hashlib.sha256(data).hexdigest()
-            executable = bool(entry.st_mode & stat.S_IXUSR)
-            entries.append(
-                SnapshotEntry(
-                    path=relative,
-                    kind="file",
-                    sha256=digest,
-                    size_bytes=len(data),
-                    executable=executable,
-                )
-            )
-            blobs.setdefault(digest, data)
+        entries, blobs, total_bytes = collect_snapshot_source(
+            root,
+            root_info,
+            includes=includes,
+            excludes=excludes,
+            ignored_paths=ignored,
+            limits=limits,
+        )
         core = SnapshotCore(entries=entries, total_bytes=total_bytes, metadata=metadata or {})
         manifest = SnapshotManifest(snapshot_id=_snapshot_id_validated(core), core=core)
         manifest_bytes = _canonical_json(manifest.model_dump(mode="json")) + b"\n"
         if len(manifest_bytes) > MAX_MANIFEST_BYTES:
             raise SnapshotError("snapshot manifest is too large")
+        _root_path_must_be_stable(root, root_info)
         _snapshot_write_parent_must_be_stable(
             output,
             parent_descriptor,
@@ -878,6 +857,7 @@ def create_snapshot(
                     archive.writestr(_zip_info(MANIFEST_NAME), manifest_bytes)
                     for digest in sorted(blobs):
                         archive.writestr(_zip_info(f"{BLOB_PREFIX}{digest}"), blobs[digest])
+            _root_path_must_be_stable(root, root_info)
             _snapshot_write_parent_must_be_stable(
                 output,
                 parent_descriptor,
