@@ -52,7 +52,7 @@ def test_parquet_staging_rejects_path_substitution_while_opening(
     assert not output.exists()
 
 
-def test_parquet_staging_uses_bound_inode_after_path_replacement(
+def test_parquet_staging_rejects_path_replacement_after_open(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -60,24 +60,25 @@ def test_parquet_staging_uses_bound_inode_after_path_replacement(
     original_copy = store_export._copy_staged
     swapped = False
 
-    with staged_parquet_output(output) as staged:
-        staged.write_bytes(b"safe-original")
-        moved = staged.parent / "original.parquet"
-        attacker = staged.parent / "attacker.parquet"
-        attacker.write_bytes(b"attacker")
+    with pytest.raises(ParquetOutputError, match="changed before installation"):
+        with staged_parquet_output(output) as staged:
+            staged.write_bytes(b"safe-original")
+            moved = staged.parent / "original.parquet"
+            attacker = staged.parent / "attacker.parquet"
+            attacker.write_bytes(b"attacker")
 
-        def swapping_copy(staged_source: Any, descriptor: int) -> os.stat_result:
-            nonlocal swapped
-            if not swapped:
-                swapped = True
-                staged.rename(moved)
-                attacker.rename(staged)
-            return original_copy(staged_source, descriptor)
+            def swapping_copy(staged_source: Any, descriptor: int) -> os.stat_result:
+                nonlocal swapped
+                if not swapped:
+                    swapped = True
+                    staged.rename(moved)
+                    attacker.rename(staged)
+                return original_copy(staged_source, descriptor)
 
-        monkeypatch.setattr(store_export, "_copy_staged", swapping_copy)
+            monkeypatch.setattr(store_export, "_copy_staged", swapping_copy)
 
     assert swapped is True
-    assert output.read_bytes() == b"safe-original"
+    assert not output.exists()
 
 
 def test_parquet_staging_mutation_rolls_back_existing_output(
