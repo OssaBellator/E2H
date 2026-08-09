@@ -66,7 +66,10 @@ def test_source_root_descriptor_stability_rejects_replacement(tmp_path: Path) ->
     root.rename(tmp_path / "original")
     root.mkdir()
     try:
-        with pytest.raises(ReleaseSourceError, match="release source root changed during traversal"):
+        with pytest.raises(
+            ReleaseSourceError,
+            match="release source root changed during traversal",
+        ):
             release_source._source_root_descriptor_must_be_stable(root, descriptor, opened)
     finally:
         os.close(descriptor)
