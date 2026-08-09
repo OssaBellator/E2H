@@ -91,3 +91,50 @@ def test_fallback_sbom_read_rejects_parent_alias_retarget(
     assert alias.resolve() == replacement
     assert (replacement / "marker.txt").read_text(encoding="utf-8") == "replacement\n"
     assert (original / source.name).is_file()
+
+
+def test_sbom_read_rejects_same_inode_rewrite_with_restored_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "sbom.json"
+    original_text = json.dumps(
+        {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "version": 1,
+            "metadata": {"component": {"name": "e2h"}},
+            "components": [],
+            "dependencies": [],
+            "note": "a",
+        }
+    )
+    replacement_text = original_text.replace('"note": "a"', '"note": "b"')
+    assert len(replacement_text) == len(original_text)
+    source.write_text(original_text, encoding="utf-8")
+    before = source.stat(follow_symlinks=False)
+    original_fdopen = os.fdopen
+    state = {"rewritten": False}
+
+    def rewriting_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        if not state["rewritten"]:
+            state["rewritten"] = True
+            source.write_text(replacement_text, encoding="utf-8")
+            os.utime(
+                source,
+                ns=(before.st_atime_ns, before.st_mtime_ns),
+                follow_symlinks=False,
+            )
+        return original_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(sbom.os, "fdopen", rewriting_fdopen)
+
+    with pytest.raises(SbomCanonicalizationError, match="SBOM changed while reading"):
+        canonicalize_cyclonedx_sbom_file(source)
+
+    assert state["rewritten"] is True
+    after = source.stat(follow_symlinks=False)
+    assert after.st_ino == before.st_ino
+    assert after.st_size == before.st_size
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert after.st_ctime_ns != before.st_ctime_ns

@@ -48,8 +48,15 @@ def _canonical_json(value: Any) -> str:
         raise SbomCanonicalizationError("SBOM must contain canonical JSON data") from exc
 
 
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
 
 
 def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
