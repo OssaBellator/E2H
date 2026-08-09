@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 def _validate_relative_path(value: str) -> str:
-    """Reject absolute and parent-traversing paths while preserving POSIX notation."""
+    """Reject unsafe relative paths while preserving POSIX notation."""
+    if "\x00" in value:
+        raise ValueError("path must not contain NUL")
     path = PurePosixPath(value)
     if path.is_absolute():
         raise ValueError("path must be relative")
@@ -68,6 +70,8 @@ class ContainerSandbox(StrictModel):
     @field_validator("image")
     @classmethod
     def image_must_be_immutable(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("container image must not contain NUL")
         if re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", value) is None:
             raise ValueError("container image must use an immutable digest reference")
         return value
@@ -102,9 +106,21 @@ class CommandCheck(StrictModel):
 
     @field_validator("argv")
     @classmethod
-    def argv_items_must_be_non_empty(cls, value: list[str]) -> list[str]:
-        if any(not item for item in value):
-            raise ValueError("argv items must be non-empty strings")
+    def argv_items_must_be_process_safe(cls, value: list[str]) -> list[str]:
+        if any(not item or "\x00" in item for item in value):
+            raise ValueError("argv items must be non-empty and contain no NUL")
+        return value
+
+    @field_validator("env")
+    @classmethod
+    def environment_must_be_process_safe(cls, value: dict[str, str]) -> dict[str, str]:
+        for key, item in value.items():
+            if not key or "=" in key or "\x00" in key:
+                raise ValueError(
+                    "environment keys must be non-empty and contain neither '=' nor NUL"
+                )
+            if "\x00" in item:
+                raise ValueError("environment values must not contain NUL")
         return value
 
 
