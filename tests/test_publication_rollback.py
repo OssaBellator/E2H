@@ -5,19 +5,39 @@ from typing import Any
 
 import pytest
 
+import e2h.snapshot as snapshot
 import e2h.snapshot_promotion as snapshot_promotion
 import e2h.store_export as store_export
 from e2h.snapshot import SnapshotError, create_snapshot
 from e2h.store_export import ParquetOutputError, staged_parquet_output
 
 
+def _workspace(tmp_path: Path) -> Path:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "value.txt").write_text("new snapshot\n", encoding="utf-8")
+    return root
+
+
+def _aliased_parent(tmp_path: Path) -> tuple[Path, Path, Path]:
+    original = tmp_path / "output-original"
+    original.mkdir()
+    replacement = tmp_path / "output-replacement"
+    replacement.mkdir()
+    alias = tmp_path / "output-visible"
+    alias.symlink_to(original, target_is_directory=True)
+    return alias, original, replacement
+
+
+@pytest.mark.skipif(
+    not snapshot._WRITE_DIR_FD_SUPPORTED,
+    reason="descriptor-relative snapshot publication is unavailable",
+)
 def test_snapshot_parent_failure_restores_previous_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    (root / "value.txt").write_text("new snapshot\n", encoding="utf-8")
+    root = _workspace(tmp_path)
     output = tmp_path / "snapshot.e2hsnap"
     previous = b"previous snapshot bytes\n"
     output.write_bytes(previous)
@@ -36,6 +56,37 @@ def test_snapshot_parent_failure_restores_previous_output(
 
     assert output.read_bytes() == previous
     assert not list(tmp_path.glob(f".{output.name}.rollback-*.bak"))
+
+
+def test_snapshot_fallback_parent_failure_restores_previous_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _workspace(tmp_path)
+    alias, original, replacement = _aliased_parent(tmp_path)
+    output = alias / "snapshot.e2hsnap"
+    previous = b"previous snapshot bytes\n"
+    (original / output.name).write_bytes(previous)
+    original_replace = snapshot.os.replace
+    state = {"swapped": False}
+    monkeypatch.setattr(snapshot, "_WRITE_DIR_FD_SUPPORTED", False)
+
+    def swapping_replace(source: Any, destination: Any, *args: Any, **kwargs: Any) -> None:
+        original_replace(source, destination, *args, **kwargs)
+        if not state["swapped"] and Path(source).name.endswith(".tmp"):
+            state["swapped"] = True
+            alias.unlink()
+            alias.symlink_to(replacement, target_is_directory=True)
+
+    monkeypatch.setattr(snapshot.os, "replace", swapping_replace)
+
+    with pytest.raises(SnapshotError, match="snapshot output parent changed"):
+        create_snapshot(root, output)
+
+    assert state["swapped"] is True
+    assert (original / output.name).read_bytes() == previous
+    assert not (replacement / output.name).exists()
+    assert not list(original.glob(f".{output.name}.rollback-*.bak"))
 
 
 def test_parquet_parent_failure_restores_previous_output(
