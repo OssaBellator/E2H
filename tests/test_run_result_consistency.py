@@ -5,7 +5,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from e2h.failures import FailureSummary, summarize_failures, unexpected_exit_failure, working_directory_failure
+from e2h.failures import (
+    FailureSummary,
+    summarize_failures,
+    unexpected_exit_failure,
+    working_directory_failure,
+)
 from e2h.runner import CheckStatus, CommandResult, RunResult, RunStatus
 
 NOW = datetime(2026, 8, 9, 14, 30, tzinfo=UTC)
