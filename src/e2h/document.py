@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from yaml.constructor import ConstructorError
@@ -60,6 +61,47 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+
+
+def _validate_json_compatible(
+    value: Any,
+    *,
+    path: str = "$",
+    active: set[int] | None = None,
+) -> None:
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} contains a non-finite number")
+        return
+    if active is None:
+        active = set()
+    if type(value) is list:
+        identity = id(value)
+        if identity in active:
+            raise ValueError(f"{path} contains a recursive value")
+        active.add(identity)
+        try:
+            for index, item in enumerate(value):
+                _validate_json_compatible(item, path=f"{path}[{index}]", active=active)
+        finally:
+            active.remove(identity)
+        return
+    if type(value) is dict:
+        identity = id(value)
+        if identity in active:
+            raise ValueError(f"{path} contains a recursive value")
+        active.add(identity)
+        try:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError(f"{path} mapping keys must be strings")
+                _validate_json_compatible(item, path=f"{path}[{key!r}]", active=active)
+        finally:
+            active.remove(identity)
+        return
+    raise ValueError(f"{path} contains unsupported value type {type(value).__name__}")
 
 
 def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> bytes:
@@ -177,4 +219,8 @@ def load_mapping_document(
         raise ValueError(f"invalid {noun} syntax: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{noun} root must be an object")
-    return data
+    try:
+        _validate_json_compatible(data)
+    except ValueError as exc:
+        raise ValueError(f"{noun} must contain JSON-compatible values: {exc}") from exc
+    return cast(dict[str, Any], data)
