@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import e2h.release_source as release_source
 from e2h.release_source import ReleaseSourceError, source_tree_sha256
 from e2h.snapshot import SnapshotLimits
 
@@ -30,6 +31,19 @@ def test_source_tree_identity_is_deterministic_and_content_sensitive(tmp_path: P
 
     (second / "README.md").write_text("changed\n", encoding="utf-8")
     assert source_tree_sha256(first) != source_tree_sha256(second)
+
+
+def test_source_tree_path_fallback_matches_descriptor_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "source"
+    _write_tree(root)
+    descriptor_digest = source_tree_sha256(root)
+
+    monkeypatch.setattr(release_source, "_SOURCE_DIR_FD_SUPPORTED", False)
+
+    assert source_tree_sha256(root) == descriptor_digest
 
 
 def test_source_tree_identity_includes_executable_bit(tmp_path: Path) -> None:
