@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 from datetime import UTC, datetime
@@ -14,7 +13,7 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.models import TaskCapsule
+from e2h.models import TaskCapsule, _validate_metadata
 from e2h.runner import ExecutionBackend, RunResult, RunStatus, run_capsule
 from e2h.trace import Trace, trace_from_run_result
 from e2h.variants import HarnessVariant, variant_sha256
@@ -67,20 +66,10 @@ class ExperimentSpec(StrictModel):
     def paths_must_be_safe(cls, value: str) -> str:
         return _validate_relative_path(value)
 
-    @field_validator("metadata")
+    @field_validator("metadata", mode="before")
     @classmethod
-    def metadata_must_be_canonical_json(cls, value: dict[str, Any]) -> dict[str, Any]:
-        try:
-            json.dumps(
-                value,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            )
-        except (TypeError, ValueError) as exc:
-            raise ValueError("experiment metadata must contain canonical JSON data") from exc
-        return value
+    def metadata_must_be_canonical_json(cls, value: Any) -> Any:
+        return _validate_metadata(value, noun="experiment")
 
     @model_validator(mode="after")
     def matrix_must_be_bounded_and_unique(self) -> ExperimentSpec:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import math
 import re
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -22,17 +22,52 @@ def _validate_relative_path(value: str) -> str:
     return value
 
 
-def _validate_metadata(value: dict[str, Any], *, noun: str) -> dict[str, Any]:
+def _validate_json_compatible(
+    value: Any,
+    *,
+    path: str = "$",
+    active: set[int] | None = None,
+) -> None:
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} contains a non-finite number")
+        return
+    if active is None:
+        active = set()
+    if type(value) is list:
+        identity = id(value)
+        if identity in active:
+            raise ValueError(f"{path} contains a recursive value")
+        active.add(identity)
+        try:
+            for index, item in enumerate(value):
+                _validate_json_compatible(item, path=f"{path}[{index}]", active=active)
+        finally:
+            active.remove(identity)
+        return
+    if type(value) is dict:
+        identity = id(value)
+        if identity in active:
+            raise ValueError(f"{path} contains a recursive value")
+        active.add(identity)
+        try:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError(f"{path} mapping keys must be strings")
+                _validate_json_compatible(item, path=f"{path}[{key!r}]", active=active)
+        finally:
+            active.remove(identity)
+        return
+    raise ValueError(f"{path} contains unsupported value type {type(value).__name__}")
+
+
+def _validate_metadata(value: Any, *, noun: str) -> Any:
     try:
-        json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{noun} metadata must contain canonical JSON data") from exc
+        _validate_json_compatible(value)
+    except ValueError as exc:
+        raise ValueError(f"{noun} metadata must contain canonical JSON data: {exc}") from exc
     return value
 
 
@@ -165,9 +200,9 @@ class TaskCapsule(StrictModel):
     success: SuccessSpec
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("metadata")
+    @field_validator("metadata", mode="before")
     @classmethod
-    def metadata_must_be_canonical_json(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def metadata_must_be_canonical_json(cls, value: Any) -> Any:
         return _validate_metadata(value, noun="task capsule")
 
     @model_validator(mode="after")
