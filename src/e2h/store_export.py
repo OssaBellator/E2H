@@ -523,6 +523,8 @@ def _install_staged(
 @contextmanager
 def staged_parquet_output(output: Path) -> Iterator[Path]:
     """Yield a private staging path and safely install it on successful exit."""
+    if "\x00" in os.fspath(output):
+        raise ParquetOutputError("Parquet output path must not contain NUL")
     try:
         with tempfile.TemporaryDirectory(prefix="e2h-store-export-") as staging_directory:
             staged = Path(staging_directory) / "export.parquet"
