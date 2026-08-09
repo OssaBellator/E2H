@@ -32,6 +32,8 @@ def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
 
 
 def _prepare_parent(path: Path) -> tuple[Path, Path, os.stat_result]:
+    if "\x00" in os.fspath(path):
+        raise OSError("atomic output path must not contain NUL")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         requested_parent = path.parent.absolute()
