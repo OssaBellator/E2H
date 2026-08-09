@@ -45,8 +45,15 @@ def _matches_exclude(relative: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatchcase(relative, pattern) for pattern in patterns)
 
 
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode)
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
 
 
 def _resolve_source_root(root: Path) -> tuple[Path, os.stat_result]:
