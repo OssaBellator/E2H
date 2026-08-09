@@ -12,7 +12,7 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.document import load_mapping_document
+from e2h.document import _validate_json_compatible, load_mapping_document
 from e2h.failures import FailureCode
 from e2h.models import TaskCapsule
 from e2h.runner import CheckStatus, RunResult
@@ -67,6 +67,7 @@ _InputModelT = TypeVar("_InputModelT", bound=BaseModel)
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
