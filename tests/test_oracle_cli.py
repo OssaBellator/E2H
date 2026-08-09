@@ -45,10 +45,7 @@ def test_oracle_cli_rejects_duplicate_json_keys(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    payload = (
-        '{"kind":"file","id":"first","id":"second",'
-        '"path":"result.txt","mode":"exists"}'
-    )
+    payload = '{"kind":"file","id":"first","id":"second","path":"result.txt","mode":"exists"}'
 
     assert _run_cli(monkeypatch, payload, cwd=tmp_path) == 2
     assert "duplicate object key: 'id'" in capsys.readouterr().err
