@@ -32,21 +32,38 @@ class TraceEventType(StrEnum):
     RUN_COMPLETED = "run.completed"
 
 
-def _validate_python_json_values(value: Any) -> None:
+def _validate_python_json_values(value: Any, *, active: set[int] | None = None) -> None:
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("trace event contains a non-finite number")
         return
     if isinstance(value, (set, frozenset)):
         raise ValueError("trace event contains an unordered set")
+    if active is None:
+        active = set()
     if isinstance(value, dict):
-        for key, item in value.items():
-            _validate_python_json_values(key)
-            _validate_python_json_values(item)
+        identity = id(value)
+        if identity in active:
+            raise ValueError("trace event contains a recursive container")
+        active.add(identity)
+        try:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError("trace event contains a non-string object key")
+                _validate_python_json_values(item, active=active)
+        finally:
+            active.remove(identity)
         return
     if isinstance(value, (list, tuple)):
-        for item in value:
-            _validate_python_json_values(item)
+        identity = id(value)
+        if identity in active:
+            raise ValueError("trace event contains a recursive container")
+        active.add(identity)
+        try:
+            for item in value:
+                _validate_python_json_values(item, active=active)
+        finally:
+            active.remove(identity)
 
 
 class TraceContext(BaseModel):
