@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
 from e2h.ingest import (
     EvidenceFormat,
     EvidenceIngestError,
@@ -67,6 +68,8 @@ class OpenAIResponseRecord(StrictModel):
             if not isinstance(item_type, str) or not item_type:
                 raise ValueError(f"provider item {index}.type must be a non-empty string")
         try:
+            _validate_json_compatible(self.response)
+            _validate_json_compatible(self.input_items)
             json.dumps(self.response, sort_keys=True, allow_nan=False)
             json.dumps(self.input_items, sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
@@ -87,6 +90,7 @@ class OpenAIResponsesDocument(StrictModel):
     @classmethod
     def metadata_must_be_json(cls, value: dict[str, Any]) -> dict[str, Any]:
         try:
+            _validate_json_compatible(value)
             json.dumps(value, sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("document metadata must be JSON-serializable") from exc
