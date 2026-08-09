@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
-from e2h.models import CommandCheck, TaskCapsule
+from e2h.models import AllowedActions, CommandCheck, ContainerSandbox, TaskCapsule
 
 _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
@@ -17,14 +17,24 @@ class SandboxError(RuntimeError):
     """Raised when a container invocation cannot be constructed safely."""
 
 
-def _validated_capsule(capsule: TaskCapsule) -> TaskCapsule:
+def _validated_capsule_policy(capsule: TaskCapsule) -> tuple[ContainerSandbox, AllowedActions]:
     if type(capsule) is not TaskCapsule:
         raise SandboxError(
             f"invalid task capsule: expected TaskCapsule, got {type(capsule).__name__}"
         )
+    sandbox = capsule.sandbox
+    allowed_actions = capsule.allowed_actions
+    if sandbox is None:
+        raise SandboxError("container execution requires capsule.sandbox")
+    if type(sandbox) is not ContainerSandbox or type(allowed_actions) is not AllowedActions:
+        raise SandboxError("invalid task capsule: sandbox policy has invalid model types")
     try:
-        payload = capsule.model_dump(mode="python", warnings="none")
-        return TaskCapsule.model_validate(payload)
+        sandbox_payload = sandbox.model_dump(mode="python", warnings="none")
+        actions_payload = allowed_actions.model_dump(mode="python", warnings="none")
+        return (
+            ContainerSandbox.model_validate(sandbox_payload),
+            AllowedActions.model_validate(actions_payload),
+        )
     except ValueError as exc:
         raise SandboxError(f"invalid task capsule: {exc}") from exc
 
@@ -68,11 +78,8 @@ def build_container_argv(
     runtime_binary: str | None = None,
 ) -> list[str]:
     """Build a deterministic Docker invocation for one capsule check."""
-    capsule = _validated_capsule(capsule)
+    sandbox, allowed_actions = _validated_capsule_policy(capsule)
     check = _validated_check(check)
-    sandbox = capsule.sandbox
-    if sandbox is None:
-        raise SandboxError("container execution requires capsule.sandbox")
     runtime = _validated_runtime_binary(
         sandbox.engine if runtime_binary is None else runtime_binary
     )
@@ -99,7 +106,7 @@ def build_container_argv(
         "--mount",
         mount,
         "--network",
-        "none" if capsule.allowed_actions.network == "deny" else "bridge",
+        "none" if allowed_actions.network == "deny" else "bridge",
         "--cap-drop",
         "ALL",
         "--security-opt",
