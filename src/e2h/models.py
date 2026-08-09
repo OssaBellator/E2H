@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -18,6 +19,20 @@ def _validate_relative_path(value: str) -> str:
         raise ValueError("path must be relative")
     if ".." in path.parts:
         raise ValueError("path must not contain parent traversal")
+    return value
+
+
+def _validate_metadata(value: dict[str, Any], *, noun: str) -> dict[str, Any]:
+    try:
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{noun} metadata must contain canonical JSON data") from exc
     return value
 
 
@@ -149,6 +164,11 @@ class TaskCapsule(StrictModel):
     sandbox: ContainerSandbox | None = None
     success: SuccessSpec
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_must_be_canonical_json(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_metadata(value, noun="task capsule")
 
     @model_validator(mode="after")
     def command_count_must_fit_limit(self) -> TaskCapsule:
