@@ -67,8 +67,50 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _validate_json_object_keys(value: Any, *, active: set[int] | None = None) -> None:
+    if active is None:
+        active = set()
+    if isinstance(value, dict):
+        identity = id(value)
+        if identity in active:
+            raise ValueError("JSON value contains a recursive container")
+        active.add(identity)
+        try:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError("JSON objects must use string keys")
+                _validate_json_object_keys(item, active=active)
+        finally:
+            active.remove(identity)
+        return
+    if isinstance(value, (list, tuple)):
+        identity = id(value)
+        if identity in active:
+            raise ValueError("JSON value contains a recursive container")
+        active.add(identity)
+        try:
+            for item in value:
+                _validate_json_object_keys(item, active=active)
+        finally:
+            active.remove(identity)
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
 def _canonical_json(value: Any) -> bytes:
     try:
+        _validate_json_object_keys(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
@@ -924,7 +966,15 @@ def _verify_snapshot_archive(
         raise SnapshotError("snapshot archive is missing manifest.json")
     manifest_data = _read_member(archive, manifest_info, MAX_MANIFEST_BYTES)
     try:
-        raw_manifest = json.loads(manifest_data)
+        manifest_text = manifest_data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SnapshotError("invalid snapshot manifest: manifest must be UTF-8") from exc
+    try:
+        raw_manifest = json.loads(
+            manifest_text,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
         manifest = SnapshotManifest.model_validate(raw_manifest)
     except (json.JSONDecodeError, ValueError) as exc:
         raise SnapshotError(f"invalid snapshot manifest: {exc}") from exc
