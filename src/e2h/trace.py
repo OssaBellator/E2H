@@ -143,6 +143,25 @@ class Trace(BaseModel):
             raise ValueError("trace event sequences must be contiguous and start at zero")
         if any(event.trace_id != self.trace_id for event in self.events):
             raise ValueError("all events must use the trace trace_id")
+        if any(event.context.run_id != self.trace_id for event in self.events):
+            raise ValueError("all event contexts must use the trace trace_id as run_id")
+        context_identity = (
+            self.events[0].context.capsule_id,
+            self.events[0].context.experiment_id,
+            self.events[0].context.variant_id,
+            self.events[0].context.repetition,
+        )
+        if any(
+            (
+                event.context.capsule_id,
+                event.context.experiment_id,
+                event.context.variant_id,
+                event.context.repetition,
+            )
+            != context_identity
+            for event in self.events[1:]
+        ):
+            raise ValueError("trace event contexts must retain stable execution identity")
         if any(
             current.timestamp < previous.timestamp
             for previous, current in zip(self.events, self.events[1:], strict=False)
