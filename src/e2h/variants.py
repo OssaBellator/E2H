@@ -169,13 +169,12 @@ class ToolVariant(StrictModel):
         tool_ids = [tool.id for tool in self.tools]
         if len(tool_ids) != len(set(tool_ids)):
             raise ValueError("tool ids must be unique")
-        target_set = set(tool_ids)
         if self.selection != "none" and not self.tools:
             raise ValueError("tool selection requires at least one tool")
         if self.selection == "named":
             if self.selected_tool is None:
                 raise ValueError("named tool selection requires selected_tool")
-            if self.selected_tool not in target_set:
+            if self.selected_tool not in set(tool_ids):
                 raise ValueError("selected_tool must reference a declared tool")
         elif self.selected_tool is not None:
             raise ValueError("selected_tool is only valid for named selection")
