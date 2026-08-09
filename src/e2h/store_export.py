@@ -206,6 +206,7 @@ def _install_staged(output: Path, staged: Path) -> None:
             parent_opened
         ) != _inode_identity(parent_expected):
             raise ParquetOutputError("Parquet output parent changed while opening")
+        expected: os.stat_result | None
         try:
             expected = _stat_entry(parent_descriptor, parent, output.name)
         except FileNotFoundError:
