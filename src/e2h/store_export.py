@@ -30,6 +30,17 @@ def _inode_identity(info: os.stat_result) -> tuple[int, int]:
     return (info.st_dev, info.st_ino)
 
 
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
+
+
 def _parent_must_be_stable(
     requested_parent: Path,
     descriptor: int,
@@ -128,6 +139,106 @@ def _copy_staged(staged: Path, descriptor: int) -> os.stat_result:
     return after
 
 
+def _write_all(descriptor: int, data: bytes) -> None:
+    remaining = memoryview(data)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written <= 0:
+            raise OSError("unable to make progress while writing rollback data")
+        remaining = remaining[written:]
+
+
+def _copy_descriptor(source_descriptor: int, target_descriptor: int) -> int:
+    observed = 0
+    os.ftruncate(target_descriptor, 0)
+    os.lseek(source_descriptor, 0, os.SEEK_SET)
+    os.lseek(target_descriptor, 0, os.SEEK_SET)
+    while chunk := os.read(source_descriptor, 1024 * 1024):
+        _write_all(target_descriptor, chunk)
+        observed += len(chunk)
+    os.fsync(target_descriptor)
+    return observed
+
+
+def _create_rollback_file(
+    parent_descriptor: int,
+    parent: Path,
+    output_name: str,
+) -> tuple[int, str, tuple[int, int]]:
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for _ in range(128):
+        name = f".{output_name}.e2h-rollback-{secrets.token_hex(16)}.bak"
+        try:
+            descriptor = _open_entry(parent_descriptor, parent, name, flags, 0o600)
+        except FileExistsError:
+            continue
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode):
+                raise ParquetOutputError("Parquet rollback entry is not a regular file")
+            return descriptor, name, _inode_identity(opened)
+        except Exception:
+            with suppress(OSError):
+                os.close(descriptor)
+            raise
+    raise ParquetOutputError("unable to allocate Parquet output rollback entry")
+
+
+def _rollback_copy_must_be_stable(
+    parent_descriptor: int,
+    parent: Path,
+    rollback_name: str,
+    rollback_descriptor: int,
+    rollback_identity: tuple[int, int],
+    expected_size: int,
+) -> None:
+    try:
+        opened = os.fstat(rollback_descriptor)
+        current = _stat_entry(parent_descriptor, parent, rollback_name)
+    except OSError as exc:
+        raise ParquetOutputError(f"unable to verify Parquet rollback entry: {exc}") from exc
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or not stat.S_ISREG(current.st_mode)
+        or _inode_identity(opened) != rollback_identity
+        or _inode_identity(current) != rollback_identity
+        or opened.st_size != expected_size
+        or current.st_size != expected_size
+    ):
+        raise ParquetOutputError("Parquet rollback entry changed while preserving output")
+
+
+def _restore_from_rollback(
+    parent_descriptor: int,
+    parent: Path,
+    output_name: str,
+    output_descriptor: int,
+    output_identity: tuple[int, int],
+    rollback_descriptor: int,
+    expected_size: int,
+) -> bool:
+    try:
+        current = _stat_entry(parent_descriptor, parent, output_name)
+    except OSError:
+        return False
+    if not stat.S_ISREG(current.st_mode) or _inode_identity(current) != output_identity:
+        return False
+    try:
+        restored_size = _copy_descriptor(rollback_descriptor, output_descriptor)
+        after = os.fstat(output_descriptor)
+        current = _stat_entry(parent_descriptor, parent, output_name)
+    except OSError:
+        return False
+    return (
+        restored_size == expected_size
+        and stat.S_ISREG(after.st_mode)
+        and after.st_size == expected_size
+        and _inode_identity(after) == output_identity
+        and stat.S_ISREG(current.st_mode)
+        and _inode_identity(current) == output_identity
+    )
+
+
 def _install_new(
     parent: Path,
     requested_parent: Path,
@@ -144,13 +255,7 @@ def _install_new(
     installed = False
     success = False
     try:
-        descriptor = _open_entry(
-            parent_descriptor,
-            parent,
-            temp_name,
-            flags,
-            0o666,
-        )
+        descriptor = _open_entry(parent_descriptor, parent, temp_name, flags, 0o666)
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode):
             raise ParquetOutputError("temporary Parquet output is not a regular file")
@@ -217,24 +322,81 @@ def _overwrite_existing(
     expected: os.stat_result,
     staged: Path,
 ) -> None:
-    flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = _open_entry(parent_descriptor, parent, output_name, flags)
     except OSError as exc:
         raise ParquetOutputError(f"unable to open existing Parquet output: {exc}") from exc
+    rollback_descriptor: int | None = None
+    rollback_name: str | None = None
+    rollback_identity: tuple[int, int] | None = None
+    modified = False
+    success = False
+    restored = False
     try:
         opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _inode_identity(opened) != _inode_identity(expected):
+        if not stat.S_ISREG(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
             raise ParquetOutputError("Parquet output destination changed while opening")
+        output_identity = _inode_identity(opened)
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
+        rollback_descriptor, rollback_name, rollback_identity = _create_rollback_file(
+            parent_descriptor,
+            parent,
+            output_name,
+        )
+        preserved_size = _copy_descriptor(descriptor, rollback_descriptor)
+        after_preserve = os.fstat(descriptor)
+        current = _stat_entry(parent_descriptor, parent, output_name)
+        if (
+            preserved_size != opened.st_size
+            or _stat_identity(after_preserve) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+        ):
+            raise ParquetOutputError("Parquet output changed while preserving previous contents")
+        _rollback_copy_must_be_stable(
+            parent_descriptor,
+            parent,
+            rollback_name,
+            rollback_descriptor,
+            rollback_identity,
+            preserved_size,
+        )
+        _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
+        modified = True
         written = _copy_staged(staged, descriptor)
         current = _stat_entry(parent_descriptor, parent, output_name)
-        if _inode_identity(written) != _inode_identity(opened) or _inode_identity(
-            current
-        ) != _inode_identity(opened):
+        if (
+            _inode_identity(written) != output_identity
+            or _inode_identity(current) != output_identity
+        ):
             raise ParquetOutputError("Parquet output destination changed while writing")
         _parent_must_be_stable(requested_parent, parent_descriptor, parent_opened)
+        success = True
     finally:
+        if modified and not success and rollback_descriptor is not None:
+            restored = _restore_from_rollback(
+                parent_descriptor,
+                parent,
+                output_name,
+                descriptor,
+                _inode_identity(expected),
+                rollback_descriptor,
+                expected.st_size,
+            )
+        if rollback_descriptor is not None:
+            with suppress(OSError):
+                os.close(rollback_descriptor)
+        if (
+            rollback_name is not None
+            and rollback_identity is not None
+            and (success or not modified or restored)
+        ):
+            _unlink_regular_entry_if_identity(
+                parent_descriptor,
+                parent,
+                rollback_name,
+                rollback_identity,
+            )
         with suppress(OSError):
             os.close(descriptor)
 

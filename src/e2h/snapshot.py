@@ -523,6 +523,110 @@ def _create_snapshot_temporary_file(
     raise SnapshotError("unable to allocate a unique snapshot temporary file")
 
 
+def _remove_regular_path_if_identity(path: Path, expected_identity: tuple[int, int]) -> bool:
+    descriptor: int | None = None
+    try:
+        current = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(current.st_mode) or _inode_identity(current) != expected_identity:
+            return False
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        current = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _inode_identity(opened) != expected_identity
+            or _inode_identity(current) != expected_identity
+        ):
+            return False
+        path.unlink()
+        return True
+    except OSError:
+        return False
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def _backup_snapshot_output_path(
+    output: Path,
+    expected_identity: tuple[int, int] | None,
+) -> tuple[Path, tuple[int, int]] | None:
+    if expected_identity is None:
+        return None
+    plain_output = Path(output)
+    for _ in range(128):
+        backup = plain_output.parent / f".{plain_output.name}.rollback-{secrets.token_hex(16)}.bak"
+        try:
+            backup.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise SnapshotError(f"unable to inspect snapshot output rollback path: {exc}") from exc
+        else:
+            continue
+        try:
+            current = plain_output.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
+        if not stat.S_ISREG(current.st_mode) or _inode_identity(current) != expected_identity:
+            raise SnapshotError("snapshot output changed before publication")
+        try:
+            os.replace(plain_output, backup)
+            moved = backup.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise SnapshotError(f"unable to preserve existing snapshot output: {exc}") from exc
+        if stat.S_ISREG(moved.st_mode) and _inode_identity(moved) == expected_identity:
+            return backup, expected_identity
+        try:
+            plain_output.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            with suppress(OSError):
+                os.replace(backup, plain_output)
+        raise SnapshotError("snapshot output changed while preserving it")
+    raise SnapshotError("unable to allocate snapshot output rollback path")
+
+
+def _restore_snapshot_output_path(
+    output: Path,
+    backup: tuple[Path, tuple[int, int]],
+    promoted_identity: tuple[int, int] | None,
+) -> bool:
+    backup_path, backup_identity = backup
+    plain_output = Path(output)
+    try:
+        backup_current = backup_path.stat(follow_symlinks=False)
+    except OSError:
+        return False
+    if (
+        not stat.S_ISREG(backup_current.st_mode)
+        or _inode_identity(backup_current) != backup_identity
+    ):
+        return False
+    try:
+        output_current = plain_output.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        output_current = None
+    except OSError:
+        return False
+    if output_current is not None:
+        if not stat.S_ISREG(output_current.st_mode):
+            return False
+        current_identity = _inode_identity(output_current)
+        if current_identity == backup_identity:
+            _remove_regular_path_if_identity(backup_path, backup_identity)
+            return True
+        if promoted_identity is None or current_identity != promoted_identity:
+            return False
+    try:
+        os.replace(backup_path, plain_output)
+        restored = plain_output.stat(follow_symlinks=False)
+    except OSError:
+        return False
+    return stat.S_ISREG(restored.st_mode) and _inode_identity(restored) == backup_identity
+
+
 def _create_restore_staging_directory(
     parent_descriptor: int,
     destination: Path,
@@ -972,6 +1076,7 @@ def create_snapshot(
     temporary_name: str | None = None
     temporary_path: Path | None = None
     temporary_identity: tuple[int, int] | None = None
+    output_identity: tuple[int, int] | None = None
     try:
         try:
             output_info = _stat_snapshot_write_entry(parent_descriptor, output)
@@ -982,6 +1087,7 @@ def create_snapshot(
         else:
             if stat.S_ISLNK(output_info.st_mode) or not stat.S_ISREG(output_info.st_mode):
                 raise SnapshotError("snapshot output must be a regular file")
+            output_identity = _inode_identity(output_info)
         ignored = {output}
         entries, blobs, total_bytes = collect_snapshot_source(
             root,
@@ -1040,19 +1146,43 @@ def create_snapshot(
                     or _inode_identity(temporary_info) != temporary_identity
                 ):
                     raise SnapshotError("snapshot temporary file changed before publication")
-                os.replace(temporary_path, output)
-                current = output.stat(follow_symlinks=False)
-                if (
-                    not stat.S_ISREG(current.st_mode)
-                    or _inode_identity(current) != temporary_identity
-                ):
-                    raise SnapshotError("snapshot output changed during publication")
-                _snapshot_write_parent_must_be_stable(
-                    output,
-                    parent_descriptor,
-                    parent_info,
-                    noun="snapshot output",
-                )
+                backup = _backup_snapshot_output_path(output, output_identity)
+                promoted = False
+                success = False
+                try:
+                    os.replace(temporary_path, output)
+                    promoted = True
+                    current = output.stat(follow_symlinks=False)
+                    if (
+                        not stat.S_ISREG(current.st_mode)
+                        or _inode_identity(current) != temporary_identity
+                    ):
+                        raise SnapshotError("snapshot output changed during publication")
+                    _snapshot_write_parent_must_be_stable(
+                        output,
+                        parent_descriptor,
+                        parent_info,
+                        noun="snapshot output",
+                    )
+                    success = True
+                finally:
+                    if not success:
+                        restored = (
+                            _restore_snapshot_output_path(
+                                output,
+                                backup,
+                                temporary_identity if promoted else None,
+                            )
+                            if backup is not None
+                            else False
+                        )
+                        if backup is None and promoted:
+                            _remove_regular_path_if_identity(Path(output), temporary_identity)
+                        if restored:
+                            backup = None
+                    if success and backup is not None:
+                        backup_path, backup_identity = backup
+                        _remove_regular_path_if_identity(backup_path, backup_identity)
             temporary_name = None
             temporary_path = None
         except (OSError, zipfile.BadZipFile) as exc:
