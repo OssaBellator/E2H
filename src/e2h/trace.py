@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from datetime import datetime, timedelta
@@ -30,6 +31,21 @@ class TraceEventType(StrEnum):
     RUN_STARTED = "run.started"
     CHECK_COMPLETED = "check.completed"
     RUN_COMPLETED = "run.completed"
+
+
+def _reject_non_finite_json_numbers(value: Any) -> None:
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("trace event contains a non-finite number")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _reject_non_finite_json_numbers(key)
+            _reject_non_finite_json_numbers(item)
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            _reject_non_finite_json_numbers(item)
 
 
 class TraceContext(BaseModel):
@@ -69,7 +85,8 @@ class TraceEvent(BaseModel):
     @model_validator(mode="after")
     def payload_must_be_json_serializable(self) -> TraceEvent:
         try:
-            json.dumps(self.model_dump(mode="json"), sort_keys=True)
+            _reject_non_finite_json_numbers(self.model_dump(mode="python"))
+            json.dumps(self.model_dump(mode="json"), sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("trace event must be JSON-serializable") from exc
         return self
@@ -180,9 +197,16 @@ def write_json_atomic(path: Path, payload: str) -> None:
 
 def write_traces_jsonl(path: Path, traces: list[Trace]) -> None:
     """Write normalized events as deterministic JSON Lines."""
-    lines = [
-        json.dumps(event.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        for trace in traces
-        for event in trace.events
-    ]
+    lines: list[str] = []
+    for trace in traces:
+        for event in trace.events:
+            _reject_non_finite_json_numbers(event.model_dump(mode="python"))
+            lines.append(
+                json.dumps(
+                    event.model_dump(mode="json"),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            )
     write_json_atomic(path, "\n".join(lines) + ("\n" if lines else ""))
