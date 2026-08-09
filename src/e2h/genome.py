@@ -70,6 +70,11 @@ def _capsule_document(capsule: TaskCapsule) -> dict[str, Any]:
 
 def capsule_sha256(capsule: TaskCapsule) -> str:
     """Return a deterministic digest for a validated task capsule."""
+    capsule = _revalidate_genome_input(
+        capsule,
+        TaskCapsule,
+        noun="task capsule",
+    )
     return hashlib.sha256(_canonical_json_bytes(_capsule_document(capsule))).hexdigest()
 
 
@@ -297,6 +302,11 @@ class GenomeApplication(StrictModel):
 
 def genome_sha256(genome: HarnessGenome) -> str:
     """Return the canonical identity of a genome document."""
+    genome = _revalidate_genome_input(
+        genome,
+        HarnessGenome,
+        noun="genome",
+    )
     return hashlib.sha256(_canonical_json_bytes(genome.model_dump(mode="json"))).hexdigest()
 
 
