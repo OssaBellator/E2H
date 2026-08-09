@@ -206,12 +206,36 @@ def _key(*parts: object) -> str:
     return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+def _validated_source_sha256(value: str) -> str:
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise ArtifactError("source_sha256 must be a lowercase SHA-256 digest")
+    return value
+
+
+def _revalidate_normalization_artifact(
+    kind: str,
+    artifact: RunResult | ExperimentResult,
+) -> RunResult | ExperimentResult:
+    if kind not in {"run", "experiment"}:
+        raise ArtifactError(f"unknown normalized artifact kind: {kind}")
+    model_type = RunResult if kind == "run" else ExperimentResult
+    if type(artifact) is not model_type:
+        raise ArtifactError(f"{kind} artifact type does not match selected kind")
+    try:
+        payload = artifact.model_dump(mode="python", warnings="none")
+        return model_type.model_validate(payload)
+    except ValidationError as exc:
+        raise ArtifactError(f"invalid {kind} artifact: {exc}") from exc
+
+
 def normalize_rows(
     source_sha256: str,
     kind: Literal["run", "experiment"],
     artifact: RunResult | ExperimentResult,
 ) -> tuple[list[RunRow], list[CheckRow], list[SummaryRow], list[FailureRow]]:
     """Normalize a validated artifact into deterministic relational rows."""
+    source_sha256 = _validated_source_sha256(source_sha256)
+    artifact = _revalidate_normalization_artifact(kind, artifact)
     run_items: list[RunItem]
     if kind == "run":
         if not isinstance(artifact, RunResult):
