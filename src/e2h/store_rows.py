@@ -48,9 +48,18 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _read_artifact_bytes(path: Path) -> bytes:
+def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
     try:
-        parent = path.parent.resolve(strict=True)
+        current_parent = requested_parent.resolve(strict=True)
+        return current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ArtifactError(f"unable to restat artifact parent: {exc}") from exc
+
+
+def _read_artifact_bytes(path: Path) -> bytes:
+    requested_parent = path.parent.absolute()
+    try:
+        parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
     except OSError as exc:
         raise ArtifactError(f"unable to inspect artifact parent: {exc}") from exc
@@ -66,9 +75,12 @@ def _read_artifact_bytes(path: Path) -> bytes:
     descriptor: int | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        if not stat.S_ISDIR(parent_opened.st_mode) or _stat_identity(
-            parent_opened
-        ) != _stat_identity(parent_expected):
+        requested_opened = _requested_parent_identity(requested_parent)
+        if (
+            not stat.S_ISDIR(parent_opened.st_mode)
+            or _stat_identity(parent_opened) != _stat_identity(parent_expected)
+            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
+        ):
             raise ArtifactError("artifact parent changed while opening")
 
         try:
@@ -119,8 +131,8 @@ def _read_artifact_bytes(path: Path) -> bytes:
                 if _ARTIFACT_DIR_FD_SUPPORTED
                 else (parent / path.name).stat(follow_symlinks=False)
             )
-            parent_current = parent.stat(follow_symlinks=False)
             parent_after = os.fstat(parent_descriptor)
+            parent_current = _requested_parent_identity(requested_parent)
         except OSError as exc:
             raise ArtifactError(f"unable to restat artifact after reading: {exc}") from exc
         if (
