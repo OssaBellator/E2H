@@ -75,7 +75,7 @@ e2h-variant = "e2h.variant_cli:variant_app"
 packages = ["src/e2h"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-config --strict-markers --cov=e2h --cov-report=term-missing --cov-fail-under=90"
+addopts = "-ra --strict-config --strict-markers --cov=e2h --cov-report=term-missing --cov-fail-under=90 --cov-precision=2"
 testpaths = ["tests"]
 
 [tool.ruff]
