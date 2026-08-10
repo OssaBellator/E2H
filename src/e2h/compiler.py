@@ -282,12 +282,21 @@ class MutationResult(StrictModel):
 
 def capsule_digest(capsule: TaskCapsule) -> str:
     """Return the stable digest of the exact capsule covered by verification."""
+    capsule = _revalidate_compiler_model(capsule, TaskCapsule, noun="task capsule")
     return _digest(capsule.model_dump(mode="json"))
 
 
 def mutation_plan_digest(mutations: list[EnvironmentMutation]) -> str:
     """Return the stable digest of the ordered mutation plan."""
-    return _digest([mutation.model_dump(mode="json") for mutation in mutations])
+    validated = [
+        _revalidate_compiler_model(
+            mutation,
+            EnvironmentMutation,
+            noun=f"mutation plan entry {index}",
+        )
+        for index, mutation in enumerate(mutations)
+    ]
+    return _digest([mutation.model_dump(mode="json") for mutation in validated])
 
 
 class VerificationReport(StrictModel):
@@ -348,11 +357,13 @@ def _digest(value: Any) -> str:
 
 def proposal_digest(core: ProposalCore) -> str:
     """Return the stable ID covering an immutable proposal core."""
+    core = _revalidate_compiler_model(core, ProposalCore, noun="proposal core")
     return _digest(core.model_dump(mode="json"))
 
 
 def bundle_digest(bundle: IngestionBundle) -> str:
     """Return a stable content digest for a normalized ingestion bundle."""
+    bundle = _revalidate_compiler_model(bundle, IngestionBundle, noun="ingestion bundle")
     return _digest(bundle.model_dump(mode="json"))
 
 
