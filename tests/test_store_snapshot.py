@@ -128,6 +128,34 @@ def test_stable_store_snapshot_rejects_new_sidecar_during_copy(
     assert created is True
 
 
+def test_stable_store_snapshot_rejects_existing_wal_mutation_during_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "evidence.duckdb"
+    database.write_bytes(b"database")
+    wal = Path(f"{database}.wal")
+    wal.write_bytes(b"initial wal")
+    original_copy = store_snapshot._copy_descriptor
+    changed = False
+
+    def mutating_copy(descriptor: int, destination: Path, expected_size: int) -> None:
+        nonlocal changed
+        if not changed:
+            changed = True
+            with wal.open("ab") as handle:
+                handle.write(b" committed")
+        original_copy(descriptor, destination, expected_size)
+
+    monkeypatch.setattr(store_snapshot, "_copy_descriptor", mutating_copy)
+
+    with pytest.raises(StoreSnapshotError, match="changed while snapshotting"):
+        with stable_store_snapshot(database):
+            raise AssertionError("mutated WAL should not be yielded")
+
+    assert changed is True
+
+
 def test_snapshot_stays_bound_to_open_parent_after_path_rebinding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
