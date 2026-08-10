@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 
@@ -40,12 +41,12 @@ def test_verify_snapshot_rejects_replacement_between_verification_and_hash(
     original_hash = mcp_server._archive_sha256_handle
     state = {"swapped": False}
 
-    def swapping_hash(handle: object) -> str:
+    def swapping_hash(handle: BinaryIO) -> str:
         if not state["swapped"]:
             state["swapped"] = True
             archive.rename(moved)
             replacement.rename(archive)
-        return original_hash(handle)  # type: ignore[arg-type]
+        return original_hash(handle)
 
     monkeypatch.setattr(mcp_server, "_archive_sha256_handle", swapping_hash)
     service = E2HMCPService(MCPServerConfig(root=tmp_path))
