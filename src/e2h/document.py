@@ -74,7 +74,7 @@ def _requested_parent_identity(requested_parent: Path, *, noun: str) -> os.stat_
     try:
         current_parent = requested_parent.resolve(strict=True)
         return current_parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError(f"unable to read {noun}: {exc}") from exc
 
 
@@ -126,7 +126,7 @@ def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> byt
     try:
         parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError(f"unable to read {noun}: {exc}") from exc
     if not stat.S_ISDIR(parent_expected.st_mode):
         raise ValueError(f"{noun} parent must be a directory")
