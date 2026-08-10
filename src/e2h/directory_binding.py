@@ -60,16 +60,14 @@ def open_absolute_directory(path: Path) -> int:
         raise DirectoryBindingError(f"unable to bind replay directory: {exc}") from exc
     try:
         for part in path.parts[1:]:
-            next_descriptor: int | None = None
+            next_descriptor = os.open(part, flags, dir_fd=descriptor)
             try:
-                next_descriptor = os.open(part, flags, dir_fd=descriptor)
                 opened = os.fstat(next_descriptor)
                 if not stat.S_ISDIR(opened.st_mode):
                     raise DirectoryBindingError("replay path component is not a directory")
             except Exception:
-                if next_descriptor is not None:
-                    with suppress(OSError):
-                        os.close(next_descriptor)
+                with suppress(OSError):
+                    os.close(next_descriptor)
                 raise
             os.close(descriptor)
             descriptor = next_descriptor
