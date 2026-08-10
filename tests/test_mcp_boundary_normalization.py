@@ -1,4 +1,4 @@
-"""Regression coverage for MCP configuration paths and evidence digests."""
+"""Regression coverage for MCP configuration paths and canonical evidence digests."""
 
 from __future__ import annotations
 
