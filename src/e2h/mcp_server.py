@@ -29,7 +29,7 @@ from e2h.snapshot import (
     _verify_snapshot_archive,
     revalidate_snapshot_limits,
 )
-from e2h.store import StoreError, query_store, store_info
+from e2h.store import StoreError, query_store_with_info
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
 
 _DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
@@ -367,8 +367,12 @@ class E2HMCPService:
             )
         try:
             selected = QueryView(view)
-            info = store_info(self.config.store, read_only=True)
-            rows = query_store(self.config.store, selected, limit=limit, read_only=True)
+            info, rows = query_store_with_info(
+                self.config.store,
+                selected,
+                limit=limit,
+                read_only=True,
+            )
         except (StoreError, ValueError) as exc:
             raise MCPServiceError(str(exc)) from exc
         material = {
