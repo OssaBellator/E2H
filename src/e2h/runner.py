@@ -166,7 +166,7 @@ class RunResult(BaseModel):
                         CheckStatus.SKIPPED,
                     }:
                         raise ValueError(
-                            "skipped checks must immediately follow the failed check that halted execution"
+                            "skipped checks must immediately follow the halting failed check"
                         )
                     blocking_check_id = self.checks[index - 1].id
                 if (
