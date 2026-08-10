@@ -494,6 +494,7 @@ def apply_optimizer_candidate(
 
 def feedback_from_run_result(result: RunResult) -> OptimizerFeedback:
     """Create bounded GEPA-friendly feedback without copying free-form runner text."""
+    result = _revalidate_optimizer_input(result, RunResult, noun="run result")
     total = len(result.checks)
     passed = sum(check.status is CheckStatus.PASSED for check in result.checks)
     score = passed / total if total else 0.0
