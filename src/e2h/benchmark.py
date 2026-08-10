@@ -256,7 +256,7 @@ def _privacy_trace(corpus: FailurePatternCorpus) -> Trace:
             context=context,
             payload={"pattern_count": len(corpus.patterns)},
         )
-    ]
+    )
     return Trace(trace_id="benchmark-privacy", events=events)
 
 
