@@ -43,7 +43,7 @@ from e2h.runner import (
 )
 from e2h.snapshot_cli import snapshot_app
 from e2h.store_cli import store_app
-from e2h.trace import write_json_atomic, write_traces_jsonl
+from e2h.trace import Trace, write_json_atomic, write_traces_jsonl
 
 app = typer.Typer(no_args_is_help=True, help="Evidence-to-Harness replay tools.")
 experiment_app = typer.Typer(no_args_is_help=True, help="Run reproducible replay matrices.")
@@ -55,6 +55,22 @@ app.add_typer(experiment_app, name="experiment")
 app.add_typer(ingest_app, name="ingest")
 console = Console()
 error_console = Console(stderr=True)
+
+
+def _write_cli_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write E2H output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
+def _write_cli_traces(path: Path, traces: list[Trace]) -> None:
+    try:
+        write_traces_jsonl(path, traces)
+    except (OSError, ValueError) as exc:
+        error_console.print(f"[red]Unable to write E2H output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
 
 
 @app.command()
@@ -79,7 +95,7 @@ def write_schema(
     if output is None:
         console.print_json(rendered)
         return
-    write_json_atomic(output, rendered)
+    _write_cli_output(output, rendered)
     console.print(f"Wrote schema to {output}")
 
 
@@ -113,7 +129,7 @@ def run(
 
     rendered = result.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_cli_output(output, rendered)
     if json_stdout:
         typer.echo(rendered, nl=False)
     else:
@@ -190,9 +206,9 @@ def run_experiment_command(
 
     rendered = execution.result.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_cli_output(output, rendered)
     if traces is not None:
-        write_traces_jsonl(traces, execution.traces)
+        _write_cli_traces(traces, execution.traces)
 
     if json_stdout:
         typer.echo(rendered, nl=False)
@@ -229,11 +245,11 @@ def _emit_ingestion(
 ) -> None:
     rendered = bundle.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_cli_output(output, rendered)
     if traces is not None:
-        write_traces_jsonl(traces, bundle.traces)
+        _write_cli_traces(traces, bundle.traces)
     if redaction_report is not None and bundle.redaction_review is not None:
-        write_json_atomic(
+        _write_cli_output(
             redaction_report,
             bundle.redaction_review.model_dump_json(indent=2) + "\n",
         )
