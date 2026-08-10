@@ -257,8 +257,8 @@ class E2HMCPService:
             )
         try:
             selected = QueryView(view)
-            info = store_info(self.config.store)
-            rows = query_store(self.config.store, selected, limit=limit)
+            info = store_info(self.config.store, read_only=True)
+            rows = query_store(self.config.store, selected, limit=limit, read_only=True)
         except (StoreError, ValueError) as exc:
             raise MCPServiceError(str(exc)) from exc
         material = {
