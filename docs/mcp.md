@@ -20,6 +20,8 @@ The default server registers these tools:
 
 A configured memory database must already exist. The MCP server does not create a store on behalf of a model call.
 
+Verified memory queries do not pass the configured source pathname directly to DuckDB. Before opening the read-only DuckDB connection, E2H binds the store parent through descriptor-relative no-follow operations and copies the database plus DuckDB's `.wal`, `.wal.checkpoint`, and `.wal.recovery` sidecars, when present, into a private temporary directory. It revalidates the source file identities and sidecar membership after the copy, then lets DuckDB open only the private snapshot pathname. Platforms without the descriptor-relative/no-follow primitives required for that binding fail closed for MCP verified-memory queries instead of falling back to a pathname race. Large stores therefore require enough temporary disk space for one private snapshot per in-flight MCP memory query.
+
 ## Replay is opt-in
 
 Replay executes capsule-declared commands and is therefore not registered unless the operator enables it when launching the server:
