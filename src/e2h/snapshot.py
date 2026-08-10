@@ -287,7 +287,7 @@ def _requested_snapshot_parent_must_be_stable(
     try:
         current_parent = requested_parent.resolve(strict=True)
         current = current_parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SnapshotError(f"unable to restat {noun} parent: {exc}") from exc
     if not stat.S_ISDIR(current.st_mode):
         raise SnapshotError(f"{noun} parent changed while {phase}")
@@ -389,7 +389,7 @@ def _open_snapshot_write_parent(
         requested_parent.mkdir(parents=True, exist_ok=True)
         parent = requested_parent.resolve(strict=True)
         expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SnapshotError(f"unable to prepare {noun}: {exc}") from exc
     if not stat.S_ISDIR(expected.st_mode):
         raise SnapshotError(f"{noun} parent must be a directory")
@@ -651,7 +651,7 @@ def _create_restore_staging_directory(
     if not _WRITE_DIR_FD_SUPPORTED:
         staging = Path(
             tempfile.mkdtemp(prefix=f".{destination.name}.restore-", dir=destination.parent)
-        ).resolve()
+        )
         return staging.name, staging
     for _ in range(128):
         name = f".{destination.name}.restore-{secrets.token_hex(16)}"
@@ -661,6 +661,22 @@ def _create_restore_staging_directory(
             continue
         return name, destination.parent / name
     raise SnapshotError("unable to allocate a unique restore staging directory")
+
+
+def _resolve_restore_target(
+    staging_path: Path,
+    parts: tuple[str, ...],
+    relative: str,
+) -> Path:
+    try:
+        target = (staging_path / Path(*parts)).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SnapshotError(f"unable to resolve restore path {relative}: {exc}") from exc
+    try:
+        target.relative_to(staging_path)
+    except ValueError as exc:
+        raise SnapshotError(f"restore path escapes staging root: {relative}") from exc
+    return target
 
 
 def _open_bound_child_directory(
@@ -771,7 +787,7 @@ def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
     try:
         parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
     if not stat.S_ISDIR(parent_expected.st_mode):
         raise SnapshotError("snapshot archive parent must be a directory")
@@ -912,7 +928,7 @@ def _resolve_selected(root: Path, value: str) -> Path:
 def _resolve_under_root(root: Path, path: Path, relative: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SnapshotError(f"unable to resolve {relative}: {exc}") from exc
     try:
         resolved.relative_to(root)
@@ -1383,13 +1399,7 @@ def restore_snapshot(
                             )
                             continue
                         assert staging_path is not None
-                        target = (staging_path / Path(*parts)).resolve()
-                        try:
-                            target.relative_to(staging_path)
-                        except ValueError as exc:
-                            raise SnapshotError(
-                                f"restore path escapes staging root: {entry.path}"
-                            ) from exc
+                        target = _resolve_restore_target(staging_path, parts, entry.path)
                         if entry.kind == "directory":
                             target.mkdir(parents=True, exist_ok=True)
                             continue
