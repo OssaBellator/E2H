@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import sys
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -20,7 +21,7 @@ from e2h.failures import (
     unexpected_exit_failure,
     working_directory_failure,
 )
-from e2h.models import TaskCapsule
+from e2h.models import CommandCheck, TaskCapsule
 from e2h.runner import (
     CheckStatus,
     CommandResult,
@@ -50,11 +51,7 @@ def _requested_relative_cwd(working_directory: str, check_cwd: str) -> str:
     return "." if rendered == "." else rendered
 
 
-def _missing_check_result(check: object, relative_cwd: str) -> CommandResult:
-    from e2h.models import CommandCheck
-
-    if type(check) is not CommandCheck:
-        raise RunnerError("invalid command check reached bound replay")
+def _missing_check_result(check: CommandCheck, relative_cwd: str) -> CommandResult:
     return CommandResult(
         id=check.id,
         argv=check.argv,
@@ -80,10 +77,9 @@ def run_capsule_bound_local(
         workspace_info = os.fstat(workspace_descriptor)
     except OSError as exc:
         raise RunnerError(f"unable to inspect bound workspace: {exc}") from exc
-    if not Path(_proc_fd_directory(workspace_descriptor)).is_dir():
+    if not stat.S_ISDIR(workspace_info.st_mode):
         raise RunnerError(f"workspace is not a directory: {workspace}")
-    if not workspace_info.st_mode:
-        raise RunnerError(f"workspace is not a directory: {workspace}")
+    _proc_fd_directory(workspace_descriptor)
 
     try:
         task_descriptor = open_relative_directory(
@@ -204,7 +200,12 @@ def run_capsule_bound_local(
             os.close(task_descriptor)
 
     failed = any(result.status is not CheckStatus.PASSED for result in results)
-    run_status = RunStatus.ERROR if infrastructure_error else RunStatus.FAILED if failed else RunStatus.PASSED
+    if infrastructure_error:
+        run_status = RunStatus.ERROR
+    elif failed:
+        run_status = RunStatus.FAILED
+    else:
+        run_status = RunStatus.PASSED
     finished_at = datetime.now(UTC)
     return RunResult(
         capsule_id=capsule.id,
