@@ -39,7 +39,7 @@ def _prepare_parent(path: Path) -> tuple[Path, Path, os.stat_result]:
         requested_parent = path.parent.absolute()
         parent = requested_parent.resolve(strict=True)
         expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise OSError(f"unable to prepare atomic output parent: {exc}") from exc
     if not stat.S_ISDIR(expected.st_mode):
         raise OSError("atomic output parent must be a directory")
@@ -50,7 +50,7 @@ def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
     try:
         current = requested_parent.resolve(strict=True)
         return current.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise OSError(f"unable to restat atomic output parent: {exc}") from exc
 
 
