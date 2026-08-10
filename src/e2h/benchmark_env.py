@@ -96,7 +96,12 @@ def _validate_relative_path(value: str, noun: str) -> str:
 
 
 def _safe_root(root: Path) -> Path:
-    resolved = root.resolve()
+    try:
+        resolved = root.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise BenchmarkEnvironmentError(
+            f"unable to resolve benchmark environment root: {exc}"
+        ) from exc
     if not resolved.is_dir():
         raise BenchmarkEnvironmentError("benchmark environment root is not a directory")
     return resolved
@@ -107,7 +112,10 @@ def _resolve_relative(root: Path, relative: str, noun: str) -> Path:
         normalized = _validate_relative_path(relative, noun)
     except ValueError as exc:
         raise BenchmarkEnvironmentError(str(exc)) from exc
-    candidate = (root / Path(*PurePosixPath(normalized).parts)).resolve()
+    try:
+        candidate = (root / Path(*PurePosixPath(normalized).parts)).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise BenchmarkEnvironmentError(f"unable to resolve {noun}: {exc}") from exc
     if not candidate.is_relative_to(root):
         raise BenchmarkEnvironmentError(f"{noun} escapes the benchmark root")
     return candidate
