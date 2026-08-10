@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import e2h.mcp_server as mcp_server
+import e2h.store_snapshot as store_snapshot
 from e2h.mcp_server import E2HMCPService, MCPServerConfig, MCPServiceError
 from e2h.store_models import QueryView, StoreInfo
 
@@ -20,6 +21,10 @@ def _empty_info() -> StoreInfo:
     )
 
 
+@pytest.mark.skipif(
+    not store_snapshot._DESCRIPTOR_BOUND_SUPPORTED,
+    reason="descriptor-bound store snapshots are unavailable",
+)
 def test_memory_query_opens_only_private_snapshot_after_source_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
