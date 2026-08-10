@@ -19,7 +19,7 @@ _FORBIDDEN_DETAIL_KEYS = frozenset({"stdout", "stderr", "output_text", "raw_outp
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
 
 class FailureCategory(StrEnum):
@@ -84,6 +84,37 @@ class Retryability(StrEnum):
     UNKNOWN = "unknown"
 
 
+_CODE_IMPACT = {
+    FailureCode.UNEXPECTED_EXIT: FailureImpact.EVALUATION_FAILURE,
+    FailureCode.SIGNAL_TERMINATION: FailureImpact.EVALUATION_FAILURE,
+    FailureCode.TIMEOUT: FailureImpact.EVALUATION_FAILURE,
+    FailureCode.COMMAND_NOT_FOUND: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.PERMISSION_DENIED: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.PROCESS_LAUNCH_ERROR: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.WORKING_DIRECTORY_MISSING: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.SANDBOX_CONFIGURATION: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.SANDBOX_RUNTIME: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.SANDBOX_CLEANUP: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.OUTPUT_CAPTURE: FailureImpact.INFRASTRUCTURE_ERROR,
+    FailureCode.SKIPPED_AFTER_FAILURE: FailureImpact.NOT_EVALUATED,
+}
+
+_CODE_RETRYABILITY = {
+    FailureCode.UNEXPECTED_EXIT: Retryability.NO,
+    FailureCode.SIGNAL_TERMINATION: Retryability.NO,
+    FailureCode.TIMEOUT: Retryability.MAYBE,
+    FailureCode.COMMAND_NOT_FOUND: Retryability.AFTER_FIX,
+    FailureCode.PERMISSION_DENIED: Retryability.AFTER_FIX,
+    FailureCode.PROCESS_LAUNCH_ERROR: Retryability.UNKNOWN,
+    FailureCode.WORKING_DIRECTORY_MISSING: Retryability.AFTER_FIX,
+    FailureCode.SANDBOX_CONFIGURATION: Retryability.AFTER_FIX,
+    FailureCode.SANDBOX_RUNTIME: Retryability.AFTER_FIX,
+    FailureCode.SANDBOX_CLEANUP: Retryability.AFTER_FIX,
+    FailureCode.OUTPUT_CAPTURE: Retryability.AFTER_FIX,
+    FailureCode.SKIPPED_AFTER_FAILURE: Retryability.AFTER_FIX,
+}
+
+
 def _validate_detail_value(value: Any) -> None:
     if value is None or isinstance(value, (str, bool, int)):
         return
@@ -138,11 +169,22 @@ class FailureRecord(StrictModel):
         return value
 
     @model_validator(mode="after")
-    def causes_must_be_unique_and_not_repeat_primary(self) -> FailureRecord:
+    def taxonomy_and_causes_must_be_consistent(self) -> FailureRecord:
         expected_category = _CODE_CATEGORY[self.code]
         if self.category is not expected_category:
             raise ValueError(
                 f"failure code {self.code.value!r} requires category {expected_category.value!r}"
+            )
+        expected_impact = _CODE_IMPACT[self.code]
+        if self.impact is not expected_impact:
+            raise ValueError(
+                f"failure code {self.code.value!r} requires impact {expected_impact.value!r}"
+            )
+        expected_retryability = _CODE_RETRYABILITY[self.code]
+        if self.retryability is not expected_retryability:
+            raise ValueError(
+                "failure code "
+                f"{self.code.value!r} requires retryability {expected_retryability.value!r}"
             )
         if self.code in self.causes:
             raise ValueError("failure causes must not repeat the primary code")
@@ -187,10 +229,18 @@ class FailureSummary(StrictModel):
         except ValueError as exc:
             raise ValueError("failure code counts must use known failure codes") from exc
         expected_categories: Counter[str] = Counter()
+        expected_impacts: Counter[FailureImpact] = Counter()
         for code, count in code_counts.items():
             expected_categories[_CODE_CATEGORY[code].value] += count
+            expected_impacts[_CODE_IMPACT[code]] += count
         if self.by_category != dict(sorted(expected_categories.items())):
             raise ValueError("failure category counts must match failure code taxonomy")
+        if (
+            self.evaluation_failures != expected_impacts[FailureImpact.EVALUATION_FAILURE]
+            or self.infrastructure_errors != expected_impacts[FailureImpact.INFRASTRUCTURE_ERROR]
+            or self.not_evaluated != expected_impacts[FailureImpact.NOT_EVALUATED]
+        ):
+            raise ValueError("failure impact counts must match failure code taxonomy")
         if (self.primary_check_id is None) != (self.primary_code is None):
             raise ValueError("primary_check_id and primary_code must be set together")
         if self.total == 0 and self.primary_check_id is not None:
