@@ -10,8 +10,8 @@ from e2h.store_models import QueryView
 
 
 class _CountCursor:
-    def fetchone(self) -> tuple[int]:
-        return (1,)
+    def fetchall(self) -> list[tuple[int]]:
+        return [(1,)]
 
 
 class _QueryCursor:
@@ -19,6 +19,25 @@ class _QueryCursor:
 
     def fetchall(self) -> list[tuple[str]]:
         return [("artifact.json",)]
+
+
+class _SchemaCursor:
+    def __init__(self, rows: list[tuple[str]]) -> None:
+        self.rows = rows
+        self.fetchall_called = False
+
+    def fetchall(self) -> list[tuple[str]]:
+        self.fetchall_called = True
+        return self.rows
+
+
+class _SchemaConnection:
+    def __init__(self, cursor: _SchemaCursor) -> None:
+        self.cursor = cursor
+
+    def execute(self, sql: str) -> _SchemaCursor:
+        assert "schema_version" in sql
+        return self.cursor
 
 
 class _FakeConnection:
@@ -44,6 +63,14 @@ class _FailingQueryConnection(_FakeConnection):
         if " LIMIT " in sql:
             raise store.duckdb.Error("query failed")
         return _QueryCursor()
+
+
+def test_schema_version_row_fully_consumes_result() -> None:
+    cursor = _SchemaCursor([("2",)])
+    connection = _SchemaConnection(cursor)
+
+    assert store._schema_version_row(connection) == ("2",)
+    assert cursor.fetchall_called is True
 
 
 def test_query_store_with_info_uses_one_transaction(
