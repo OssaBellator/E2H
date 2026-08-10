@@ -59,7 +59,7 @@ def resolve_snapshot_source_root(root: Path) -> tuple[Path, os.stat_result]:
     try:
         resolved = root.resolve(strict=True)
         expected = resolved.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SnapshotError(f"unable to inspect snapshot root: {exc}") from exc
     if not stat.S_ISDIR(expected.st_mode):
         raise SnapshotError(f"snapshot root is not a directory: {resolved}")
@@ -76,7 +76,7 @@ def _requested_root_stat(requested_root: Path) -> os.stat_result:
     try:
         current_root = requested_root.resolve(strict=True)
         current = current_root.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise SnapshotError(f"unable to restat snapshot root: {exc}") from exc
     if not stat.S_ISDIR(current.st_mode):
         raise SnapshotError("snapshot root changed during traversal")
