@@ -15,7 +15,7 @@ from e2h.runner import ExecutionBackend
 
 pytestmark = pytest.mark.skipif(
     os.name != "posix" or not sys.platform.startswith("linux"),
-    reason="handle-bound MCP replay requires Linux procfs",
+    reason="handle-bound MCP local replay requires Linux procfs",
 )
 
 
@@ -132,7 +132,7 @@ def test_mcp_local_replay_stays_on_bound_workspace_after_path_rebinding(
     assert not (outside / "proof").exists()
 
 
-def test_mcp_auto_container_replay_uses_bound_workspace_runner(
+def test_mcp_auto_container_replay_keeps_existing_runner_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -156,29 +156,21 @@ def test_mcp_auto_container_replay_uses_bound_workspace_runner(
     )
     workspace = root / "workspace"
     workspace.mkdir()
-    observed: list[tuple[Path, int]] = []
+    called = False
 
-    @contextmanager
-    def fake_bind(path: Path) -> Iterator[int]:
-        assert path == workspace.resolve()
-        yield 73
+    def unexpected_bind(path: Path):
+        raise AssertionError(f"container replay unexpectedly used local binder: {path}")
 
-    def stop_at_bound_container(
-        loaded: object,
-        path: Path,
-        *,
-        workspace_descriptor: int,
-        container_runtime: str | None = None,
-    ) -> object:
-        del loaded, container_runtime
-        observed.append((path, workspace_descriptor))
-        raise mcp_server.RunnerError("bound container replay reached")
+    def stop_at_container(*args: object, **kwargs: object):
+        nonlocal called
+        called = True
+        raise mcp_server.RunnerError("container routing reached generic runner")
 
-    monkeypatch.setattr(mcp_server, "bound_absolute_directory", fake_bind)
-    monkeypatch.setattr(mcp_server, "run_capsule_bound_container", stop_at_bound_container)
+    monkeypatch.setattr(mcp_server, "bound_absolute_directory", unexpected_bind)
+    monkeypatch.setattr(mcp_server, "run_capsule", stop_at_container)
     service = E2HMCPService(MCPServerConfig(root=root, allow_replay=True))
 
-    with pytest.raises(MCPServiceError, match="bound container replay reached"):
+    with pytest.raises(MCPServiceError, match="container routing reached generic runner"):
         service.replay(capsule.name, workspace="workspace")
 
-    assert observed == [(workspace.resolve(), 73)]
+    assert called is True
