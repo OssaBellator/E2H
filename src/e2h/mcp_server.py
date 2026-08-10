@@ -471,7 +471,10 @@ class E2HMCPService:
         if not workspace_path.is_dir():
             raise MCPServiceError("workspace does not exist or is not a directory")
         try:
-            loaded = load_capsule(capsule_path)
+            loaded = load_capsule(
+                capsule_path,
+                containment_root=self.config.root,
+            )
             result = run_capsule(
                 loaded,
                 workspace_path,
