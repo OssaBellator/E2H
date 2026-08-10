@@ -1,4 +1,4 @@
-"""Regression coverage for compiler CLI atomic-publication failures."""
+"""Regression coverage for controlled compiler CLI atomic-publication failures."""
 
 from __future__ import annotations
 
