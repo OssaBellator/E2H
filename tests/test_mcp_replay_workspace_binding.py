@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,13 +8,14 @@ from typing import Iterator
 
 import pytest
 
+import e2h.directory_binding as directory_binding
 import e2h.mcp_server as mcp_server
 from e2h.mcp_server import E2HMCPService, MCPServerConfig, MCPServiceError
 from e2h.runner import ExecutionBackend
 
 pytestmark = pytest.mark.skipif(
-    os.name != "posix" or not sys.platform.startswith("linux"),
-    reason="handle-bound MCP local replay requires Linux procfs",
+    not directory_binding._DIRECTORY_BINDING_SUPPORTED or not sys.platform.startswith("linux"),
+    reason="handle-bound MCP local replay requires Linux directory descriptors and procfs",
 )
 
 
