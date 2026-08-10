@@ -36,6 +36,16 @@ class _FakeConnection:
         self.closed = True
 
 
+class _FailingQueryConnection(_FakeConnection):
+    def execute(self, sql: str) -> Any:
+        self.sql.append(sql)
+        if sql.startswith("SELECT count(*)"):
+            return _CountCursor()
+        if " LIMIT " in sql:
+            raise store.duckdb.Error("query failed")
+        return _QueryCursor()
+
+
 def test_query_store_with_info_uses_one_transaction(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -68,3 +78,25 @@ def test_query_store_with_info_uses_one_transaction(
     assert connection.sql[0] == "BEGIN TRANSACTION"
     assert connection.sql[-1] == "COMMIT"
     assert any("LIMIT 7" in sql for sql in connection.sql[1:-1])
+
+
+def test_query_store_with_info_rolls_back_failed_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "evidence.duckdb"
+    connection = _FailingQueryConnection()
+
+    monkeypatch.setattr(store, "_connection", lambda *args, **kwargs: connection)
+
+    with pytest.raises(store.StoreError, match="unable to query store: query failed"):
+        store.query_store_with_info(
+            database,
+            QueryView.SOURCES,
+            limit=7,
+            read_only=True,
+        )
+
+    assert connection.sql[0] == "BEGIN TRANSACTION"
+    assert connection.sql[-1] == "ROLLBACK"
+    assert connection.closed is True
