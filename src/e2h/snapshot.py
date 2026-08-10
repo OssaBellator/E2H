@@ -70,7 +70,7 @@ class SnapshotError(ValueError):
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
 
 def _validate_json_object_keys(value: Any, *, active: set[int] | None = None) -> None:
