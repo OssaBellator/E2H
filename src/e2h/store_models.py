@@ -54,6 +54,8 @@ class IngestResult(StrictModel):
             return self
         if self.runs < 1:
             raise ValueError("inserted ingests must contain at least one run")
+        if self.failures > self.checks:
+            raise ValueError("failure rows must not exceed check rows")
         if self.kind == "run":
             if self.runs != 1:
                 raise ValueError("standalone run ingests must contain exactly one run")
@@ -61,6 +63,8 @@ class IngestResult(StrictModel):
                 raise ValueError("standalone run ingests must not contain variant summaries")
         elif self.summaries < 1:
             raise ValueError("experiment ingests must contain at least one variant summary")
+        elif self.summaries > self.runs:
+            raise ValueError("experiment variant summaries must not exceed runs")
         return self
 
 
