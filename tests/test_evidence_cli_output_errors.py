@@ -1,4 +1,4 @@
-"""Regression coverage for controlled benchmark and release publication failures."""
+"""Regression coverage for controlled benchmark/release evidence publication failures."""
 
 from __future__ import annotations
 
