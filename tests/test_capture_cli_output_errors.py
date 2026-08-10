@@ -1,4 +1,4 @@
-"""Regression coverage for controlled capture CLI publication failures."""
+"""Regression coverage for controlled capture CLI schema-publication failures."""
 
 from __future__ import annotations
 
