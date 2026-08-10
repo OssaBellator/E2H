@@ -235,8 +235,14 @@ def resolve_under_root(root: Path, relative: str) -> Path:
         raise ValueError("experiment root must not contain NUL")
     if "\x00" in relative:
         raise ValueError("path must not contain NUL")
-    root_path = root.resolve()
-    candidate = (root_path / relative).resolve()
+    try:
+        root_path = root.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"unable to resolve experiment root: {exc}") from exc
+    try:
+        candidate = (root_path / relative).resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"unable to resolve experiment path {relative!r}: {exc}") from exc
     try:
         candidate.relative_to(root_path)
     except ValueError as exc:
