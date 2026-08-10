@@ -358,7 +358,9 @@ class E2HMCPService:
         """Query one predefined E2H analytical view and bind the returned memory to a digest."""
         if self.config.store is None:
             raise MCPServiceError("verified memory is not configured for this MCP server")
-        if not self.config.store.is_file():
+        store_relative = self.config.store.relative_to(self.config.root).as_posix()
+        store, _ = _safe_relative(self.config.root, store_relative, noun="memory store")
+        if not store.is_file():
             raise MCPServiceError("configured memory store does not exist")
         if not 1 <= limit <= self.config.max_memory_rows:
             raise MCPServiceError(
@@ -368,7 +370,7 @@ class E2HMCPService:
         try:
             selected = QueryView(view)
             info, rows = query_store_with_info(
-                self.config.store,
+                store,
                 selected,
                 limit=limit,
                 read_only=True,
