@@ -11,6 +11,8 @@ from e2h.runner import CheckStatus, CommandResult, RunResult, RunStatus
 
 NOW = datetime(2026, 8, 10, 7, 45, tzinfo=UTC)
 
+# Mutate valid runner artifacts after construction to exercise the adapter trust boundary.
+
 
 def _check() -> CommandResult:
     return CommandResult(
