@@ -506,7 +506,7 @@ def _requested_manifest_parent_identity(requested_parent: Path) -> os.stat_resul
     try:
         current_parent = requested_parent.resolve(strict=True)
         return current_parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
 
 
@@ -517,7 +517,7 @@ def _read_release_manifest_bytes(path: Path) -> bytes:
     try:
         parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ReleaseIntegrityError(f"unable to read release manifest: {exc}") from exc
     if not stat.S_ISDIR(parent_expected.st_mode):
         raise ReleaseIntegrityError("release manifest parent must be a directory")
