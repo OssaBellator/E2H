@@ -32,11 +32,35 @@ def _validate_store_path(path: Path, *, noun: str) -> None:
         raise StoreError(f"{noun} path must not contain NUL")
 
 
-def _connection(database: Path) -> duckdb.DuckDBPyConnection:
+def _connection(
+    database: Path,
+    *,
+    read_only: bool = False,
+) -> duckdb.DuckDBPyConnection:
     _validate_store_path(database, noun="store database")
     connection: duckdb.DuckDBPyConnection | None = None
     try:
         database = database.resolve()
+        if read_only:
+            if not database.is_file():
+                raise StoreError("experiment store does not exist")
+            connection = duckdb.connect(str(database), read_only=True)
+            existing = connection.execute(
+                "SELECT value FROM store_metadata WHERE key = 'schema_version'"
+            ).fetchone()
+            if existing is None:
+                connection.close()
+                connection = None
+                raise StoreError("experiment store schema version is missing")
+            actual = str(existing[0])
+            if actual != STORE_SCHEMA_VERSION:
+                connection.close()
+                connection = None
+                raise StoreError(
+                    f"unsupported store schema version {actual!r}; expected {STORE_SCHEMA_VERSION}"
+                )
+            return connection
+
         database.parent.mkdir(parents=True, exist_ok=True)
         connection = duckdb.connect(str(database))
         connection.execute(SCHEMA_SQL)
@@ -99,9 +123,13 @@ def initialize_store(database: Path) -> StoreInfo:
         connection.close()
 
 
-def store_info(database: Path) -> StoreInfo:
-    """Return schema and row counts for an existing or new store."""
-    return initialize_store(database)
+def store_info(database: Path, *, read_only: bool = False) -> StoreInfo:
+    """Return schema and row counts, optionally without mutating the store."""
+    connection = _connection(database, read_only=read_only)
+    try:
+        return _info(connection)
+    finally:
+        connection.close()
 
 
 def ingest_artifact(
@@ -221,6 +249,7 @@ def query_store(
     view: QueryView,
     *,
     limit: int = 100,
+    read_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Query one predefined analytical view with a bounded row limit."""
     if not 1 <= limit <= MAX_QUERY_ROWS:
@@ -229,7 +258,7 @@ def query_store(
         selected = QueryView(view)
     except ValueError as exc:
         raise StoreError(f"unknown query view: {view}") from exc
-    connection = _connection(database)
+    connection = _connection(database, read_only=read_only)
     try:
         cursor = connection.execute(f"{VIEW_SQL[selected]} LIMIT {limit}")
         if cursor.description is None:
