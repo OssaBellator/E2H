@@ -68,6 +68,14 @@ def _container_workdir(relative_cwd: str) -> str:
     return str(_CONTAINER_ROOT.joinpath(path))
 
 
+def _validated_bound_mount_source(value: str, *, noun: str) -> str:
+    if not value or "\x00" in value:
+        raise SandboxError(f"{noun} must be a non-empty path without NUL")
+    if not Path(value).is_absolute():
+        raise SandboxError(f"{noun} must be absolute")
+    return value
+
+
 def build_container_argv(
     capsule: TaskCapsule,
     check: CommandCheck,
@@ -77,6 +85,7 @@ def build_container_argv(
     *,
     runtime_binary: str | None = None,
     workspace_mount_source: str | None = None,
+    working_directory_mount_source: str | None = None,
 ) -> list[str]:
     """Build a deterministic Docker invocation for one capsule check."""
     sandbox, allowed_actions = _validated_capsule_policy(capsule)
@@ -84,14 +93,22 @@ def build_container_argv(
     runtime = _validated_runtime_binary(
         sandbox.engine if runtime_binary is None else runtime_binary
     )
-    workspace_text = (
-        str(workspace_root) if workspace_mount_source is None else workspace_mount_source
-    )
+    workspace_text = str(workspace_root)
+    if workspace_mount_source is not None:
+        workspace_text = _validated_bound_mount_source(
+            workspace_mount_source,
+            noun="bound container workspace mount source",
+        )
+    check_mount_source = None
+    if working_directory_mount_source is not None:
+        check_mount_source = _validated_bound_mount_source(
+            working_directory_mount_source,
+            noun="bound container working-directory mount source",
+        )
     cidfile_text = str(cidfile)
     if "\x00" in workspace_text or "\x00" in cidfile_text:
         raise SandboxError("container filesystem arguments must not contain NUL")
-    if workspace_mount_source is not None and not Path(workspace_text).is_absolute():
-        raise SandboxError("bound container workspace mount source must be absolute")
+    workdir = _container_workdir(relative_cwd)
     mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
     if sandbox.workspace_access == "read_only":
         mount += ",readonly"
@@ -107,26 +124,35 @@ def build_container_argv(
         "--hostname",
         "e2h",
         "--workdir",
-        _container_workdir(relative_cwd),
+        workdir,
         "--mount",
         mount,
-        "--network",
-        "none" if allowed_actions.network == "deny" else "bridge",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges:true",
-        "--pids-limit",
-        str(sandbox.pids_limit),
-        "--memory",
-        f"{sandbox.memory_mb}m",
-        "--cpus",
-        f"{sandbox.cpus:g}",
-        "--user",
-        sandbox.user,
-        "--tmpfs",
-        f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
     ]
+    if check_mount_source is not None and workdir != str(_CONTAINER_ROOT):
+        check_mount = f"type=bind,src={check_mount_source},dst={workdir}"
+        if sandbox.workspace_access == "read_only":
+            check_mount += ",readonly"
+        argv.extend(["--mount", check_mount])
+    argv.extend(
+        [
+            "--network",
+            "none" if allowed_actions.network == "deny" else "bridge",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--pids-limit",
+            str(sandbox.pids_limit),
+            "--memory",
+            f"{sandbox.memory_mb}m",
+            "--cpus",
+            f"{sandbox.cpus:g}",
+            "--user",
+            sandbox.user,
+            "--tmpfs",
+            f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        ]
+    )
     if sandbox.read_only_root:
         argv.append("--read-only")
     for key, value in sorted(check.env.items()):
