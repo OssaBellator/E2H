@@ -153,20 +153,27 @@ class RunResult(BaseModel):
         check_ids = [check.id for check in self.checks]
         if len(check_ids) != len(set(check_ids)):
             raise ValueError("run check ids must be unique")
-        blocking_check_ids: set[str] = set()
+        blocking_check_id: str | None = None
         skipped_started = False
-        for check in self.checks:
+        for index, check in enumerate(self.checks):
             if skipped_started and check.status is not CheckStatus.SKIPPED:
                 raise ValueError("executed checks must not follow skipped checks")
             if check.status is CheckStatus.SKIPPED:
-                skipped_started = True
+                if not skipped_started:
+                    skipped_started = True
+                    if index == 0 or self.checks[index - 1].status in {
+                        CheckStatus.PASSED,
+                        CheckStatus.SKIPPED,
+                    }:
+                        raise ValueError(
+                            "skipped checks must immediately follow the failed check that halted execution"
+                        )
+                    blocking_check_id = self.checks[index - 1].id
                 if (
                     check.failure is None
-                    or check.failure.caused_by_check_id not in blocking_check_ids
+                    or check.failure.caused_by_check_id != blocking_check_id
                 ):
-                    raise ValueError("skipped checks must reference an earlier failed check")
-            elif check.status is not CheckStatus.PASSED:
-                blocking_check_ids.add(check.id)
+                    raise ValueError("skipped checks must reference the check that halted execution")
         expected_summary = summarize_failures((check.id, check.failure) for check in self.checks)
         if self.failure_summary != expected_summary:
             raise ValueError("run failure_summary must match check failures")
