@@ -107,12 +107,12 @@ def run_capsule_bound_local(
     except OSError as exc:
         raise RunnerError(f"unable to open working directory: {exc}") from exc
 
-    task_cwd = _bound_relative_cwd(workspace_descriptor, task_descriptor)
     results: list[CommandResult] = []
     halt = False
     blocked_by_check_id: str | None = None
     infrastructure_error = False
     try:
+        task_cwd = _bound_relative_cwd(workspace_descriptor, task_descriptor)
         for check in capsule.success.commands:
             requested_cwd = _requested_relative_cwd(task_cwd, check.cwd)
             if halt:
