@@ -17,12 +17,12 @@ from typing import Any
 from mcp.server import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
-from e2h.bound_runner import run_capsule_bound_container, run_capsule_bound_local
+from e2h.bound_runner import run_capsule_bound_local
 from e2h.directory_binding import DirectoryBindingError, bound_absolute_directory
 from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
 from e2h.loader import CapsuleLoadError, load_capsule
-from e2h.runner import ExecutionBackend, RunnerError
+from e2h.runner import ExecutionBackend, RunnerError, run_capsule
 from e2h.snapshot import SnapshotError, verify_snapshot_with_archive_sha256
 from e2h.store import StoreError, query_store_with_info
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
@@ -499,20 +499,20 @@ class E2HMCPService:
                     if loaded.sandbox is not None
                     else ExecutionBackend.LOCAL
                 )
-            with bound_absolute_directory(workspace_path) as workspace_descriptor:
-                if selected_backend is ExecutionBackend.LOCAL:
+            if selected_backend is ExecutionBackend.LOCAL:
+                with bound_absolute_directory(workspace_path) as workspace_descriptor:
                     result = run_capsule_bound_local(
                         loaded,
                         workspace_path,
                         workspace_descriptor=workspace_descriptor,
                     )
-                else:
-                    result = run_capsule_bound_container(
-                        loaded,
-                        workspace_path,
-                        workspace_descriptor=workspace_descriptor,
-                        container_runtime=self.config.container_runtime,
-                    )
+            else:
+                result = run_capsule(
+                    loaded,
+                    workspace_path,
+                    backend=selected_backend,
+                    container_runtime=self.config.container_runtime,
+                )
         except (CapsuleLoadError, DirectoryBindingError, RunnerError) as exc:
             raise MCPServiceError(str(exc)) from exc
 
