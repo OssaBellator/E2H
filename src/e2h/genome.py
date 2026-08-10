@@ -298,6 +298,8 @@ class GenomeApplication(StrictModel):
     def result_digest_must_match_capsule(self) -> GenomeApplication:
         if capsule_sha256(self.capsule) != self.result_capsule_sha256:
             raise ValueError("result capsule digest does not match embedded capsule")
+        if self.base_capsule_sha256 == self.result_capsule_sha256:
+            raise ValueError("genome application must change the base capsule")
         if len(self.applied_patch_ids) != len(set(self.applied_patch_ids)):
             raise ValueError("applied patch ids must be unique")
         return self
