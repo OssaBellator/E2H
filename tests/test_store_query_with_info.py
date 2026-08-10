@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pytest
 
 import e2h.store as store
 from e2h.store_models import QueryView
+from e2h.store_snapshot import StoreSnapshotError
 
 
 class _CountCursor:
@@ -73,18 +75,26 @@ def test_schema_version_row_fully_consumes_result() -> None:
     assert cursor.fetchall_called is True
 
 
-def test_query_store_with_info_uses_one_transaction(
+def test_query_store_with_info_uses_private_snapshot_and_one_transaction(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = tmp_path / "evidence.duckdb"
+    private_database = tmp_path / "private" / database.name
     connection = _FakeConnection()
     calls: list[tuple[Path, bool]] = []
+    snapshots: list[Path] = []
+
+    @contextmanager
+    def fake_snapshot(path: Path) -> Iterator[Path]:
+        snapshots.append(path)
+        yield private_database
 
     def fake_connection(path: Path, *, read_only: bool = False) -> _FakeConnection:
         calls.append((path, read_only))
         return connection
 
+    monkeypatch.setattr(store, "stable_store_snapshot", fake_snapshot)
     monkeypatch.setattr(store, "_connection", fake_connection)
 
     info, rows = store.query_store_with_info(
@@ -94,7 +104,8 @@ def test_query_store_with_info_uses_one_transaction(
         read_only=True,
     )
 
-    assert calls == [(database, True)]
+    assert snapshots == [database]
+    assert calls == [(private_database, True)]
     assert info.sources == 1
     assert info.runs == 1
     assert info.checks == 1
@@ -112,8 +123,15 @@ def test_query_store_with_info_rolls_back_failed_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = tmp_path / "evidence.duckdb"
+    private_database = tmp_path / "private" / database.name
     connection = _FailingQueryConnection()
 
+    @contextmanager
+    def fake_snapshot(path: Path) -> Iterator[Path]:
+        assert path == database
+        yield private_database
+
+    monkeypatch.setattr(store, "stable_store_snapshot", fake_snapshot)
     monkeypatch.setattr(store, "_connection", lambda *args, **kwargs: connection)
 
     with pytest.raises(store.StoreError, match="unable to query store: query failed"):
@@ -126,4 +144,50 @@ def test_query_store_with_info_rolls_back_failed_transaction(
 
     assert connection.sql[0] == "BEGIN TRANSACTION"
     assert connection.sql[-1] == "ROLLBACK"
+    assert connection.closed is True
+
+
+def test_query_store_with_info_wraps_snapshot_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "evidence.duckdb"
+
+    @contextmanager
+    def failing_snapshot(path: Path) -> Iterator[Path]:
+        assert path == database
+        raise StoreSnapshotError("store changed while snapshotting")
+        yield path
+
+    monkeypatch.setattr(store, "stable_store_snapshot", failing_snapshot)
+
+    with pytest.raises(store.StoreError, match="store changed while snapshotting"):
+        store.query_store_with_info(
+            database,
+            QueryView.SOURCES,
+            read_only=True,
+        )
+
+
+def test_query_store_with_info_does_not_snapshot_writable_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "evidence.duckdb"
+    connection = _FakeConnection()
+
+    @contextmanager
+    def unexpected_snapshot(path: Path) -> Iterator[Path]:
+        raise AssertionError(f"unexpected snapshot for {path}")
+        yield path
+
+    monkeypatch.setattr(store, "stable_store_snapshot", unexpected_snapshot)
+    monkeypatch.setattr(store, "_connection", lambda *args, **kwargs: connection)
+
+    store.query_store_with_info(
+        database,
+        QueryView.SOURCES,
+        read_only=False,
+    )
+
     assert connection.closed is True
