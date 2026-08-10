@@ -1,4 +1,4 @@
-"""Regression coverage for typed artifact CLI publication failures."""
+"""Regression coverage for controlled typed-artifact CLI publication failures."""
 
 from __future__ import annotations
 
