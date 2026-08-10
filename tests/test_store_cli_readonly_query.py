@@ -1,4 +1,4 @@
-"""Regression coverage for the store-query no-migration contract."""
+"""Regression coverage for the user-facing store-query no-migration contract."""
 
 from __future__ import annotations
 
