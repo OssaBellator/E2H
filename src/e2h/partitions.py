@@ -152,9 +152,34 @@ class DatasetPartitionVerification(StrictModel):
 class PartitionExamplePayload(StrictModel):
     """One optimizer-facing example with labels included or withheld."""
 
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
+
     id: str = Field(pattern=_ID_PATTERN)
     values: dict[str, Any]
     input_fields: list[str] = Field(min_length=1)
+
+    @field_validator("values")
+    @classmethod
+    def values_must_be_canonical_fields(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if any(_FIELD_RE.fullmatch(key) is None for key in value):
+            raise ValueError("partition export value keys must be Python identifiers")
+        _canonical_json_bytes(value)
+        return value
+
+    @field_validator("input_fields")
+    @classmethod
+    def input_fields_must_be_canonical(cls, value: list[str]) -> list[str]:
+        if any(_FIELD_RE.fullmatch(item) is None for item in value):
+            raise ValueError("partition export input fields must be Python identifiers")
+        if value != sorted(value) or len(value) != len(set(value)):
+            raise ValueError("partition export input fields must be unique and sorted")
+        return value
+
+    @model_validator(mode="after")
+    def inputs_must_be_present_in_values(self) -> PartitionExamplePayload:
+        if not set(self.input_fields).issubset(self.values):
+            raise ValueError("partition export values must contain every declared input field")
+        return self
 
 
 class DatasetPartitionExport(StrictModel):
@@ -168,6 +193,23 @@ class DatasetPartitionExport(StrictModel):
     role: PartitionRole
     labels_revealed: bool
     examples: list[PartitionExamplePayload] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def export_must_preserve_partition_privacy(self) -> DatasetPartitionExport:
+        expected_labels_revealed = self.role is not PartitionRole.SEALED_TEST
+        if self.labels_revealed is not expected_labels_revealed:
+            raise ValueError("partition export labels_revealed must match partition role")
+        example_ids = [example.id for example in self.examples]
+        if len(example_ids) != len(set(example_ids)):
+            raise ValueError("partition export example ids must be unique")
+        input_fields = self.examples[0].input_fields
+        if any(example.input_fields != input_fields for example in self.examples[1:]):
+            raise ValueError("partition export examples must share identical input fields")
+        if self.role is PartitionRole.SEALED_TEST and any(
+            set(example.values) != set(example.input_fields) for example in self.examples
+        ):
+            raise ValueError("sealed partition exports must contain input fields only")
+        return self
 
 
 class SealedPrediction(StrictModel):
