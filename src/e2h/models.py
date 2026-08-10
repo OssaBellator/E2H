@@ -74,7 +74,7 @@ def _validate_metadata(value: Any, *, noun: str) -> Any:
 class StrictModel(BaseModel):
     """Base class that rejects unknown fields to keep capsules deterministic."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
 
 class InitialState(StrictModel):
