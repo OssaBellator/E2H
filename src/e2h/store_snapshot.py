@@ -56,10 +56,14 @@ def _open_absolute_directory(path: Path) -> int:
     try:
         for part in path.parts[1:]:
             next_descriptor = os.open(part, flags, dir_fd=descriptor)
-            opened = os.fstat(next_descriptor)
-            if not stat.S_ISDIR(opened.st_mode):
-                os.close(next_descriptor)
-                raise StoreSnapshotError("store parent component is not a directory")
+            try:
+                opened = os.fstat(next_descriptor)
+                if not stat.S_ISDIR(opened.st_mode):
+                    raise StoreSnapshotError("store parent component is not a directory")
+            except Exception:
+                with suppress(OSError):
+                    os.close(next_descriptor)
+                raise
             os.close(descriptor)
             descriptor = next_descriptor
         return descriptor
@@ -101,7 +105,14 @@ def _open_store_entry(
         )
     except OSError as exc:
         raise StoreSnapshotError(f"unable to open DuckDB store file {name!r}: {exc}") from exc
-    opened = os.fstat(descriptor)
+    try:
+        opened = os.fstat(descriptor)
+    except OSError as exc:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise StoreSnapshotError(
+            f"unable to inspect opened DuckDB store file {name!r}: {exc}"
+        ) from exc
     if not stat.S_ISREG(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
         os.close(descriptor)
         raise StoreSnapshotError(f"DuckDB store file {name!r} changed while opening")
