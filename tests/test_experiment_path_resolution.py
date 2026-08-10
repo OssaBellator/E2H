@@ -1,4 +1,4 @@
-"""Regression coverage for experiment path-resolution error normalization."""
+"""Regression coverage for controlled experiment path-resolution failures."""
 
 from __future__ import annotations
 
