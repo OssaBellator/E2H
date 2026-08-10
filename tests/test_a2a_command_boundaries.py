@@ -1,3 +1,5 @@
+"""Regression coverage for strict A2A command ingress and response identities."""
+
 from __future__ import annotations
 
 from pathlib import Path
