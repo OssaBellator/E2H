@@ -9,12 +9,11 @@ from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
-_CHDIR_SUPPORTS_FD = os.chdir in os.supports_fd
 _DIRECTORY_BINDING_SUPPORTED = (
     os.name == "posix"
     and _OPEN_SUPPORTS_DIR_FD
-    and _CHDIR_SUPPORTS_FD
     and hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
 )
 
 
@@ -27,8 +26,9 @@ def _directory_identity(info: os.stat_result) -> tuple[int, int]:
 
 
 def _validate_relative_directory(value: str) -> str:
-    if not value or "\x00" in value:
-        raise DirectoryBindingError("bound directory path must be non-empty and contain no NUL")
+    if "\x00" in value:
+        raise DirectoryBindingError("bound directory path must contain no NUL")
+    value = value or "."
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
         raise DirectoryBindingError(f"unsafe bound directory path: {value}")
@@ -36,9 +36,9 @@ def _validate_relative_directory(value: str) -> str:
 
 
 def _directory_flags(*, nofollow: bool) -> int:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags = os.O_RDONLY | os.O_DIRECTORY
     if nofollow:
-        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= os.O_NOFOLLOW
     return flags
 
 
@@ -122,14 +122,11 @@ def open_relative_directory(
 ) -> int:
     """Open a relative directory and prove its resulting handle remains under containment."""
     relative = _validate_relative_directory(relative)
-    try:
-        descriptor = os.open(
-            relative,
-            _directory_flags(nofollow=False),
-            dir_fd=base_descriptor,
-        )
-    except OSError:
-        raise
+    descriptor = os.open(
+        relative,
+        _directory_flags(nofollow=False),
+        dir_fd=base_descriptor,
+    )
     opened = os.fstat(descriptor)
     if not stat.S_ISDIR(opened.st_mode):
         os.close(descriptor)
