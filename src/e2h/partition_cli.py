@@ -37,6 +37,14 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_partition_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write partition output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 @partition_app.command("validate")
 def validate_partition_command(
     manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -58,7 +66,7 @@ def validate_partition_command(
 
     rendered = verification.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_partition_output(output, rendered)
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
@@ -110,7 +118,7 @@ def export_partition_command(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_partition_output(output, rendered)
     console.print(f"Exported {len(exported.examples)} {role.value} examples to {output}")
 
 
@@ -139,7 +147,7 @@ def evaluate_partition_command(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_partition_output(output, rendered)
     console.print(f"Sealed score: {report.correct}/{report.total} ({report.score:.3f})")
 
 
@@ -163,5 +171,5 @@ def write_partition_schema(
     if output is None:
         console.print_json(rendered)
         return
-    write_json_atomic(output, rendered)
+    _write_partition_output(output, rendered)
     console.print(f"Wrote {kind} schema to {output}")
