@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.document import _validate_json_compatible
+from e2h.document import _reject_json_constant, _unique_json_object, _validate_json_compatible
 from e2h.ingest import (
     EvidenceFormat,
     EvidenceIngestError,
@@ -168,8 +168,12 @@ def _text_blocks(content: Any) -> tuple[str, list[dict[str, Any]]]:
 
 def _json_arguments(value: str) -> Any | None:
     try:
-        return json.loads(value)
-    except json.JSONDecodeError:
+        return json.loads(
+            value,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError):
         return None
 
 
