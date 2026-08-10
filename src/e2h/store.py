@@ -21,6 +21,7 @@ from e2h.store_models import (
     StoreInfo,
 )
 from e2h.store_rows import ArtifactError, normalize_rows, parse_artifact, read_artifact
+from e2h.store_snapshot import StoreSnapshotError, stable_store_snapshot
 
 
 class StoreError(RuntimeError):
@@ -281,20 +282,13 @@ def query_store(
         connection.close()
 
 
-def query_store_with_info(
+def _query_store_with_info(
     database: Path,
-    view: QueryView,
+    selected: QueryView,
     *,
-    limit: int = 100,
-    read_only: bool = False,
+    limit: int,
+    read_only: bool,
 ) -> tuple[StoreInfo, list[dict[str, Any]]]:
-    """Return store metadata and one bounded view from the same transaction."""
-    if not 1 <= limit <= MAX_QUERY_ROWS:
-        raise StoreError(f"limit must be between 1 and {MAX_QUERY_ROWS}")
-    try:
-        selected = QueryView(view)
-    except ValueError as exc:
-        raise StoreError(f"unknown query view: {view}") from exc
     connection = _connection(database, read_only=read_only)
     try:
         connection.execute("BEGIN TRANSACTION")
@@ -321,6 +315,39 @@ def query_store_with_info(
         raise StoreError(f"unable to query store: {exc}") from exc
     finally:
         connection.close()
+
+
+def query_store_with_info(
+    database: Path,
+    view: QueryView,
+    *,
+    limit: int = 100,
+    read_only: bool = False,
+) -> tuple[StoreInfo, list[dict[str, Any]]]:
+    """Return store metadata and one bounded view from the same transaction."""
+    if not 1 <= limit <= MAX_QUERY_ROWS:
+        raise StoreError(f"limit must be between 1 and {MAX_QUERY_ROWS}")
+    try:
+        selected = QueryView(view)
+    except ValueError as exc:
+        raise StoreError(f"unknown query view: {view}") from exc
+    if not read_only:
+        return _query_store_with_info(
+            database,
+            selected,
+            limit=limit,
+            read_only=False,
+        )
+    try:
+        with stable_store_snapshot(database) as snapshot:
+            return _query_store_with_info(
+                snapshot,
+                selected,
+                limit=limit,
+                read_only=True,
+            )
+    except StoreSnapshotError as exc:
+        raise StoreError(str(exc)) from exc
 
 
 def export_parquet(
