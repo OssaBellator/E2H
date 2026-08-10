@@ -29,6 +29,14 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_genome_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write genome output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 def _write_capsule(path: Path, capsule: TaskCapsule) -> None:
     suffix = path.suffix.lower()
     if suffix == ".json":
@@ -41,7 +49,7 @@ def _write_capsule(path: Path, capsule: TaskCapsule) -> None:
         )
     else:
         raise GenomeError("materialized capsule must use .json, .yaml, or .yml")
-    write_json_atomic(path, rendered)
+    _write_genome_output(path, rendered)
 
 
 def _emit_application(
@@ -52,7 +60,7 @@ def _emit_application(
 ) -> None:
     rendered = application.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_genome_output(output, rendered)
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
@@ -98,7 +106,7 @@ def write_genome_schema(
     if output is None:
         console.print_json(rendered)
         return
-    write_json_atomic(output, rendered)
+    _write_genome_output(output, rendered)
     console.print(f"Wrote genome schema to {output}")
 
 
