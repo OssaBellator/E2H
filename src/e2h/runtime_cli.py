@@ -17,10 +17,15 @@ from e2h.anthropic_runtime import (
 )
 from e2h.ingest import EvidenceIngestError
 from e2h.loader import CapsuleLoadError, load_capsule
-from e2h.openai_runtime_cli import console, error_console, runtime_app
+from e2h.openai_runtime_cli import (
+    _write_runtime_output,
+    _write_runtime_traces,
+    console,
+    error_console,
+    runtime_app,
+)
 from e2h.privacy import RedactionPolicy, RedactionPolicyError, load_redaction_policy
 from e2h.runtime_plan import RuntimePlanError, load_runtime_request_plan
-from e2h.trace import write_json_atomic, write_traces_jsonl
 from e2h.variants import VariantError, load_variant_document
 
 
@@ -55,7 +60,7 @@ def plan_runtime_request_command(
 
     rendered = plan.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_runtime_output(output, rendered)
 
     if json_stdout:
         typer.echo(rendered, nl=False)
@@ -131,10 +136,10 @@ def run_anthropic_messages_command(
         raise typer.Exit(code=2) from exc
 
     archive_rendered = runtime_result.archive.model_dump_json(indent=2) + "\n"
-    write_json_atomic(archive, archive_rendered)
+    _write_runtime_output(archive, archive_rendered)
     result_rendered = runtime_result.model_dump_json(indent=2) + "\n"
     if result_output is not None:
-        write_json_atomic(result_output, result_rendered)
+        _write_runtime_output(result_output, result_rendered)
 
     if bundle_output is not None or traces is not None or redaction_report is not None:
         try:
@@ -152,11 +157,11 @@ def run_anthropic_messages_command(
             error_console.print(f"[red]Runtime archive ingestion failed:[/red] {exc}")
             raise typer.Exit(code=2) from exc
         if bundle_output is not None:
-            write_json_atomic(bundle_output, bundle.model_dump_json(indent=2) + "\n")
+            _write_runtime_output(bundle_output, bundle.model_dump_json(indent=2) + "\n")
         if traces is not None:
-            write_traces_jsonl(traces, bundle.traces)
+            _write_runtime_traces(traces, bundle.traces)
         if redaction_report is not None and bundle.redaction_review is not None:
-            write_json_atomic(
+            _write_runtime_output(
                 redaction_report,
                 bundle.redaction_review.model_dump_json(indent=2) + "\n",
             )
