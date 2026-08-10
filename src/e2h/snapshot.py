@@ -1327,6 +1327,24 @@ def verify_snapshot(
             return _verify_snapshot_archive(archive, limits)
 
 
+def verify_snapshot_with_archive_sha256(
+    archive_path: Path,
+    *,
+    limits: SnapshotLimits | None = None,
+) -> tuple[SnapshotManifest, str]:
+    """Verify an archive and hash the exact same stable archive bytes."""
+    limits = revalidate_snapshot_limits(limits)
+    with _open_snapshot_archive_file(archive_path) as handle:
+        try:
+            archive = zipfile.ZipFile(handle, "r")
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+        with archive:
+            manifest = _verify_snapshot_archive(archive, limits)
+        archive_digest = _archive_sha256_handle(handle)
+    return manifest, archive_digest
+
+
 def restore_snapshot(
     archive_path: Path,
     destination: Path,
@@ -1487,15 +1505,7 @@ def snapshot_reference(
     role: Literal["workspace", "artifact"] = "workspace",
 ) -> SnapshotReference:
     """Verify an archive and return a portable content-addressed reference."""
-    limits = revalidate_snapshot_limits(None)
-    with _open_snapshot_archive_file(archive_path) as handle:
-        try:
-            archive = zipfile.ZipFile(handle, "r")
-        except (OSError, zipfile.BadZipFile) as exc:
-            raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
-        with archive:
-            manifest = _verify_snapshot_archive(archive, limits)
-        archive_digest = _archive_sha256_handle(handle)
+    manifest, archive_digest = verify_snapshot_with_archive_sha256(archive_path)
     return SnapshotReference(
         snapshot_id=manifest.snapshot_id,
         archive_sha256=archive_digest,
