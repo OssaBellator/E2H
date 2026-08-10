@@ -76,6 +76,7 @@ def build_container_argv(
     cidfile: Path,
     *,
     runtime_binary: str | None = None,
+    workspace_mount_source: str | None = None,
 ) -> list[str]:
     """Build a deterministic Docker invocation for one capsule check."""
     sandbox, allowed_actions = _validated_capsule_policy(capsule)
@@ -83,10 +84,14 @@ def build_container_argv(
     runtime = _validated_runtime_binary(
         sandbox.engine if runtime_binary is None else runtime_binary
     )
-    workspace_text = str(workspace_root)
+    workspace_text = (
+        str(workspace_root) if workspace_mount_source is None else workspace_mount_source
+    )
     cidfile_text = str(cidfile)
     if "\x00" in workspace_text or "\x00" in cidfile_text:
         raise SandboxError("container filesystem arguments must not contain NUL")
+    if workspace_mount_source is not None and not Path(workspace_text).is_absolute():
+        raise SandboxError("bound container workspace mount source must be absolute")
     mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
     if sandbox.workspace_access == "read_only":
         mount += ",readonly"
