@@ -434,7 +434,10 @@ class E2HMCPService:
         if not path.is_file():
             raise MCPServiceError("snapshot archive does not exist or is not a file")
         try:
-            manifest, digest = verify_snapshot_with_archive_sha256(path)
+            manifest, digest = verify_snapshot_with_archive_sha256(
+                path,
+                containment_root=self.config.root,
+            )
         except SnapshotError as exc:
             raise MCPServiceError(str(exc)) from exc
         return SnapshotVerification(
@@ -446,7 +449,7 @@ class E2HMCPService:
         )
 
     def replay(self, capsule: str, *, workspace: str = ".") -> ReplayVerification:
-        """Execute one capsule only when replay was enabled by the server operator."""
+        """Execute one capsule only when replay was enabled by the MCP server operator."""
         if not self.config.allow_replay:
             raise MCPServiceError("replay is disabled by the MCP server operator")
         capsule_path, _ = _safe_relative(self.config.root, capsule, noun="capsule")
