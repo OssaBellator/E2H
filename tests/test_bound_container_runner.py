@@ -130,4 +130,4 @@ def test_bound_container_runtime_receives_original_workspace_and_exact_cwd(
     assert observed["workspace_source"].startswith(f"/proc/{os.getpid()}/fd/")
     assert observed["check_source"].startswith(f"/proc/{os.getpid()}/fd/")
     assert workspace.is_symlink()
-    assert nested.is_symlink()
+    assert (moved_workspace / "task" / "nested").is_symlink()
