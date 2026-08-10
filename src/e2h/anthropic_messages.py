@@ -50,7 +50,7 @@ _PLACEHOLDER_TYPES = {
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
 
 def _ensure_json(value: Any, noun: str) -> None:
