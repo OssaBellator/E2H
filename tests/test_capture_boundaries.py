@@ -1,4 +1,4 @@
-"""Regression coverage for capture content-addressing and exact JSON boundaries."""
+"""Regression coverage for capture model revalidation and exact JSON identities."""
 
 from __future__ import annotations
 
