@@ -153,6 +153,8 @@ def stable_store_snapshot(database: Path) -> Iterator[Path]:
     if "\x00" in os.fspath(database):
         raise StoreSnapshotError("store path must not contain NUL")
     database = database.absolute()
+    if database.name in {"", ".", ".."}:
+        raise StoreSnapshotError("store path must name a file without relative segments")
     parent_descriptor = _open_absolute_directory(database.parent)
     opened: dict[str, int] = {}
     try:
