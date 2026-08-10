@@ -75,7 +75,7 @@ def _validate_python_json_values(value: Any, *, active: set[int] | None = None) 
 class TraceContext(BaseModel):
     """Stable identifiers that connect evidence to an experiment slot."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
     run_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$")
     capsule_id: str
@@ -97,7 +97,7 @@ class TraceContext(BaseModel):
 class TraceEvent(BaseModel):
     """One JSON-serializable, observable event in a normalized trace."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
     schema_version: Literal["0.1"] = "0.1"
     trace_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,255}$")
@@ -130,7 +130,7 @@ class TraceEvent(BaseModel):
 class Trace(BaseModel):
     """A validated sequence of events for one execution."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
     schema_version: Literal["0.1"] = "0.1"
     trace_id: str
