@@ -22,6 +22,8 @@ from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 NOW = datetime(2026, 8, 10, 7, 30, tzinfo=UTC)
 SHA = "a" * 64
 
+# These regressions mutate otherwise valid models after construction to exercise trust boundaries.
+
 
 def _capsule() -> TaskCapsule:
     return TaskCapsule.model_validate(
