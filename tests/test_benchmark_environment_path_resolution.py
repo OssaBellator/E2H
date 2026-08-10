@@ -1,4 +1,4 @@
-"""Regression coverage for benchmark-environment resolver error normalization."""
+"""Regression coverage for controlled benchmark-environment resolver failures."""
 
 from __future__ import annotations
 
