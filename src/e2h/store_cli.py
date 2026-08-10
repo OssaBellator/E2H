@@ -111,9 +111,9 @@ def query_store_command(
     limit: Annotated[int, typer.Option(min=1, max=10_000)] = 100,
     json_stdout: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Query a stable analytical view."""
+    """Query a stable analytical view without mutating the store."""
     try:
-        rows = query_store(database, view, limit=limit)
+        rows = query_store(database, view, limit=limit, read_only=True)
     except StoreError as exc:
         error_console.print(f"[red]Unable to query store:[/red] {exc}")
         raise typer.Exit(code=2) from exc
