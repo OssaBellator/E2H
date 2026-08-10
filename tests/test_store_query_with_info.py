@@ -36,7 +36,7 @@ class _FakeConnection:
         self.closed = True
 
 
-def test_query_store_with_info_uses_one_connection(
+def test_query_store_with_info_uses_one_transaction(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -65,4 +65,6 @@ def test_query_store_with_info_uses_one_connection(
     assert info.failure_records == 1
     assert rows == [{"source_name": "artifact.json"}]
     assert connection.closed is True
-    assert any("LIMIT 7" in sql for sql in connection.sql)
+    assert connection.sql[0] == "BEGIN TRANSACTION"
+    assert connection.sql[-1] == "COMMIT"
+    assert any("LIMIT 7" in sql for sql in connection.sql[1:-1])
