@@ -1,4 +1,4 @@
-"""Regression coverage for controlled provider-runtime publication failures."""
+"""Regression coverage for controlled post-provider runtime publication failures."""
 
 from __future__ import annotations
 
