@@ -41,6 +41,14 @@ class LongHorizonSchemaKind(StrEnum):
     REPORT = "report"
 
 
+def _write_long_horizon_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write long-horizon output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 def _load_corpus(path: Path) -> LongHorizonCorpus:
     try:
         return load_long_horizon_corpus(path)
@@ -87,7 +95,7 @@ def export_long_horizon(
     """Write the candidate-visible corpus with all evaluator-side updates removed."""
     corpus = _load_corpus(source)
     public = export_public_long_horizon_corpus(corpus)
-    write_json_atomic(output, public.model_dump_json(indent=2) + "\n")
+    _write_long_horizon_output(output, public.model_dump_json(indent=2) + "\n")
     console.print(
         f"Wrote label-free long-horizon corpus to {output} "
         f"({public_long_horizon_corpus_sha256(corpus)})"
@@ -127,7 +135,7 @@ def evaluate_long_horizon(
         raise typer.Exit(code=1)
     rendered = report.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_long_horizon_output(output, rendered)
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
@@ -163,5 +171,5 @@ def write_long_horizon_schema(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_long_horizon_output(output, rendered)
     console.print(f"Wrote long-horizon {kind.value} schema to {output}")
