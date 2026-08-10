@@ -283,11 +283,20 @@ def _requested_snapshot_parent_must_be_stable(
     noun: str,
     phase: str,
     full_identity: bool,
+    containment_root: Path | None = None,
 ) -> None:
     try:
         current_parent = requested_parent.resolve(strict=True)
-        current = current_parent.stat(follow_symlinks=False)
     except (OSError, RuntimeError, ValueError) as exc:
+        raise SnapshotError(f"unable to restat {noun} parent: {exc}") from exc
+    if containment_root is not None:
+        try:
+            current_parent.relative_to(containment_root)
+        except ValueError as exc:
+            raise SnapshotError(f"{noun} parent escapes the configured root") from exc
+    try:
+        current = current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
         raise SnapshotError(f"unable to restat {noun} parent: {exc}") from exc
     if not stat.S_ISDIR(current.st_mode):
         raise SnapshotError(f"{noun} parent changed while {phase}")
@@ -782,12 +791,24 @@ def _remove_restore_tree_at(
 
 
 @contextmanager
-def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
+def _open_snapshot_archive_file(
+    path: Path,
+    *,
+    containment_root: Path | None = None,
+) -> Iterator[BinaryIO]:
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
-        parent_expected = parent.stat(follow_symlinks=False)
     except (OSError, RuntimeError, ValueError) as exc:
+        raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
+    if containment_root is not None:
+        try:
+            parent.relative_to(containment_root)
+        except ValueError as exc:
+            raise SnapshotError("snapshot archive parent escapes the configured root") from exc
+    try:
+        parent_expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
         raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
     if not stat.S_ISDIR(parent_expected.st_mode):
         raise SnapshotError("snapshot archive parent must be a directory")
@@ -808,6 +829,7 @@ def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
             noun="snapshot archive",
             phase="opening",
             full_identity=True,
+            containment_root=containment_root,
         )
         try:
             expected = (
@@ -869,6 +891,7 @@ def _open_snapshot_archive_file(path: Path) -> Iterator[BinaryIO]:
                 noun="snapshot archive",
                 phase="reading",
                 full_identity=True,
+                containment_root=containment_root,
             )
     except OSError as exc:
         raise SnapshotError(f"unable to read snapshot archive: {exc}") from exc
@@ -1331,10 +1354,14 @@ def verify_snapshot_with_archive_sha256(
     archive_path: Path,
     *,
     limits: SnapshotLimits | None = None,
+    containment_root: Path | None = None,
 ) -> tuple[SnapshotManifest, str]:
     """Verify an archive and hash the exact same stable archive bytes."""
     limits = revalidate_snapshot_limits(limits)
-    with _open_snapshot_archive_file(archive_path) as handle:
+    with _open_snapshot_archive_file(
+        archive_path,
+        containment_root=containment_root,
+    ) as handle:
         try:
             archive = zipfile.ZipFile(handle, "r")
         except (OSError, zipfile.BadZipFile) as exc:
