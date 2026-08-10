@@ -304,7 +304,7 @@ def _open_materialization_parent(destination: Path) -> tuple[Path, int, os.stat_
         destination.parent.mkdir(parents=True, exist_ok=True)
         parent = destination.parent.resolve(strict=True)
         expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise BenchmarkEnvironmentError(
             f"unable to prepare environment materialization destination: {exc}"
         ) from exc
@@ -536,7 +536,7 @@ def _remove_materialized_tree_by_identity_at(
 def _resolve_under_source(source: Path, path: Path, relative: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise BenchmarkEnvironmentError(
             f"unable to resolve environment entry {relative}: {exc}"
         ) from exc
@@ -1035,7 +1035,7 @@ def _copy_environment_tree_path(
             )
     except BenchmarkEnvironmentError:
         raise
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise BenchmarkEnvironmentError(
             f"unable to prepare environment materialization destination: {exc}"
         ) from exc
