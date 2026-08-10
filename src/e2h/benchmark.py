@@ -44,7 +44,7 @@ class BenchmarkError(ValueError):
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
 
 class PatternOrigin(StrEnum):
@@ -256,7 +256,7 @@ def _privacy_trace(corpus: FailurePatternCorpus) -> Trace:
             context=context,
             payload={"pattern_count": len(corpus.patterns)},
         )
-    )
+    ]
     return Trace(trace_id="benchmark-privacy", events=events)
 
 
