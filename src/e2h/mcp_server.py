@@ -24,6 +24,7 @@ from e2h.runner import ExecutionBackend, RunnerError, run_capsule
 from e2h.snapshot import SnapshotError, verify_snapshot_with_archive_sha256
 from e2h.store import StoreError, query_store_with_info
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
+from e2h.store_snapshot import StoreSnapshotError, stable_store_snapshot
 
 _DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
@@ -386,13 +387,14 @@ class E2HMCPService:
             )
         try:
             selected = QueryView(view)
-            info, rows = query_store_with_info(
-                store,
-                selected,
-                limit=limit,
-                read_only=True,
-            )
-        except (StoreError, ValueError) as exc:
+            with stable_store_snapshot(store) as private_store:
+                info, rows = query_store_with_info(
+                    private_store,
+                    selected,
+                    limit=limit,
+                    read_only=True,
+                )
+        except (StoreError, StoreSnapshotError, ValueError) as exc:
             raise MCPServiceError(str(exc)) from exc
         material = {
             "view": selected.value,
