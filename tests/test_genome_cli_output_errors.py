@@ -1,4 +1,4 @@
-"""Regression coverage for controlled genome CLI publication failures."""
+"""Regression coverage for controlled genome CLI artifact-publication failures."""
 
 from __future__ import annotations
 
