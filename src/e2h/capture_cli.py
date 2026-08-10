@@ -31,6 +31,14 @@ def _load(path: Path) -> CaptureDocument:
         raise typer.Exit(code=2) from exc
 
 
+def _write_capture_schema(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write capture schema:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 @capture_app.command("validate")
 def validate_capture(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -103,5 +111,5 @@ def write_capture_schema(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_capture_schema(output, rendered)
     console.print(f"Wrote capture schema to {output}")
