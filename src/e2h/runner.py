@@ -160,7 +160,10 @@ class RunResult(BaseModel):
                 raise ValueError("executed checks must not follow skipped checks")
             if check.status is CheckStatus.SKIPPED:
                 skipped_started = True
-                if check.failure is None or check.failure.caused_by_check_id not in blocking_check_ids:
+                if (
+                    check.failure is None
+                    or check.failure.caused_by_check_id not in blocking_check_ids
+                ):
                     raise ValueError("skipped checks must reference an earlier failed check")
             elif check.status is not CheckStatus.PASSED:
                 blocking_check_ids.add(check.id)
