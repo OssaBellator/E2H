@@ -1,4 +1,4 @@
-"""Regression coverage for exact-JSON snapshot metadata identities."""
+"""Regression coverage for exact-JSON snapshot metadata and identity semantics."""
 
 from __future__ import annotations
 
