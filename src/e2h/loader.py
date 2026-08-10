@@ -40,14 +40,10 @@ def load_capsule(
         raise CapsuleLoadError(str(exc)) from exc
 
 
-def load_experiment(
-    path: Path,
-    *,
-    containment_root: Path | None = None,
-) -> ExperimentSpec:
+def load_experiment(path: Path) -> ExperimentSpec:
     """Load and validate an experiment specification."""
     try:
-        data = _load_mapping(path, noun="experiment", containment_root=containment_root)
+        data = _load_mapping(path, noun="experiment")
         return ExperimentSpec.model_validate(data)
     except ValueError as exc:
         raise ExperimentLoadError(str(exc)) from exc
