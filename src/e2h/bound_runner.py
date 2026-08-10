@@ -94,6 +94,8 @@ def run_capsule_bound_local(
         ) from exc
     except DirectoryBindingError as exc:
         raise RunnerError(str(exc)) from exc
+    except OSError as exc:
+        raise RunnerError(f"unable to open working directory: {exc}") from exc
 
     results: list[CommandResult] = []
     halt = False
@@ -117,7 +119,7 @@ def run_capsule_bound_local(
                     check.cwd,
                     containment_descriptor=workspace_descriptor,
                 )
-            except (FileNotFoundError, NotADirectoryError):
+            except (FileNotFoundError, NotADirectoryError, PermissionError):
                 results.append(_missing_check_result(check, relative_cwd))
                 infrastructure_error = True
                 blocked_by_check_id = check.id
@@ -125,6 +127,8 @@ def run_capsule_bound_local(
                 continue
             except DirectoryBindingError as exc:
                 raise RunnerError(str(exc)) from exc
+            except OSError as exc:
+                raise RunnerError(f"unable to open check directory: {exc}") from exc
 
             timeout = check.timeout_seconds or capsule.limits.default_timeout_seconds
             command_started = monotonic()
