@@ -114,6 +114,12 @@ _CODE_RETRYABILITY = {
     FailureCode.SKIPPED_AFTER_FAILURE: Retryability.AFTER_FIX,
 }
 
+_IMPACT_PRIMARY_RANK = {
+    FailureImpact.INFRASTRUCTURE_ERROR: 0,
+    FailureImpact.EVALUATION_FAILURE: 1,
+    FailureImpact.NOT_EVALUATED: 2,
+}
+
 
 def _validate_detail_value(value: Any) -> None:
     if value is None or isinstance(value, (str, bool, int)):
@@ -249,6 +255,13 @@ class FailureSummary(StrictModel):
             raise ValueError("non-empty failure summaries require a primary failure")
         if self.primary_code is not None and self.primary_code.value not in self.by_code:
             raise ValueError("primary failure code must appear in failure code counts")
+        if self.primary_code is not None:
+            primary_rank = _IMPACT_PRIMARY_RANK[_CODE_IMPACT[self.primary_code]]
+            best_rank = min(
+                _IMPACT_PRIMARY_RANK[_CODE_IMPACT[code]] for code in code_counts
+            )
+            if primary_rank != best_rank:
+                raise ValueError("primary failure must use the highest-priority failure impact")
         return self
 
 
@@ -449,14 +462,9 @@ def summarize_failures(
     category_counts: Counter[str] = Counter(failure.category.value for _, _, failure in present)
     code_counts: Counter[str] = Counter(failure.code.value for _, _, failure in present)
     impact_counts: Counter[FailureImpact] = Counter(failure.impact for _, _, failure in present)
-    rank = {
-        FailureImpact.INFRASTRUCTURE_ERROR: 0,
-        FailureImpact.EVALUATION_FAILURE: 1,
-        FailureImpact.NOT_EVALUATED: 2,
-    }
     _, primary_check_id, primary = min(
         present,
-        key=lambda item: (rank[item[2].impact], item[0]),
+        key=lambda item: (_IMPACT_PRIMARY_RANK[item[2].impact], item[0]),
     )
     return FailureSummary(
         total=len(present),
