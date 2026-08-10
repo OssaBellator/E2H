@@ -210,6 +210,17 @@ class PromotionProposal(StrictModel):
             raise ValueError("promotion baseline and candidate ids must differ")
         if self.baseline_variant_sha256 == self.candidate_variant_sha256:
             raise ValueError("promotion baseline and candidate must have different identities")
+        for report in self.evidence:
+            if (
+                report.baseline_variant_id != self.baseline_variant_id
+                or report.baseline_variant_sha256 != self.baseline_variant_sha256
+            ):
+                raise ValueError("promotion evidence baseline must match proposal baseline")
+            if (
+                report.candidate_variant_id != self.candidate_variant_id
+                or report.candidate_variant_sha256 != self.candidate_variant_sha256
+            ):
+                raise ValueError("promotion evidence candidate must match proposal candidate")
         roles = [report.role for report in self.evidence]
         if len(roles) != len(set(roles)):
             raise ValueError("promotion proposal evidence roles must be unique")
