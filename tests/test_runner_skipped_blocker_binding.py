@@ -60,7 +60,7 @@ def _run(checks: list[CommandResult]) -> RunResult:
 def test_skipped_suffix_must_start_immediately_after_blocker() -> None:
     checks = [_failed("earlier"), _passed("continued"), _skipped("skipped", "earlier")]
 
-    with pytest.raises(ValidationError, match="immediately follow the failed check"):
+    with pytest.raises(ValidationError, match="immediately follow the halting failed check"):
         _run(checks)
 
 
