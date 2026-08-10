@@ -274,6 +274,38 @@ def query_store(
         connection.close()
 
 
+def query_store_with_info(
+    database: Path,
+    view: QueryView,
+    *,
+    limit: int = 100,
+    read_only: bool = False,
+) -> tuple[StoreInfo, list[dict[str, Any]]]:
+    """Return store metadata and one bounded view from the same database connection."""
+    if not 1 <= limit <= MAX_QUERY_ROWS:
+        raise StoreError(f"limit must be between 1 and {MAX_QUERY_ROWS}")
+    try:
+        selected = QueryView(view)
+    except ValueError as exc:
+        raise StoreError(f"unknown query view: {view}") from exc
+    connection = _connection(database, read_only=read_only)
+    try:
+        info = _info(connection)
+        cursor = connection.execute(f"{VIEW_SQL[selected]} LIMIT {limit}")
+        if cursor.description is None:
+            return info, []
+        columns = [str(item[0]) for item in cursor.description]
+        rows = [
+            {column: _normalize(value) for column, value in zip(columns, row, strict=True)}
+            for row in cursor.fetchall()
+        ]
+        return info, rows
+    except duckdb.Error as exc:
+        raise StoreError(f"unable to query store: {exc}") from exc
+    finally:
+        connection.close()
+
+
 def export_parquet(
     database: Path,
     output: Path,
