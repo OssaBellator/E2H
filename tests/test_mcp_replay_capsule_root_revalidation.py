@@ -67,6 +67,7 @@ def test_replay_rejects_capsule_parent_escape_between_resolution_and_load(
         raise AssertionError("outside capsule reached replay execution")
 
     monkeypatch.setattr(mcp_server, "load_capsule", swapping_load)
+    monkeypatch.setattr(mcp_server, "run_capsule_bound_local", unexpected_run)
     monkeypatch.setattr(mcp_server, "run_capsule", unexpected_run)
     service = E2HMCPService(MCPServerConfig(root=root, allow_replay=True))
 

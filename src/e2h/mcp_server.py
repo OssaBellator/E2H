@@ -17,6 +17,8 @@ from typing import Any
 from mcp.server import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
+from e2h.bound_runner import run_capsule_bound_local
+from e2h.directory_binding import DirectoryBindingError, bound_absolute_directory
 from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
 from e2h.loader import CapsuleLoadError, load_capsule
@@ -490,13 +492,28 @@ class E2HMCPService:
                 capsule_path,
                 containment_root=self.config.root,
             )
-            result = run_capsule(
-                loaded,
-                workspace_path,
-                backend=self.config.replay_backend,
-                container_runtime=self.config.container_runtime,
-            )
-        except (CapsuleLoadError, RunnerError) as exc:
+            selected_backend = self.config.replay_backend
+            if selected_backend is ExecutionBackend.AUTO:
+                selected_backend = (
+                    ExecutionBackend.CONTAINER
+                    if loaded.sandbox is not None
+                    else ExecutionBackend.LOCAL
+                )
+            if selected_backend is ExecutionBackend.LOCAL:
+                with bound_absolute_directory(workspace_path) as workspace_descriptor:
+                    result = run_capsule_bound_local(
+                        loaded,
+                        workspace_path,
+                        workspace_descriptor=workspace_descriptor,
+                    )
+            else:
+                result = run_capsule(
+                    loaded,
+                    workspace_path,
+                    backend=selected_backend,
+                    container_runtime=self.config.container_runtime,
+                )
+        except (CapsuleLoadError, DirectoryBindingError, RunnerError) as exc:
             raise MCPServiceError(str(exc)) from exc
 
         raw_result = result.model_dump(mode="json")
