@@ -59,7 +59,7 @@ def _requested_parent_identity(requested_parent: Path) -> os.stat_result:
     try:
         current_parent = requested_parent.resolve(strict=True)
         return current_parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ArtifactError(f"unable to restat artifact parent: {exc}") from exc
 
 
@@ -70,7 +70,7 @@ def _read_artifact_bytes(path: Path) -> bytes:
     try:
         parent = requested_parent.resolve(strict=True)
         parent_expected = parent.stat(follow_symlinks=False)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ArtifactError(f"unable to inspect artifact parent: {exc}") from exc
     if stat.S_ISLNK(parent_expected.st_mode) or not stat.S_ISDIR(parent_expected.st_mode):
         raise ArtifactError("artifact parent must be a real directory")
