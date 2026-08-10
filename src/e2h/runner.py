@@ -62,6 +62,35 @@ class ExecutionBackend(StrEnum):
     CONTAINER = "container"
 
 
+_FAILURE_CODES_BY_CHECK_STATUS: dict[CheckStatus, frozenset[FailureCode]] = {
+    CheckStatus.FAILED: frozenset(
+        {
+            FailureCode.UNEXPECTED_EXIT,
+            FailureCode.SIGNAL_TERMINATION,
+        }
+    ),
+    CheckStatus.TIMED_OUT: frozenset(
+        {
+            FailureCode.TIMEOUT,
+            FailureCode.SANDBOX_CLEANUP,
+            FailureCode.OUTPUT_CAPTURE,
+        }
+    ),
+    CheckStatus.ERROR: frozenset(
+        {
+            FailureCode.COMMAND_NOT_FOUND,
+            FailureCode.PERMISSION_DENIED,
+            FailureCode.PROCESS_LAUNCH_ERROR,
+            FailureCode.WORKING_DIRECTORY_MISSING,
+            FailureCode.SANDBOX_CONFIGURATION,
+            FailureCode.SANDBOX_RUNTIME,
+            FailureCode.OUTPUT_CAPTURE,
+        }
+    ),
+    CheckStatus.SKIPPED: frozenset({FailureCode.SKIPPED_AFTER_FAILURE}),
+}
+
+
 class CommandResult(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -87,8 +116,14 @@ class CommandResult(BaseModel):
         if self.status is CheckStatus.PASSED:
             if self.failure is not None:
                 raise ValueError("passed command results must not define a failure")
-        elif self.failure is None:
+            return self
+        if self.failure is None:
             raise ValueError("non-passed command results require a failure")
+        if self.failure.code not in _FAILURE_CODES_BY_CHECK_STATUS[self.status]:
+            raise ValueError(
+                f"{self.status.value} command result has incompatible failure code "
+                f"{self.failure.code.value!r}"
+            )
         return self
 
 
@@ -118,6 +153,17 @@ class RunResult(BaseModel):
         check_ids = [check.id for check in self.checks]
         if len(check_ids) != len(set(check_ids)):
             raise ValueError("run check ids must be unique")
+        blocking_check_ids: set[str] = set()
+        skipped_started = False
+        for check in self.checks:
+            if skipped_started and check.status is not CheckStatus.SKIPPED:
+                raise ValueError("executed checks must not follow skipped checks")
+            if check.status is CheckStatus.SKIPPED:
+                skipped_started = True
+                if check.failure is None or check.failure.caused_by_check_id not in blocking_check_ids:
+                    raise ValueError("skipped checks must reference an earlier failed check")
+            elif check.status is not CheckStatus.PASSED:
+                blocking_check_ids.add(check.id)
         expected_summary = summarize_failures((check.id, check.failure) for check in self.checks)
         if self.failure_summary != expected_summary:
             raise ValueError("run failure_summary must match check failures")
