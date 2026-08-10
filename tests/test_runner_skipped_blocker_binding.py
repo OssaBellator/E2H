@@ -73,9 +73,10 @@ def test_skipped_suffix_must_reference_last_executed_failure() -> None:
 
 def test_all_skipped_checks_reference_one_halting_check() -> None:
     checks = [
+        _failed("first"),
         _failed("blocker"),
         _skipped("first-skipped", "blocker"),
-        _skipped("second-skipped", "other-failure"),
+        _skipped("second-skipped", "first"),
     ]
 
     with pytest.raises(ValidationError, match="reference the check that halted execution"):
