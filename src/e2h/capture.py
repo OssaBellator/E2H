@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from e2h.document import load_mapping_document
+from e2h.document import _validate_json_compatible, load_mapping_document
 
 _MAX_CAPTURE_BYTES = 10 * 1024 * 1024
 _MAX_OBSERVATIONS = 1_000
@@ -43,9 +43,9 @@ class StrictModel(BaseModel):
 
 def _ensure_json(value: Any, noun: str) -> None:
     try:
-        json.dumps(value, sort_keys=True, allow_nan=False)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{noun} must be JSON-serializable") from exc
+        _validate_json_compatible(value)
+    except ValueError as exc:
+        raise ValueError(f"{noun} must contain canonical JSON data") from exc
 
 
 def _aware(value: datetime, noun: str) -> datetime:
@@ -127,8 +127,21 @@ class CaptureDocument(StrictModel):
         return self
 
 
+def _validated_capture_document(document: CaptureDocument) -> CaptureDocument:
+    if type(document) is not CaptureDocument:
+        raise CaptureError(
+            f"invalid capture document: expected CaptureDocument, got {type(document).__name__}"
+        )
+    try:
+        payload = document.model_dump(mode="python", warnings="none")
+        return CaptureDocument.model_validate(payload)
+    except ValueError as exc:
+        raise CaptureError(f"invalid capture document: {exc}") from exc
+
+
 def capture_document_sha256(document: CaptureDocument) -> str:
     """Bind the exact normalized capture document to a canonical SHA-256."""
+    document = _validated_capture_document(document)
     rendered = json.dumps(
         document.model_dump(mode="json"),
         sort_keys=True,
