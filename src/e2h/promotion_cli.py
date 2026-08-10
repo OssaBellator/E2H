@@ -53,12 +53,20 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_promotion_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write promotion output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 def _write_or_echo(model: BaseModel, output: Path | None) -> None:
     rendered = model.model_dump_json(indent=2) + "\n"
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_promotion_output(output, rendered)
 
 
 @promotion_app.command("compare")
@@ -230,5 +238,5 @@ def schema_command(
     if output is None:
         console.print_json(rendered)
         return
-    write_json_atomic(output, rendered)
+    _write_promotion_output(output, rendered)
     console.print(f"Wrote {kind} schema to {output}")
