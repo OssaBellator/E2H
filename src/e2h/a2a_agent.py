@@ -26,6 +26,7 @@ from google.protobuf.json_format import MessageToJson  # type: ignore[import-unt
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from starlette.applications import Starlette
 
+from e2h.document import _reject_json_constant, _unique_json_object, _validate_json_compatible
 from e2h.mcp_server import E2HMCPService, MCPServerConfig, MCPServiceError
 from e2h.runner import ExecutionBackend
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
@@ -121,6 +122,7 @@ def _package_version() -> str:
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
@@ -131,6 +133,35 @@ def _canonical_json_bytes(value: Any) -> bytes:
     except (TypeError, ValueError) as exc:
         raise A2AAgentError("value must contain canonical JSON data") from exc
     return rendered.encode("utf-8")
+
+
+def _parse_text_payload(text: str) -> Any:
+    try:
+        return json.loads(
+            text,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise A2AAgentError(
+            "verification text part must contain valid JSON without duplicate object keys"
+        ) from exc
+
+
+def _revalidate_verification_command(command: VerificationCommand) -> VerificationCommand:
+    if type(command) not in (
+        StatusCommand,
+        MemoryQueryCommand,
+        VerifyArtifactCommand,
+        VerifySnapshotCommand,
+        ReplayCommand,
+    ):
+        raise A2AAgentError(f"invalid verification command type: {type(command).__name__}")
+    try:
+        payload = command.model_dump(mode="python", warnings="none")
+        return _COMMAND_ADAPTER.validate_python(payload)
+    except ValueError as exc:
+        raise A2AAgentError(f"invalid verification command: {exc}") from exc
 
 
 def _normalized_public_url(value: str) -> str:
@@ -192,7 +223,7 @@ def parse_verification_message(message: Message, *, max_bytes: int) -> Verificat
             raw = part.text.encode("utf-8")
             if len(raw) > max_bytes:
                 raise A2AAgentError(f"verification request exceeds {max_bytes} bytes")
-            payload = json.loads(part.text)
+            payload = _parse_text_payload(part.text)
         elif kind == "data":
             rendered = MessageToJson(
                 part.data,
@@ -220,6 +251,7 @@ def execute_verification_command(
     command: VerificationCommand,
 ) -> A2AVerificationResponse:
     """Execute one strict verification command and return an application-level envelope."""
+    command = _revalidate_verification_command(command)
     try:
         if isinstance(command, StatusCommand):
             result = service.status().model_dump(mode="json")
