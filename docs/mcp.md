@@ -36,9 +36,13 @@ uv run e2h-mcp \
 
 `e2h_replay` accepts only a capsule path and workspace path relative to the configured root. The execution backend and optional container-runtime override are server configuration, not model-controlled tool arguments.
 
+On native Linux, effective local MCP replay binds the canonical workspace with no-follow directory opens before command execution. Each declared working directory is then opened relative to held directory descriptors and checked to remain beneath that bound workspace. The child process receives a `/proc/<server-pid>/fd/<check-directory-fd>` working directory while the server keeps that descriptor open for the full command. Rebinding the original workspace pathname after the handle is acquired therefore cannot redirect the local child to a different directory. Missing executables still use the runner's normal typed launch failures, and the existing POSIX process-group timeout cleanup remains in effect. Local MCP replay fails closed on platforms where this handle-bound Linux/procfs path is unavailable; direct library-level `run_capsule()` behavior is unchanged.
+
+Container replay is a separate boundary: Docker/Podman receives a host bind-mount source pathname, so the local-child directory-handle mechanism above does not by itself bind the container mount and workdir. Container workspace rebinding remains tracked in issue #288. Until that boundary is closed, use MCP container replay only when the local workspace path and its relevant parent/cwd entries are not writable or rebindable by an untrusted actor.
+
 By default replay results omit stdout and stderr and return their SHA-256 digests, character counts, truncation flags, status, failures, and an exact replay-result digest. This keeps routine MCP calls from automatically copying command output into model context. An operator can deliberately expose E2H's already bounded command output with `--expose-replay-output`.
 
-For untrusted workloads, use capsule sandbox declarations and an operator-selected container backend. Enabling replay is not a sandbox by itself.
+Enabling replay is not a sandbox by itself. Container sandbox declarations still provide process/network/resource isolation, but the host workspace path must also satisfy the container replay trust assumption described above.
 
 ## Example host configuration
 
