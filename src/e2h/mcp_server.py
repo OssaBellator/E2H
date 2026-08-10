@@ -449,7 +449,7 @@ class E2HMCPService:
         )
 
     def replay(self, capsule: str, *, workspace: str = ".") -> ReplayVerification:
-        """Execute one capsule only when replay was enabled by the MCP server operator."""
+        """Execute one capsule only when replay was enabled by the server operator."""
         if not self.config.allow_replay:
             raise MCPServiceError("replay is disabled by the MCP server operator")
         capsule_path, _ = _safe_relative(self.config.root, capsule, noun="capsule")
