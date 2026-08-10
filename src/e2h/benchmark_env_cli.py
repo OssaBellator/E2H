@@ -38,6 +38,14 @@ class EnvironmentSchemaKind(StrEnum):
     VERIFICATION = "verification"
 
 
+def _write_environment_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write benchmark environment output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 def _load_suite(path: Path) -> BenchmarkEnvironmentSuite:
     try:
         return load_benchmark_environment_suite(path)
@@ -67,7 +75,7 @@ def seal_environments(
     except BenchmarkEnvironmentError as exc:
         error_console.print(f"[red]Unable to seal benchmark environments:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    write_json_atomic(output, lock.model_dump_json(indent=2) + "\n")
+    _write_environment_output(output, lock.model_dump_json(indent=2) + "\n")
     console.print(f"Wrote benchmark environment lock to {output}")
 
 
@@ -148,5 +156,5 @@ def write_environment_schema(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_environment_output(output, rendered)
     console.print(f"Wrote benchmark environment {kind.value} schema to {output}")
