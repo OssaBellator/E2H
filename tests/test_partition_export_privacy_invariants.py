@@ -68,7 +68,10 @@ def test_export_rejects_label_flag_inconsistent_with_role(
 def test_sealed_export_rejects_undeclared_value_fields() -> None:
     payload = _payload(values={"task": "value", "answer": "SECRET"})
 
-    with pytest.raises(ValidationError, match="sealed partition exports must contain input fields only"):
+    with pytest.raises(
+        ValidationError,
+        match="sealed partition exports must contain input fields only",
+    ):
         _export(examples=[payload])
 
 
