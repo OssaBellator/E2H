@@ -9,7 +9,6 @@ import json
 import os
 import stat
 import sys
-import zipfile
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -22,13 +21,7 @@ from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
 from e2h.loader import CapsuleLoadError, load_capsule
 from e2h.runner import ExecutionBackend, RunnerError, run_capsule
-from e2h.snapshot import (
-    SnapshotError,
-    _archive_sha256_handle,
-    _open_snapshot_archive_file,
-    _verify_snapshot_archive,
-    revalidate_snapshot_limits,
-)
+from e2h.snapshot import SnapshotError, verify_snapshot_with_archive_sha256
 from e2h.store import StoreError, query_store_with_info
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
 
@@ -441,15 +434,7 @@ class E2HMCPService:
         if not path.is_file():
             raise MCPServiceError("snapshot archive does not exist or is not a file")
         try:
-            limits = revalidate_snapshot_limits(None)
-            with _open_snapshot_archive_file(path) as handle:
-                try:
-                    snapshot_archive = zipfile.ZipFile(handle, "r")
-                except (OSError, zipfile.BadZipFile) as exc:
-                    raise SnapshotError(f"unable to open snapshot archive: {exc}") from exc
-                with snapshot_archive:
-                    manifest = _verify_snapshot_archive(snapshot_archive, limits)
-                digest = _archive_sha256_handle(handle)
+            manifest, digest = verify_snapshot_with_archive_sha256(path)
         except SnapshotError as exc:
             raise MCPServiceError(str(exc)) from exc
         return SnapshotVerification(
