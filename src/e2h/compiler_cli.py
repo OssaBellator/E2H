@@ -34,10 +34,17 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_compiler_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        raise CapsuleCompileError(f"unable to write compiler output: {exc}") from exc
+
+
 def _write_json(path: Path, payload: str) -> None:
     if path.suffix.lower() != ".json":
         raise CapsuleCompileError("structured compiler outputs must use .json")
-    write_json_atomic(path, payload)
+    _write_compiler_output(path, payload)
 
 
 def _emit_json(
@@ -60,7 +67,7 @@ def _write_capsule(path: Path, capsule_payload: dict[str, object]) -> None:
         rendered = yaml.safe_dump(capsule_payload, sort_keys=False)
     else:
         raise CapsuleCompileError("materialized capsule must use .json, .yaml, or .yml")
-    write_json_atomic(path, rendered)
+    _write_compiler_output(path, rendered)
 
 
 @compiler_app.command("validate")
