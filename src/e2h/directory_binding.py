@@ -122,17 +122,26 @@ def open_relative_directory(
 ) -> int:
     """Open a relative directory and prove its resulting handle remains under containment."""
     relative = _validate_relative_directory(relative)
-    descriptor = os.open(
-        relative,
-        _directory_flags(nofollow=False),
-        dir_fd=base_descriptor,
-    )
+    try:
+        descriptor = os.open(
+            relative,
+            _directory_flags(nofollow=False),
+            dir_fd=base_descriptor,
+        )
+    except OSError:
+        raise
     opened = os.fstat(descriptor)
     if not stat.S_ISDIR(opened.st_mode):
         os.close(descriptor)
         raise NotADirectoryError(relative)
     try:
-        if not _directory_is_beneath(containment_descriptor, descriptor):
+        try:
+            contained = _directory_is_beneath(containment_descriptor, descriptor)
+        except OSError as exc:
+            raise DirectoryBindingError(
+                f"unable to validate bound workspace path {relative!r}: {exc}"
+            ) from exc
+        if not contained:
             raise DirectoryBindingError(f"path escapes bound workspace: {relative}")
         return descriptor
     except Exception:
