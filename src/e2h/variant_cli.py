@@ -28,6 +28,14 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_variant_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write variant output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 @variant_app.command("validate")
 def validate_variant_command(
     document: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -49,7 +57,7 @@ def validate_variant_command(
 
     rendered = verification.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_variant_output(output, rendered)
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
@@ -90,5 +98,5 @@ def write_variant_schema(
     if output is None:
         console.print_json(rendered)
         return
-    write_json_atomic(output, rendered)
+    _write_variant_output(output, rendered)
     console.print(f"Wrote variant schema to {output}")
