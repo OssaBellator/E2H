@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 
@@ -9,13 +11,20 @@ from e2h.mcp_server import E2HMCPService, MCPServerConfig
 from e2h.store_models import QueryView, StoreInfo
 
 
-def test_mcp_memory_query_uses_combined_store_read(
+def test_mcp_memory_query_uses_private_snapshot_and_combined_store_read(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = tmp_path / "evidence.duckdb"
     database.write_bytes(b"placeholder")
+    private_database = tmp_path / "private" / database.name
+    snapshots: list[Path] = []
     calls: list[tuple[Path, QueryView, int, bool]] = []
+
+    @contextmanager
+    def fake_snapshot(path: Path) -> Iterator[Path]:
+        snapshots.append(path)
+        yield private_database
 
     def fake_query_store_with_info(
         path: Path,
@@ -37,12 +46,14 @@ def test_mcp_memory_query_uses_combined_store_read(
             [{"capsule_id": "capsule"}],
         )
 
+    monkeypatch.setattr(mcp_server, "stable_store_snapshot", fake_snapshot)
     monkeypatch.setattr(mcp_server, "query_store_with_info", fake_query_store_with_info)
     service = E2HMCPService(MCPServerConfig(root=tmp_path, store=database))
 
     result = service.memory_query(QueryView.RUNS, limit=4)
 
-    assert calls == [(database.resolve(), QueryView.RUNS, 4, True)]
+    assert snapshots == [database.resolve()]
+    assert calls == [(private_database, QueryView.RUNS, 4, True)]
     assert result.store_source_count == 1
     assert result.row_count == 1
     assert result.rows == [{"capsule_id": "capsule"}]
