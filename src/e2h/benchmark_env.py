@@ -46,7 +46,7 @@ class BenchmarkEnvironmentError(ValueError):
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
 
 _InputModelT = TypeVar("_InputModelT", bound=BaseModel)
