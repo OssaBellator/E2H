@@ -60,11 +60,17 @@ def open_absolute_directory(path: Path) -> int:
         raise DirectoryBindingError(f"unable to bind replay directory: {exc}") from exc
     try:
         for part in path.parts[1:]:
-            next_descriptor = os.open(part, flags, dir_fd=descriptor)
-            opened = os.fstat(next_descriptor)
-            if not stat.S_ISDIR(opened.st_mode):
-                os.close(next_descriptor)
-                raise DirectoryBindingError("replay path component is not a directory")
+            next_descriptor: int | None = None
+            try:
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+                opened = os.fstat(next_descriptor)
+                if not stat.S_ISDIR(opened.st_mode):
+                    raise DirectoryBindingError("replay path component is not a directory")
+            except Exception:
+                if next_descriptor is not None:
+                    with suppress(OSError):
+                        os.close(next_descriptor)
+                raise
             os.close(descriptor)
             descriptor = next_descriptor
         return descriptor
@@ -103,7 +109,12 @@ def _directory_is_beneath(root_descriptor: int, child_descriptor: int) -> bool:
                 _directory_flags(nofollow=False),
                 dir_fd=current_descriptor,
             )
-            parent = os.fstat(parent_descriptor)
+            try:
+                parent = os.fstat(parent_descriptor)
+            except Exception:
+                with suppress(OSError):
+                    os.close(parent_descriptor)
+                raise
             if _directory_identity(parent) == current_identity:
                 os.close(parent_descriptor)
                 return False
@@ -122,19 +133,15 @@ def open_relative_directory(
 ) -> int:
     """Open a relative directory and prove its resulting handle remains under containment."""
     relative = _validate_relative_directory(relative)
+    descriptor = os.open(
+        relative,
+        _directory_flags(nofollow=False),
+        dir_fd=base_descriptor,
+    )
     try:
-        descriptor = os.open(
-            relative,
-            _directory_flags(nofollow=False),
-            dir_fd=base_descriptor,
-        )
-    except OSError:
-        raise
-    opened = os.fstat(descriptor)
-    if not stat.S_ISDIR(opened.st_mode):
-        os.close(descriptor)
-        raise NotADirectoryError(relative)
-    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise NotADirectoryError(relative)
         try:
             contained = _directory_is_beneath(containment_descriptor, descriptor)
         except OSError as exc:
