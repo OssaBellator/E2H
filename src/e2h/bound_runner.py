@@ -1,4 +1,4 @@
-"""Handle-bound replay for security-sensitive remote execution surfaces."""
+"""Handle-bound local replay for the MCP execution boundary."""
 
 from __future__ import annotations
 
@@ -6,20 +6,16 @@ import os
 import stat
 import sys
 from contextlib import suppress
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from tempfile import TemporaryDirectory
 from time import monotonic
 
 from e2h.directory_binding import DirectoryBindingError, open_relative_directory
 from e2h.failures import (
-    FailureCode,
     FailureImpact,
     FailureRecord,
     launch_failure,
     output_capture_failure,
-    sandbox_failure,
     summarize_failures,
     timeout_failure,
     unexpected_exit_failure,
@@ -35,19 +31,17 @@ from e2h.runner import (
     RunStatus,
     _ProcessOutcome,
     _execute_local_command,
-    _execute_process,
     _skipped,
     _validated_capsule,
 )
-from e2h.sandbox import SandboxError, build_container_argv, force_remove_container
 
 
 def _proc_fd_directory(descriptor: int) -> Path:
     if not sys.platform.startswith("linux"):
-        raise RunnerError("handle-bound MCP replay requires Linux procfs")
+        raise RunnerError("handle-bound MCP local replay requires Linux procfs")
     path = Path(f"/proc/{os.getpid()}/fd/{descriptor}")
     if not path.exists():
-        raise RunnerError("handle-bound MCP replay requires accessible Linux procfs")
+        raise RunnerError("handle-bound MCP local replay requires accessible Linux procfs")
     return path
 
 
@@ -79,71 +73,14 @@ def _missing_check_result(check: CommandCheck, relative_cwd: str) -> CommandResu
     )
 
 
-def _execute_bound_container_command(
-    capsule: TaskCapsule,
-    check: CommandCheck,
-    workspace: Path,
-    *,
-    workspace_descriptor: int,
-    check_descriptor: int,
-    relative_cwd: str,
-    timeout: float,
-    max_output_chars: int,
-    runtime_override: str | None,
-) -> _ProcessOutcome:
-    sandbox = capsule.sandbox
-    if sandbox is None:
-        raise SandboxError("container backend requires capsule.sandbox")
-    runtime = runtime_override or sandbox.engine
-    workspace_source = str(_proc_fd_directory(workspace_descriptor))
-    check_source = str(_proc_fd_directory(check_descriptor))
-    with TemporaryDirectory(prefix="e2h-container-") as temporary:
-        cidfile = Path(temporary) / "container.cid"
-        argv = build_container_argv(
-            capsule,
-            check,
-            workspace,
-            relative_cwd,
-            cidfile,
-            runtime_binary=runtime,
-            workspace_mount_source=workspace_source,
-            working_directory_mount_source=check_source,
-        )
-        outcome = _execute_process(
-            argv,
-            _proc_fd_directory(workspace_descriptor),
-            os.environ.copy(),
-            timeout,
-            max_output_chars,
-        )
-        if not outcome.timed_out:
-            return outcome
-        cleanup_error = force_remove_container(runtime, cidfile)
-        if cleanup_error is None:
-            return outcome
-        combined_error = (
-            cleanup_error if outcome.error is None else f"{outcome.error}; {cleanup_error}"
-        )
-        return replace(
-            outcome,
-            error=combined_error,
-            failure_code=FailureCode.SANDBOX_CLEANUP,
-        )
-
-
-def _run_capsule_bound(
+def run_capsule_bound_local(
     capsule: TaskCapsule,
     workspace: Path,
     *,
     workspace_descriptor: int,
-    backend: ExecutionBackend,
-    container_runtime: str | None = None,
 ) -> RunResult:
+    """Run a capsule locally with every command cwd bound to a verified directory handle."""
     capsule = _validated_capsule(capsule)
-    if backend not in {ExecutionBackend.LOCAL, ExecutionBackend.CONTAINER}:
-        raise RunnerError(f"unsupported bound replay backend: {backend.value}")
-    if backend is ExecutionBackend.CONTAINER and capsule.sandbox is None:
-        raise RunnerError("container backend requires capsule.sandbox")
     started_at = datetime.now(UTC)
     started_clock = monotonic()
     try:
@@ -208,38 +145,12 @@ def _run_capsule_bound(
             failure: FailureRecord | None = None
             try:
                 relative_cwd = _bound_relative_cwd(workspace_descriptor, check_descriptor)
-                if backend is ExecutionBackend.LOCAL:
-                    outcome = _execute_local_command(
-                        check,
-                        _proc_fd_directory(check_descriptor),
-                        timeout,
-                        capsule.limits.max_output_chars,
-                    )
-                else:
-                    outcome = _execute_bound_container_command(
-                        capsule,
-                        check,
-                        workspace,
-                        workspace_descriptor=workspace_descriptor,
-                        check_descriptor=check_descriptor,
-                        relative_cwd=relative_cwd,
-                        timeout=timeout,
-                        max_output_chars=capsule.limits.max_output_chars,
-                        runtime_override=container_runtime,
-                    )
-            except SandboxError as exc:
-                status = CheckStatus.ERROR
-                outcome = _ProcessOutcome(
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="",
-                    stdout_truncated=False,
-                    stderr_truncated=False,
-                    error=str(exc),
+                outcome = _execute_local_command(
+                    check,
+                    _proc_fd_directory(check_descriptor),
+                    timeout,
+                    capsule.limits.max_output_chars,
                 )
-                failure = sandbox_failure()
-                infrastructure_error = True
             except OSError as exc:
                 status = CheckStatus.ERROR
                 outcome = _ProcessOutcome(
@@ -251,21 +162,21 @@ def _run_capsule_bound(
                     stderr_truncated=False,
                     error=str(exc),
                 )
-                failure = launch_failure(exc, backend.value)
+                failure = launch_failure(exc, ExecutionBackend.LOCAL.value)
                 infrastructure_error = True
             else:
                 if outcome.timed_out:
                     status = CheckStatus.TIMED_OUT
                     failure = timeout_failure(
                         timeout,
-                        backend.value,
+                        ExecutionBackend.LOCAL.value,
                         infrastructure_code=outcome.failure_code,
                     )
                     if failure.impact is FailureImpact.INFRASTRUCTURE_ERROR:
                         infrastructure_error = True
                 elif outcome.error is not None:
                     status = CheckStatus.ERROR
-                    failure = output_capture_failure(backend.value)
+                    failure = output_capture_failure(ExecutionBackend.LOCAL.value)
                     infrastructure_error = True
                 elif outcome.exit_code in check.expected_exit_codes:
                     status = CheckStatus.PASSED
@@ -319,36 +230,4 @@ def _run_capsule_bound(
         duration_seconds=monotonic() - started_clock,
         checks=results,
         failure_summary=summarize_failures((result.id, result.failure) for result in results),
-    )
-
-
-def run_capsule_bound_local(
-    capsule: TaskCapsule,
-    workspace: Path,
-    *,
-    workspace_descriptor: int,
-) -> RunResult:
-    """Run a capsule locally with command cwd bound to verified directory handles."""
-    return _run_capsule_bound(
-        capsule,
-        workspace,
-        workspace_descriptor=workspace_descriptor,
-        backend=ExecutionBackend.LOCAL,
-    )
-
-
-def run_capsule_bound_container(
-    capsule: TaskCapsule,
-    workspace: Path,
-    *,
-    workspace_descriptor: int,
-    container_runtime: str | None = None,
-) -> RunResult:
-    """Run a container capsule with workspace/cwd bind sources backed by held handles."""
-    return _run_capsule_bound(
-        capsule,
-        workspace,
-        workspace_descriptor=workspace_descriptor,
-        backend=ExecutionBackend.CONTAINER,
-        container_runtime=container_runtime,
     )
