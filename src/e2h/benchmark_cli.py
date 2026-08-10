@@ -27,6 +27,14 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_benchmark_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write benchmark output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 def _load(path: Path) -> FailurePatternCorpus:
     try:
         return load_failure_pattern_corpus(path)
@@ -113,5 +121,5 @@ def write_benchmark_schema(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_benchmark_output(output, rendered)
     console.print(f"Wrote benchmark schema to {output}")
