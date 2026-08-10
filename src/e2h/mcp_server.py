@@ -6,7 +6,10 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
+import stat
 import sys
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -25,6 +28,9 @@ from e2h.store_models import MAX_QUERY_ROWS, QueryView
 _DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_ARTIFACT_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD
 
 
 class MCPServiceError(ValueError):
@@ -84,32 +90,129 @@ def _safe_relative(root: Path, value: str, *, noun: str) -> tuple[Path, str]:
     return resolved, relative.as_posix() or "."
 
 
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
+
+
+def _requested_artifact_parent_identity(requested_parent: Path) -> os.stat_result:
+    try:
+        current_parent = requested_parent.resolve(strict=True)
+        return current_parent.stat(follow_symlinks=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise MCPServiceError(f"unable to restat artifact parent: {exc}") from exc
+
+
 def _stable_file_sha256(path: Path, *, max_bytes: int) -> tuple[int, str]:
+    if "\x00" in os.fspath(path):
+        raise MCPServiceError("artifact path must not contain NUL")
+    requested_parent = path.parent.absolute()
     try:
-        before = path.stat()
+        parent = requested_parent.resolve(strict=True)
+        parent_expected = parent.stat(follow_symlinks=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise MCPServiceError(f"unable to inspect artifact parent: {exc}") from exc
+    if stat.S_ISLNK(parent_expected.st_mode) or not stat.S_ISDIR(parent_expected.st_mode):
+        raise MCPServiceError("artifact parent must be a real directory")
+
+    parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        parent_descriptor = os.open(parent, parent_flags)
     except OSError as exc:
-        raise MCPServiceError(f"unable to stat artifact: {exc}") from exc
-    if not path.is_file():
-        raise MCPServiceError("artifact is not a regular file")
-    if before.st_size > max_bytes:
-        raise MCPServiceError(f"artifact exceeds configured max bytes ({max_bytes})")
-    digest = hashlib.sha256()
-    total = 0
+        raise MCPServiceError(f"unable to open artifact parent: {exc}") from exc
+
+    descriptor: int | None = None
     try:
-        with path.open("rb") as handle:
+        parent_opened = os.fstat(parent_descriptor)
+        requested_opened = _requested_artifact_parent_identity(requested_parent)
+        if (
+            not stat.S_ISDIR(parent_opened.st_mode)
+            or _stat_identity(parent_opened) != _stat_identity(parent_expected)
+            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
+        ):
+            raise MCPServiceError("artifact parent changed while opening")
+
+        try:
+            expected = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _ARTIFACT_DIR_FD_SUPPORTED
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+        except OSError as exc:
+            raise MCPServiceError(f"unable to stat artifact: {exc}") from exc
+        if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
+            raise MCPServiceError("artifact is not a regular file")
+        if expected.st_size > max_bytes:
+            raise MCPServiceError(f"artifact exceeds configured max bytes ({max_bytes})")
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = (
+                os.open(path.name, flags, dir_fd=parent_descriptor)
+                if _ARTIFACT_DIR_FD_SUPPORTED
+                else os.open(parent / path.name, flags)
+            )
+        except OSError as exc:
+            raise MCPServiceError(f"unable to open artifact: {exc}") from exc
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _stat_identity(opened) != _stat_identity(expected):
+            raise MCPServiceError("artifact changed while opening")
+        if opened.st_size > max_bytes:
+            raise MCPServiceError(f"artifact exceeds configured max bytes ({max_bytes})")
+
+        digest = hashlib.sha256()
+        total = 0
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
             while chunk := handle.read(_READ_CHUNK_BYTES):
                 total += len(chunk)
                 if total > max_bytes:
                     raise MCPServiceError(f"artifact exceeds configured max bytes ({max_bytes})")
                 digest.update(chunk)
-        after = path.stat()
+
+        after = os.fstat(descriptor)
+        try:
+            current = (
+                os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+                if _ARTIFACT_DIR_FD_SUPPORTED
+                else (parent / path.name).stat(follow_symlinks=False)
+            )
+            parent_after = os.fstat(parent_descriptor)
+            parent_current = _requested_artifact_parent_identity(requested_parent)
+        except OSError as exc:
+            raise MCPServiceError(f"unable to restat artifact after reading: {exc}") from exc
+        if (
+            _stat_identity(after) != _stat_identity(opened)
+            or _stat_identity(current) != _stat_identity(opened)
+            or total != opened.st_size
+        ):
+            raise MCPServiceError("artifact changed while it was being verified")
+        if _stat_identity(parent_after) != _stat_identity(parent_opened) or _stat_identity(
+            parent_current
+        ) != _stat_identity(parent_opened):
+            raise MCPServiceError("artifact parent changed while it was being verified")
+        return total, digest.hexdigest()
     except OSError as exc:
         raise MCPServiceError(f"unable to hash artifact: {exc}") from exc
-    identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-    identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-    if identity_before != identity_after or total != before.st_size:
-        raise MCPServiceError("artifact changed while it was being verified")
-    return total, digest.hexdigest()
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        with suppress(OSError):
+            os.close(parent_descriptor)
 
 
 @dataclass(frozen=True)
