@@ -121,7 +121,9 @@ def _execute_bound_container_command(
         cleanup_error = force_remove_container(runtime, cidfile)
         if cleanup_error is None:
             return outcome
-        combined_error = cleanup_error if outcome.error is None else f"{outcome.error}; {cleanup_error}"
+        combined_error = (
+            cleanup_error if outcome.error is None else f"{outcome.error}; {cleanup_error}"
+        )
         return replace(
             outcome,
             error=combined_error,
@@ -140,6 +142,8 @@ def _run_capsule_bound(
     capsule = _validated_capsule(capsule)
     if backend not in {ExecutionBackend.LOCAL, ExecutionBackend.CONTAINER}:
         raise RunnerError(f"unsupported bound replay backend: {backend.value}")
+    if backend is ExecutionBackend.CONTAINER and capsule.sandbox is None:
+        raise RunnerError("container backend requires capsule.sandbox")
     started_at = datetime.now(UTC)
     started_clock = monotonic()
     try:
@@ -234,7 +238,7 @@ def _run_capsule_bound(
                     stderr_truncated=False,
                     error=str(exc),
                 )
-                failure = sandbox_failure(configuration=capsule.sandbox is None)
+                failure = sandbox_failure()
                 infrastructure_error = True
             except OSError as exc:
                 status = CheckStatus.ERROR
