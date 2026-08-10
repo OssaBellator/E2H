@@ -1,4 +1,4 @@
-"""Regression coverage for the MCP experiment-store read-only boundary."""
+"""Regression coverage for the MCP experiment-store no-mutation contract."""
 
 from __future__ import annotations
 
