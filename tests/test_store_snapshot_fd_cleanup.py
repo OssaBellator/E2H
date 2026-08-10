@@ -46,12 +46,16 @@ def test_store_entry_open_closes_descriptor_when_fstat_fails(
     expected = source.stat(follow_symlinks=False)
     closed: list[int] = []
 
-    monkeypatch.setattr(store_snapshot.os, "open", lambda *args, **kwargs: 20)
-    monkeypatch.setattr(
-        store_snapshot.os,
-        "fstat",
-        lambda descriptor: (_ for _ in ()).throw(OSError("fstat failed")),
-    )
+    def fake_open(*args: Any, **kwargs: Any) -> int:
+        del args, kwargs
+        return 20
+
+    def fail_fstat(descriptor: int) -> Any:
+        del descriptor
+        raise OSError("fstat failed")
+
+    monkeypatch.setattr(store_snapshot.os, "open", fake_open)
+    monkeypatch.setattr(store_snapshot.os, "fstat", fail_fstat)
     monkeypatch.setattr(store_snapshot.os, "close", closed.append)
 
     with pytest.raises(
