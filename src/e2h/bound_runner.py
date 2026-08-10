@@ -107,20 +107,40 @@ def run_capsule_bound_local(
     except OSError as exc:
         raise RunnerError(f"unable to open working directory: {exc}") from exc
 
+    task_cwd = _bound_relative_cwd(workspace_descriptor, task_descriptor)
     results: list[CommandResult] = []
     halt = False
     blocked_by_check_id: str | None = None
     infrastructure_error = False
     try:
         for check in capsule.success.commands:
-            requested_cwd = _requested_relative_cwd(
-                capsule.initial_state.working_directory,
-                check.cwd,
-            )
+            requested_cwd = _requested_relative_cwd(task_cwd, check.cwd)
             if halt:
                 if blocked_by_check_id is None:
                     raise RunnerError("halted replay is missing its blocking check")
-                results.append(_skipped(check, requested_cwd, blocked_by_check_id))
+                skipped_cwd = requested_cwd
+                try:
+                    skipped_descriptor = open_relative_directory(
+                        task_descriptor,
+                        check.cwd,
+                        containment_descriptor=workspace_descriptor,
+                    )
+                except (FileNotFoundError, NotADirectoryError, PermissionError):
+                    pass
+                except DirectoryBindingError as exc:
+                    raise RunnerError(str(exc)) from exc
+                except OSError as exc:
+                    raise RunnerError(f"unable to open skipped check directory: {exc}") from exc
+                else:
+                    try:
+                        skipped_cwd = _bound_relative_cwd(
+                            workspace_descriptor,
+                            skipped_descriptor,
+                        )
+                    finally:
+                        with suppress(OSError):
+                            os.close(skipped_descriptor)
+                results.append(_skipped(check, skipped_cwd, blocked_by_check_id))
                 continue
 
             try:
