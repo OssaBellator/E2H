@@ -173,3 +173,41 @@ def test_artifact_hash_rejects_parent_replacement_while_opening(
         _stable_file_sha256(artifact, max_bytes=100)
 
     assert state["swapped"] is True
+
+
+def test_artifact_hash_rejects_parent_escape_after_file_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    parent = root / "artifacts"
+    parent.mkdir()
+    artifact = parent / "artifact.bin"
+    artifact.write_bytes(b"inside")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / artifact.name).write_bytes(b"outside")
+    moved_parent = tmp_path / "original-artifacts"
+    original_fdopen = os.fdopen
+    state = {"swapped": False}
+
+    def swapping_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        if not state["swapped"]:
+            state["swapped"] = True
+            parent.rename(moved_parent)
+            try:
+                parent.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                pytest.skip(f"symlinks unavailable: {exc}")
+        return original_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(mcp_server.os, "fdopen", swapping_fdopen)
+
+    with pytest.raises(
+        MCPServiceError,
+        match="artifact parent escapes the configured MCP root",
+    ):
+        _stable_file_sha256(artifact, max_bytes=100, root=root.resolve())
+
+    assert state["swapped"] is True
