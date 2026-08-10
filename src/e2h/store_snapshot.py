@@ -126,10 +126,9 @@ def _revalidate_store_set(
     names: tuple[str, ...],
     expected: dict[str, os.stat_result | None],
     opened: dict[str, int],
-    parent_identity: tuple[int, int, int, int, int, int],
 ) -> None:
-    if _stat_identity(os.fstat(parent_descriptor)) != parent_identity:
-        raise StoreSnapshotError("DuckDB store parent changed while snapshotting")
+    if not stat.S_ISDIR(os.fstat(parent_descriptor).st_mode):
+        raise StoreSnapshotError("DuckDB store parent is no longer a directory")
     for name in names:
         current = _stat_entry(parent_descriptor, name)
         before = expected[name]
@@ -160,7 +159,6 @@ def stable_store_snapshot(database: Path) -> Iterator[Path]:
         parent_opened = os.fstat(parent_descriptor)
         if not stat.S_ISDIR(parent_opened.st_mode):
             raise StoreSnapshotError("store parent must be a directory")
-        parent_identity = _stat_identity(parent_opened)
         names = tuple(f"{database.name}{suffix}" for suffix in _STORE_SUFFIXES)
         expected = {name: _stat_entry(parent_descriptor, name) for name in names}
         if expected[names[0]] is None:
@@ -181,7 +179,6 @@ def stable_store_snapshot(database: Path) -> Iterator[Path]:
                 names,
                 expected,
                 opened,
-                parent_identity,
             )
             yield private_root / database.name
     finally:
