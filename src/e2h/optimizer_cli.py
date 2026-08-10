@@ -46,6 +46,14 @@ def _render_json(value: Any) -> str:
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
+def _write_optimizer_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write optimizer output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 @optimizer_app.command("validate")
 def validate_adapter_command(
     adapter: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
@@ -73,7 +81,7 @@ def validate_adapter_command(
 
     rendered = verification.model_dump_json(indent=2) + "\n"
     if output is not None:
-        write_json_atomic(output, rendered)
+        _write_optimizer_output(output, rendered)
     if json_stdout:
         typer.echo(rendered, nl=False)
         return
@@ -105,7 +113,7 @@ def export_dataset_command(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_optimizer_output(output, rendered)
     console.print(f"Exported {len(dataset.examples)} DSPy examples to {output}")
 
 
@@ -132,7 +140,7 @@ def apply_candidate_command(
     except (OptimizerAdapterError, CapsuleLoadError, VariantError, ValidationError) as exc:
         error_console.print(f"[red]Invalid optimizer candidate:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    write_json_atomic(output, result.model_dump_json(indent=2) + "\n")
+    _write_optimizer_output(output, result.model_dump_json(indent=2) + "\n")
     console.print(
         f"Materialized {result.variant.id} from candidate "
         f"{optimizer_candidate_sha256(loaded_candidate)}"
@@ -168,7 +176,7 @@ def feedback_command(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_optimizer_output(output, rendered)
     console.print(f"Wrote optimizer feedback to {output}")
 
 
@@ -191,5 +199,5 @@ def write_optimizer_schema(
     if output is None:
         console.print_json(rendered)
         return
-    write_json_atomic(output, rendered)
+    _write_optimizer_output(output, rendered)
     console.print(f"Wrote {kind} schema to {output}")
