@@ -32,6 +32,17 @@ def _validate_store_path(path: Path, *, noun: str) -> None:
         raise StoreError(f"{noun} path must not contain NUL")
 
 
+def _schema_version_row(connection: duckdb.DuckDBPyConnection) -> tuple[Any, ...] | None:
+    rows = connection.execute(
+        "SELECT value FROM store_metadata WHERE key = 'schema_version'"
+    ).fetchall()
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise StoreError("experiment store has multiple schema version markers")
+    return rows[0]
+
+
 def _connection(
     database: Path,
     *,
@@ -45,9 +56,7 @@ def _connection(
             if not database.is_file():
                 raise StoreError("experiment store does not exist")
             connection = duckdb.connect(str(database), read_only=True)
-            existing = connection.execute(
-                "SELECT value FROM store_metadata WHERE key = 'schema_version'"
-            ).fetchone()
+            existing = _schema_version_row(connection)
             if existing is None:
                 connection.close()
                 connection = None
@@ -64,9 +73,7 @@ def _connection(
         database.parent.mkdir(parents=True, exist_ok=True)
         connection = duckdb.connect(str(database))
         connection.execute(SCHEMA_SQL)
-        existing = connection.execute(
-            "SELECT value FROM store_metadata WHERE key = 'schema_version'"
-        ).fetchone()
+        existing = _schema_version_row(connection)
         if existing is None:
             connection.execute(
                 "INSERT INTO store_metadata (key, value) VALUES ('schema_version', ?)",
@@ -97,10 +104,10 @@ def _connection(
 
 
 def _scalar_int(connection: duckdb.DuckDBPyConnection, sql: str) -> int:
-    row = connection.execute(sql).fetchone()
-    if row is None:
-        raise StoreError("store count query returned no row")
-    return int(row[0])
+    rows = connection.execute(sql).fetchall()
+    if len(rows) != 1:
+        raise StoreError("store count query did not return exactly one row")
+    return int(rows[0][0])
 
 
 def _info(connection: duckdb.DuckDBPyConnection) -> StoreInfo:
@@ -158,8 +165,8 @@ def ingest_artifact(
         exists = connection.execute(
             "SELECT 1 FROM sources WHERE source_sha256 = ?",
             [source_sha256],
-        ).fetchone()
-        if exists is not None:
+        ).fetchall()
+        if exists:
             return IngestResult(
                 source_sha256=source_sha256,
                 kind=artifact_kind,
