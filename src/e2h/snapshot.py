@@ -18,6 +18,8 @@ from typing import Any, BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from e2h.document import _validate_json_compatible
+
 SNAPSHOT_SCHEMA_VERSION = "0.1"
 MANIFEST_NAME = "manifest.json"
 BLOB_PREFIX = "blobs/"
@@ -114,6 +116,7 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _canonical_json(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         _validate_json_object_keys(value)
         rendered = json.dumps(
             value,
