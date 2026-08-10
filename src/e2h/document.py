@@ -70,11 +70,34 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def _requested_parent_identity(requested_parent: Path, *, noun: str) -> os.stat_result:
+def _parent_must_be_contained(
+    parent: Path,
+    containment_root: Path | None,
+    *,
+    noun: str,
+) -> None:
+    if containment_root is None:
+        return
+    try:
+        parent.relative_to(containment_root)
+    except ValueError as exc:
+        raise ValueError(f"{noun} parent escapes the configured root") from exc
+
+
+def _requested_parent_identity(
+    requested_parent: Path,
+    *,
+    noun: str,
+    containment_root: Path | None = None,
+) -> os.stat_result:
     try:
         current_parent = requested_parent.resolve(strict=True)
-        return current_parent.stat(follow_symlinks=False)
     except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"unable to read {noun}: {exc}") from exc
+    _parent_must_be_contained(current_parent, containment_root, noun=noun)
+    try:
+        return current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
         raise ValueError(f"unable to read {noun}: {exc}") from exc
 
 
@@ -119,14 +142,24 @@ def _validate_json_compatible(
     raise ValueError(f"{path} contains unsupported value type {type(value).__name__}")
 
 
-def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> bytes:
+def _read_document_bytes(
+    path: Path,
+    *,
+    noun: str,
+    max_bytes: int | None,
+    containment_root: Path | None = None,
+) -> bytes:
     if "\x00" in os.fspath(path):
         raise ValueError(f"unable to read {noun}: path must not contain NUL")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
-        parent_expected = parent.stat(follow_symlinks=False)
     except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"unable to read {noun}: {exc}") from exc
+    _parent_must_be_contained(parent, containment_root, noun=noun)
+    try:
+        parent_expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
         raise ValueError(f"unable to read {noun}: {exc}") from exc
     if not stat.S_ISDIR(parent_expected.st_mode):
         raise ValueError(f"{noun} parent must be a directory")
@@ -138,7 +171,11 @@ def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> byt
     descriptor: int | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        requested_opened = _requested_parent_identity(requested_parent, noun=noun)
+        requested_opened = _requested_parent_identity(
+            requested_parent,
+            noun=noun,
+            containment_root=containment_root,
+        )
         if (
             _stat_identity(parent_opened) != _stat_identity(parent_expected)
             or _stat_identity(requested_opened) != _stat_identity(parent_opened)
@@ -187,7 +224,11 @@ def _read_document_bytes(path: Path, *, noun: str, max_bytes: int | None) -> byt
             else (parent / path.name).stat(follow_symlinks=False)
         )
         parent_after = os.fstat(parent_descriptor)
-        parent_current = _requested_parent_identity(requested_parent, noun=noun)
+        parent_current = _requested_parent_identity(
+            requested_parent,
+            noun=noun,
+            containment_root=containment_root,
+        )
         if max_bytes is not None and len(raw) > max_bytes:
             raise ValueError(f"{noun} exceeds {max_bytes} bytes")
         if (
@@ -216,9 +257,15 @@ def load_mapping_document(
     *,
     noun: str,
     max_bytes: int | None = None,
+    containment_root: Path | None = None,
 ) -> dict[str, Any]:
     """Load one UTF-8 JSON/YAML mapping with strict, unambiguous keys."""
-    raw = _read_document_bytes(path, noun=noun, max_bytes=max_bytes)
+    raw = _read_document_bytes(
+        path,
+        noun=noun,
+        max_bytes=max_bytes,
+        containment_root=containment_root,
+    )
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:

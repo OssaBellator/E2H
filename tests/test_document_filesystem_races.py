@@ -86,6 +86,47 @@ def test_mapping_loader_rejects_parent_directory_swap(
     assert swapped is True
 
 
+def test_mapping_loader_rejects_containment_escape_after_file_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    directory = root / "config"
+    directory.mkdir()
+    source = directory / "document.json"
+    _write(source)
+    moved = tmp_path / "original-config"
+    outside = tmp_path / "outside-config"
+    outside.mkdir()
+    _write(outside / source.name, value="outside")
+
+    original_fdopen = os.fdopen
+    swapped = False
+
+    def swapping_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            directory.rename(moved)
+            try:
+                directory.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                pytest.skip(f"symlinks unavailable: {exc}")
+        return original_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(os, "fdopen", swapping_fdopen)
+
+    with pytest.raises(ValueError, match="document parent escapes the configured root"):
+        load_mapping_document(
+            source,
+            noun="document",
+            containment_root=root.resolve(),
+        )
+
+    assert swapped is True
+
+
 def test_mapping_loader_preserves_bounded_and_unbounded_reads(tmp_path: Path) -> None:
     source = tmp_path / "document.json"
     _write(source)
