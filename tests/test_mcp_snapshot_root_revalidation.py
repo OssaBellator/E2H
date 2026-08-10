@@ -59,7 +59,10 @@ def test_mcp_snapshot_rejects_parent_escape_between_resolution_and_verification(
     monkeypatch.setattr(mcp_server, "verify_snapshot_with_archive_sha256", swapping_verify)
     service = E2HMCPService(MCPServerConfig(root=root))
 
-    with pytest.raises(MCPServiceError, match="snapshot archive parent escapes the configured root"):
+    with pytest.raises(
+        MCPServiceError,
+        match="snapshot archive parent escapes the configured root",
+    ):
         service.verify_snapshot("archives/artifact.e2hsnap")
 
     assert state["swapped"] is True
