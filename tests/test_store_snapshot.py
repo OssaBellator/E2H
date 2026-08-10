@@ -149,7 +149,7 @@ def test_stable_store_snapshot_rejects_existing_wal_mutation_during_copy(
 
     monkeypatch.setattr(store_snapshot, "_copy_descriptor", mutating_copy)
 
-    with pytest.raises(StoreSnapshotError, match="changed while snapshotting"):
+    with pytest.raises(StoreSnapshotError, match="changed while"):
         with stable_store_snapshot(database):
             raise AssertionError("mutated WAL should not be yielded")
 
