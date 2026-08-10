@@ -1,4 +1,4 @@
-"""Regression coverage for controlled main CLI publication failures."""
+"""Regression coverage for controlled top-level E2H CLI publication failures."""
 
 from __future__ import annotations
 
