@@ -260,6 +260,14 @@ class RollbackEvent(StrictModel):
             raise ValueError("rollback observed value must be finite")
         return value
 
+    @model_validator(mode="after")
+    def rollback_variants_must_differ(self) -> RollbackEvent:
+        if self.from_variant_id == self.to_variant_id:
+            raise ValueError("rollback event source and target variant ids must differ")
+        if self.from_variant_sha256 == self.to_variant_sha256:
+            raise ValueError("rollback event source and target variants must differ")
+        return self
+
 
 def variant_prediction_sha256(document: VariantPredictionDocument) -> str:
     """Return the canonical identity of one variant prediction document."""
