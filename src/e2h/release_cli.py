@@ -36,6 +36,14 @@ console = Console()
 error_console = Console(stderr=True)
 
 
+def _write_release_output(path: Path, payload: str) -> None:
+    try:
+        write_json_atomic(path, payload)
+    except OSError as exc:
+        error_console.print(f"[red]Unable to write release output:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+
 def _load(path: Path) -> ReleaseManifest:
     try:
         return load_release_manifest(path)
@@ -110,7 +118,7 @@ def seal_release(
         error_console.print(f"[red]Unable to seal release artifacts:[/red] {exc}")
         raise typer.Exit(code=2) from exc
     rendered = manifest.model_dump_json(indent=2) + "\n"
-    write_json_atomic(output, rendered)
+    _write_release_output(output, rendered)
     console.print(
         f"Sealed {len(manifest.artifacts)} release artifacts for "
         f"{manifest.project} {manifest.version}: {release_manifest_sha256(manifest)}"
@@ -245,7 +253,7 @@ def canonicalize_sbom(
     except SbomCanonicalizationError as exc:
         error_console.print(f"[red]Unable to canonicalize SBOM:[/red] {exc}")
         raise typer.Exit(code=2) from exc
-    write_json_atomic(output, rendered)
+    _write_release_output(output, rendered)
     console.print(f"Wrote canonical CycloneDX SBOM to {output}")
 
 
@@ -304,5 +312,5 @@ def write_release_schema(
     if output is None:
         typer.echo(rendered, nl=False)
         return
-    write_json_atomic(output, rendered)
+    _write_release_output(output, rendered)
     console.print(f"Wrote release manifest schema to {output}")
