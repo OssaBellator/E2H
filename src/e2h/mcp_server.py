@@ -101,22 +101,46 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def _requested_artifact_parent_identity(requested_parent: Path) -> os.stat_result:
+def _requested_artifact_parent_identity(
+    requested_parent: Path,
+    root: Path | None = None,
+) -> os.stat_result:
     try:
         current_parent = requested_parent.resolve(strict=True)
-        return current_parent.stat(follow_symlinks=False)
     except (OSError, RuntimeError, ValueError) as exc:
+        raise MCPServiceError(f"unable to restat artifact parent: {exc}") from exc
+    if root is not None:
+        try:
+            current_parent.relative_to(root)
+        except ValueError as exc:
+            raise MCPServiceError("artifact parent escapes the configured MCP root") from exc
+    try:
+        return current_parent.stat(follow_symlinks=False)
+    except OSError as exc:
         raise MCPServiceError(f"unable to restat artifact parent: {exc}") from exc
 
 
-def _stable_file_sha256(path: Path, *, max_bytes: int) -> tuple[int, str]:
+def _stable_file_sha256(
+    path: Path,
+    *,
+    max_bytes: int,
+    root: Path | None = None,
+) -> tuple[int, str]:
     if "\x00" in os.fspath(path):
         raise MCPServiceError("artifact path must not contain NUL")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
-        parent_expected = parent.stat(follow_symlinks=False)
     except (OSError, RuntimeError, ValueError) as exc:
+        raise MCPServiceError(f"unable to inspect artifact parent: {exc}") from exc
+    if root is not None:
+        try:
+            parent.relative_to(root)
+        except ValueError as exc:
+            raise MCPServiceError("artifact parent escapes the configured MCP root") from exc
+    try:
+        parent_expected = parent.stat(follow_symlinks=False)
+    except OSError as exc:
         raise MCPServiceError(f"unable to inspect artifact parent: {exc}") from exc
     if stat.S_ISLNK(parent_expected.st_mode) or not stat.S_ISDIR(parent_expected.st_mode):
         raise MCPServiceError("artifact parent must be a real directory")
@@ -130,7 +154,7 @@ def _stable_file_sha256(path: Path, *, max_bytes: int) -> tuple[int, str]:
     descriptor: int | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        requested_opened = _requested_artifact_parent_identity(requested_parent)
+        requested_opened = _requested_artifact_parent_identity(requested_parent, root)
         if (
             not stat.S_ISDIR(parent_opened.st_mode)
             or _stat_identity(parent_opened) != _stat_identity(parent_expected)
@@ -191,7 +215,7 @@ def _stable_file_sha256(path: Path, *, max_bytes: int) -> tuple[int, str]:
                 else (parent / path.name).stat(follow_symlinks=False)
             )
             parent_after = os.fstat(parent_descriptor)
-            parent_current = _requested_artifact_parent_identity(requested_parent)
+            parent_current = _requested_artifact_parent_identity(requested_parent, root)
         except OSError as exc:
             raise MCPServiceError(f"unable to restat artifact after reading: {exc}") from exc
         if (
@@ -410,6 +434,7 @@ class E2HMCPService:
         size, digest = _stable_file_sha256(
             path,
             max_bytes=self.config.max_artifact_bytes,
+            root=self.config.root,
         )
         digest_matches = None if expected_sha256 is None else digest == expected_sha256
         size_matches = (min_bytes is None or size >= min_bytes) and (
