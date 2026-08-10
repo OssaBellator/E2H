@@ -14,6 +14,7 @@ from typing import Any
 from mcp.server import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
+from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
 from e2h.loader import CapsuleLoadError, load_capsule
 from e2h.runner import ExecutionBackend, RunnerError, run_capsule
@@ -36,6 +37,7 @@ class StrictModel(BaseModel):
 
 def _canonical_json_bytes(value: Any) -> bytes:
     try:
+        _validate_json_compatible(value)
         rendered = json.dumps(
             value,
             sort_keys=True,
@@ -59,13 +61,22 @@ def _package_version() -> str:
         return "0.0.0+unknown"
 
 
+def _resolve_path(path: Path, *, noun: str) -> Path:
+    if "\x00" in str(path):
+        raise MCPServiceError(f"{noun} path must not contain NUL")
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise MCPServiceError(f"unable to resolve {noun}: {exc}") from exc
+
+
 def _safe_relative(root: Path, value: str, *, noun: str) -> tuple[Path, str]:
     if not value or "\x00" in value:
         raise MCPServiceError(f"{noun} must be a non-empty path without NUL")
     candidate = Path(value)
     if candidate.is_absolute():
         raise MCPServiceError(f"{noun} must be relative to the configured MCP root")
-    resolved = (root / candidate).resolve()
+    resolved = _resolve_path(root / candidate, noun=noun)
     try:
         relative = resolved.relative_to(root)
     except ValueError as exc:
@@ -193,7 +204,7 @@ class E2HMCPService:
     """Path-bounded implementation behind the MCP tool surface."""
 
     def __init__(self, config: MCPServerConfig) -> None:
-        root = config.root.resolve()
+        root = _resolve_path(config.root, noun="MCP root")
         if not root.is_dir():
             raise MCPServiceError(f"MCP root is not a directory: {config.root}")
         if config.max_artifact_bytes < 1:
@@ -209,8 +220,8 @@ class E2HMCPService:
         if config.store is not None:
             raw_store = config.store
             if raw_store.is_absolute():
+                store = _resolve_path(raw_store, noun="memory store")
                 try:
-                    store = raw_store.resolve()
                     store.relative_to(root)
                 except ValueError as exc:
                     raise MCPServiceError(
