@@ -62,18 +62,31 @@ def _entry_identity(info: os.stat_result) -> tuple[int, ...]:
     return _file_identity(info)
 
 
+def _apply_metadata(destination: Path, info: os.stat_result) -> None:
+    destination.chmod(stat.S_IMODE(info.st_mode) & 0o777)
+    os.utime(
+        destination,
+        ns=(info.st_atime_ns, info.st_mtime_ns),
+        follow_symlinks=False,
+    )
+
+
 def _stat_entry(parent_descriptor: int, name: str) -> os.stat_result:
     try:
         return os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
     except OSError as exc:
-        raise WorkspaceSnapshotError(f"unable to inspect replay workspace entry {name!r}: {exc}") from exc
+        raise WorkspaceSnapshotError(
+            f"unable to inspect replay workspace entry {name!r}: {exc}"
+        ) from exc
 
 
 def _list_directory(descriptor: int) -> list[str]:
     try:
         return sorted(os.listdir(descriptor))
     except (OSError, TypeError) as exc:
-        raise WorkspaceSnapshotError(f"unable to list replay workspace directory: {exc}") from exc
+        raise WorkspaceSnapshotError(
+            f"unable to list replay workspace directory: {exc}"
+        ) from exc
 
 
 def _copy_regular_file(
@@ -89,14 +102,24 @@ def _copy_regular_file(
     try:
         descriptor = os.open(name, flags, dir_fd=parent_descriptor)
     except OSError as exc:
-        raise WorkspaceSnapshotError(f"unable to open replay workspace file {name!r}: {exc}") from exc
+        raise WorkspaceSnapshotError(
+            f"unable to open replay workspace file {name!r}: {exc}"
+        ) from exc
     try:
         opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _file_identity(opened) != _file_identity(expected):
-            raise WorkspaceSnapshotError(f"replay workspace file {name!r} changed while opening")
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _file_identity(opened) != _file_identity(expected)
+        ):
+            raise WorkspaceSnapshotError(
+                f"replay workspace file {name!r} changed while opening"
+            )
         copied = 0
         try:
-            with os.fdopen(descriptor, "rb", closefd=False) as source, destination.open("xb") as target:
+            with (
+                os.fdopen(descriptor, "rb", closefd=False) as source,
+                destination.open("xb") as target,
+            ):
                 while chunk := source.read(_READ_CHUNK_BYTES):
                     copied += len(chunk)
                     if copied > expected.st_size:
@@ -109,7 +132,9 @@ def _copy_regular_file(
                 f"unable to copy replay workspace file {name!r}: {exc}"
             ) from exc
         if copied != expected.st_size:
-            raise WorkspaceSnapshotError(f"replay workspace file {name!r} changed while copying")
+            raise WorkspaceSnapshotError(
+                f"replay workspace file {name!r} changed while copying"
+            )
         state.add_bytes(copied)
         after = os.fstat(descriptor)
         current = _stat_entry(parent_descriptor, name)
@@ -117,13 +142,10 @@ def _copy_regular_file(
             _file_identity(after) != _file_identity(expected)
             or _file_identity(current) != _file_identity(expected)
         ):
-            raise WorkspaceSnapshotError(f"replay workspace file {name!r} changed while copying")
-        destination.chmod(stat.S_IMODE(expected.st_mode) & 0o777)
-        os.utime(
-            destination,
-            ns=(expected.st_atime_ns, expected.st_mtime_ns),
-            follow_symlinks=False,
-        )
+            raise WorkspaceSnapshotError(
+                f"replay workspace file {name!r} changed while copying"
+            )
+        _apply_metadata(destination, expected)
     finally:
         with suppress(OSError):
             os.close(descriptor)
@@ -131,7 +153,9 @@ def _copy_regular_file(
 
 def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
     if not target or "\x00" in target:
-        raise WorkspaceSnapshotError("replay workspace symlink target must be non-empty without NUL")
+        raise WorkspaceSnapshotError(
+            "replay workspace symlink target must be non-empty without NUL"
+        )
     value = PurePosixPath(target)
     if value.is_absolute():
         raise WorkspaceSnapshotError("replay workspace symlink target must be relative")
@@ -141,7 +165,9 @@ def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
             continue
         if part == "..":
             if not stack:
-                raise WorkspaceSnapshotError("replay workspace symlink escapes isolated root")
+                raise WorkspaceSnapshotError(
+                    "replay workspace symlink escapes isolated root"
+                )
             stack.pop()
         else:
             stack.append(part)
@@ -158,13 +184,17 @@ def _copy_symlink(
     try:
         target = os.readlink(name, dir_fd=parent_descriptor)
     except OSError as exc:
-        raise WorkspaceSnapshotError(f"unable to read replay workspace symlink {name!r}: {exc}") from exc
+        raise WorkspaceSnapshotError(
+            f"unable to read replay workspace symlink {name!r}: {exc}"
+        ) from exc
     _safe_symlink_target(relative_parent, target)
     state.add_bytes(len(target.encode("utf-8", errors="surrogateescape")))
     try:
         destination.symlink_to(target)
     except OSError as exc:
-        raise WorkspaceSnapshotError(f"unable to copy replay workspace symlink {name!r}: {exc}") from exc
+        raise WorkspaceSnapshotError(
+            f"unable to copy replay workspace symlink {name!r}: {exc}"
+        ) from exc
     current = _stat_entry(parent_descriptor, name)
     try:
         current_target = os.readlink(name, dir_fd=parent_descriptor)
@@ -173,7 +203,54 @@ def _copy_symlink(
             f"unable to re-read replay workspace symlink {name!r}: {exc}"
         ) from exc
     if _file_identity(current) != _file_identity(expected) or current_target != target:
-        raise WorkspaceSnapshotError(f"replay workspace symlink {name!r} changed while copying")
+        raise WorkspaceSnapshotError(
+            f"replay workspace symlink {name!r} changed while copying"
+        )
+
+
+def _copy_directory_entry(
+    source_descriptor: int,
+    name: str,
+    info: os.stat_result,
+    destination: Path,
+    relative: PurePosixPath,
+    state: _SnapshotState,
+) -> None:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        child_descriptor = os.open(name, flags, dir_fd=source_descriptor)
+    except OSError as exc:
+        raise WorkspaceSnapshotError(
+            f"unable to open replay workspace directory {name!r}: {exc}"
+        ) from exc
+    try:
+        opened = os.fstat(child_descriptor)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or _directory_identity(opened) != _directory_identity(info)
+        ):
+            raise WorkspaceSnapshotError(
+                f"replay workspace directory {name!r} changed while opening"
+            )
+        destination.mkdir(mode=0o700)
+        _copy_directory(child_descriptor, destination, relative / name, state)
+        current = _stat_entry(source_descriptor, name)
+        if (
+            _directory_identity(os.fstat(child_descriptor))
+            != _directory_identity(info)
+            or _directory_identity(current) != _directory_identity(info)
+        ):
+            raise WorkspaceSnapshotError(
+                f"replay workspace directory {name!r} changed while copying"
+            )
+        _apply_metadata(destination, info)
+    finally:
+        with suppress(OSError):
+            os.close(child_descriptor)
 
 
 def _copy_directory(
@@ -196,42 +273,14 @@ def _copy_directory(
             _copy_symlink(source_descriptor, name, info, target, relative, state)
             continue
         if stat.S_ISDIR(info.st_mode):
-            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            try:
-                child_descriptor = os.open(name, flags, dir_fd=source_descriptor)
-            except OSError as exc:
-                raise WorkspaceSnapshotError(
-                    f"unable to open replay workspace directory {name!r}: {exc}"
-                ) from exc
-            try:
-                opened = os.fstat(child_descriptor)
-                if (
-                    not stat.S_ISDIR(opened.st_mode)
-                    or _directory_identity(opened) != _directory_identity(info)
-                ):
-                    raise WorkspaceSnapshotError(
-                        f"replay workspace directory {name!r} changed while opening"
-                    )
-                target.mkdir(mode=0o700)
-                child_relative = relative / name
-                _copy_directory(child_descriptor, target, child_relative, state)
-                current = _stat_entry(source_descriptor, name)
-                if (
-                    _directory_identity(os.fstat(child_descriptor)) != _directory_identity(info)
-                    or _directory_identity(current) != _directory_identity(info)
-                ):
-                    raise WorkspaceSnapshotError(
-                        f"replay workspace directory {name!r} changed while copying"
-                    )
-                target.chmod(stat.S_IMODE(info.st_mode) & 0o777)
-                os.utime(
-                    target,
-                    ns=(info.st_atime_ns, info.st_mtime_ns),
-                    follow_symlinks=False,
-                )
-            finally:
-                with suppress(OSError):
-                    os.close(child_descriptor)
+            _copy_directory_entry(
+                source_descriptor,
+                name,
+                info,
+                target,
+                relative,
+                state,
+            )
             continue
         raise WorkspaceSnapshotError(
             f"replay workspace entry {name!r} has unsupported file type"
@@ -264,11 +313,18 @@ def stable_workspace_snapshot(
     except DirectoryBindingError as exc:
         raise WorkspaceSnapshotError(str(exc)) from exc
     try:
+        root_info = os.fstat(descriptor)
         with TemporaryDirectory(prefix="e2h-replay-workspace-") as temporary:
             private_workspace = Path(temporary) / "workspace"
             private_workspace.mkdir(mode=0o700)
             state = _SnapshotState(max_bytes=max_bytes, max_entries=max_entries)
-            _copy_directory(descriptor, private_workspace, PurePosixPath("."), state)
+            _copy_directory(
+                descriptor,
+                private_workspace,
+                PurePosixPath("."),
+                state,
+            )
+            _apply_metadata(private_workspace, root_info)
             yield private_workspace
     finally:
         with suppress(OSError):
