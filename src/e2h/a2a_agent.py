@@ -35,6 +35,8 @@ _A2A_PROTOCOL_VERSION = "1.0"
 _DEFAULT_REQUEST_BYTES = 65_536
 _DEFAULT_RESPONSE_BYTES = 1_048_576
 _DEFAULT_MEMORY_ROWS = 100
+_DEFAULT_REPLAY_WORKSPACE_BYTES = 100 * 1024 * 1024
+_DEFAULT_REPLAY_WORKSPACE_ENTRIES = 10_000
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 logger = logging.getLogger(__name__)
 
@@ -406,8 +408,8 @@ def build_agent_card(
                 id="e2h_replay",
                 name="Replay E2H capsule",
                 description=(
-                    "Run a root-bounded E2H capsule with handle-bound local replay and return "
-                    "replay evidence."
+                    "Run a root-bounded E2H capsule using handle-bound local replay or a "
+                    "bounded read-only isolated container workspace, and return replay evidence."
                 ),
                 tags=["verification", "replay", "capsule"],
                 examples=['{"schema_version":"0.1","operation":"replay","capsule":"capsule.yaml"}'],
@@ -478,18 +480,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-replay",
         action="store_true",
-        help="Advertise and enable command-executing local replay. Disabled by default.",
+        help="Advertise and enable command-executing replay. Disabled by default.",
     )
     parser.add_argument(
         "--backend",
         choices=[item.value for item in ExecutionBackend],
         default=ExecutionBackend.AUTO.value,
-        help="Replay backend; container replay is currently unavailable over A2A.",
+        help=(
+            "Replay backend; local uses handle-bound execution and container uses a bounded "
+            "read-only isolated workspace copy."
+        ),
     )
     parser.add_argument(
         "--container-runtime",
         default=None,
-        help="Container runtime override reserved for future A2A container replay.",
+        help="Container runtime override for isolated container replay.",
     )
     parser.add_argument(
         "--expose-replay-output",
@@ -507,6 +512,18 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         default=_DEFAULT_MEMORY_ROWS,
         help=f"Maximum rows returned by one memory query (hard limit {MAX_QUERY_ROWS}).",
+    )
+    parser.add_argument(
+        "--max-replay-workspace-bytes",
+        type=int,
+        default=_DEFAULT_REPLAY_WORKSPACE_BYTES,
+        help="Maximum bytes copied into one isolated container replay workspace.",
+    )
+    parser.add_argument(
+        "--max-replay-workspace-entries",
+        type=int,
+        default=_DEFAULT_REPLAY_WORKSPACE_ENTRIES,
+        help="Maximum filesystem entries copied into one isolated container replay workspace.",
     )
     parser.add_argument(
         "--max-request-bytes",
@@ -538,6 +555,8 @@ def main() -> None:
                 expose_replay_output=args.expose_replay_output,
                 max_artifact_bytes=args.max_artifact_bytes,
                 max_memory_rows=args.max_memory_rows,
+                max_replay_workspace_bytes=args.max_replay_workspace_bytes,
+                max_replay_workspace_entries=args.max_replay_workspace_entries,
             ),
             public_url=_normalized_public_url(public_url),
             max_request_bytes=args.max_request_bytes,
