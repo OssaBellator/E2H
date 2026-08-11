@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
+import e2h.mcp_server as mcp_server
+from e2h.bound_runner import handle_bound_local_replay_supported
 from e2h.mcp_server import (
     E2HMCPService,
     MCPServerConfig,
@@ -178,6 +180,9 @@ def test_replay_is_operator_gated_and_digest_only_by_default(tmp_path: Path) -> 
     with pytest.raises(MCPServiceError, match="disabled"):
         disabled.replay("capsule.json")
 
+    if not handle_bound_local_replay_supported():
+        return
+
     service = E2HMCPService(
         MCPServerConfig(
             root=tmp_path,
@@ -197,6 +202,8 @@ def test_replay_is_operator_gated_and_digest_only_by_default(tmp_path: Path) -> 
 
 
 def test_replay_output_requires_operator_opt_in(tmp_path: Path) -> None:
+    if not handle_bound_local_replay_supported():
+        pytest.skip("handle-bound MCP local replay is unavailable on this host")
     _write_capsule(tmp_path / "capsule.json")
     service = E2HMCPService(
         MCPServerConfig(
@@ -211,7 +218,11 @@ def test_replay_output_requires_operator_opt_in(tmp_path: Path) -> None:
     assert result.output_exposed is True
 
 
-def test_replay_rejects_paths_and_missing_inputs(tmp_path: Path) -> None:
+def test_replay_rejects_paths_and_missing_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: True)
     service = E2HMCPService(MCPServerConfig(root=tmp_path, allow_replay=True))
     with pytest.raises(MCPServiceError, match="capsule escapes"):
         service.replay("../capsule.json")
@@ -222,7 +233,12 @@ def test_replay_rejects_paths_and_missing_inputs(tmp_path: Path) -> None:
         service.replay("capsule.json", workspace="missing")
 
 
-def test_mcp_tool_catalog_hides_replay_unless_enabled(tmp_path: Path) -> None:
+def test_mcp_tool_catalog_hides_replay_unless_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: True)
+
     async def scenario() -> None:
         server = create_mcp_server(MCPServerConfig(root=tmp_path))
         async with Client(server) as client:
