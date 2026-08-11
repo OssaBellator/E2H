@@ -144,3 +144,36 @@ def test_run_docker_wraps_stdin_rewind_failure() -> None:
 def test_docker_prerelease_versions_do_not_satisfy_security_gate(value: str) -> None:
     with pytest.raises(DockerRemoteError, match="prerelease version is not accepted"):
         docker_remote._parse_version(value, noun="client")
+
+
+def test_prepared_workspace_volume_pins_local_driver_and_read_only_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bypass_precreate_dependencies(monkeypatch)
+    calls: list[list[str]] = []
+
+    def fake_run_docker(
+        runtime: str,
+        args: list[str],
+        **kwargs: Any,
+    ) -> str:
+        del runtime, kwargs
+        calls.append(list(args))
+        if args[:2] == ["volume", "create"]:
+            return args[-1]
+        if args and args[0] == "create":
+            return "a" * 64
+        return ""
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+
+    with prepared_workspace_volume(
+        ContainerSandbox(image=IMAGE),
+        object(),  # type: ignore[arg-type]
+    ):
+        pass
+
+    volume_create = calls[0]
+    assert volume_create[volume_create.index("--driver") + 1] == "local"
+    create = calls[1]
+    assert "--read-only" in create
