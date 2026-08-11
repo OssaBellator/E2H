@@ -41,6 +41,39 @@ def _capsule(**sandbox_overrides: object) -> TaskCapsule:
     )
 
 
+def _cleanup_runtime(tmp_path: Path) -> tuple[Path, Path]:
+    runtime = tmp_path / "docker-test"
+    log = tmp_path / "docker-log.jsonl"
+    runtime.write_text(
+        f"""#!{sys.executable}
+import json
+import os
+from pathlib import Path
+import sys
+args = sys.argv[1:]
+with Path(os.environ["DOCKER_TEST_LOG"]).open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(args) + "\\n")
+if args and args[0] == "rm" and os.environ.get("DOCKER_TEST_RM_FAIL"):
+    print("remove lost race", file=sys.stderr)
+    raise SystemExit(1)
+if args and args[0] == "ps":
+    value = os.environ.get("DOCKER_TEST_PS_RESULT", "")
+    if value:
+        print(value)
+    if os.environ.get("DOCKER_TEST_PS_FAIL"):
+        print("probe failed", file=sys.stderr)
+        raise SystemExit(2)
+""",
+        encoding="utf-8",
+    )
+    runtime.chmod(0o755)
+    return runtime, log
+
+
+def _records(log: Path) -> list[list[str]]:
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
 def test_volume_builder_uses_read_only_named_volume_without_cidfile() -> None:
     capsule = _capsule()
     argv = build_container_volume_argv(
@@ -105,36 +138,72 @@ def test_volume_builder_rejects_unsafe_remote_policy(
         )
 
 
-def test_named_container_cleanup_does_not_use_host_cidfile(tmp_path: Path) -> None:
-    runtime = tmp_path / "docker-test"
-    log = tmp_path / "docker-log.json"
-    runtime.write_text(
-        f"""#!{sys.executable}
-import json
-import os
-from pathlib import Path
-import sys
-Path(os.environ["DOCKER_TEST_LOG"]).write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
-""",
-        encoding="utf-8",
-    )
-    runtime.chmod(0o755)
+def test_named_container_cleanup_does_not_use_host_cidfile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _cleanup_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
 
-    old = __import__("os").environ.get("DOCKER_TEST_LOG")
-    __import__("os").environ["DOCKER_TEST_LOG"] = str(log)
-    try:
-        assert force_remove_named_container(
-            str(runtime),
-            "e2h-replay-check-abc",
-        ) is None
-    finally:
-        if old is None:
-            __import__("os").environ.pop("DOCKER_TEST_LOG", None)
-        else:
-            __import__("os").environ["DOCKER_TEST_LOG"] = old
-
-    assert json.loads(log.read_text(encoding="utf-8")) == [
-        "rm",
-        "-f",
+    assert force_remove_named_container(
+        str(runtime),
         "e2h-replay-check-abc",
+    ) is None
+    assert _records(log) == [["rm", "-f", "e2h-replay-check-abc"]]
+
+
+def test_named_cleanup_accepts_verified_auto_remove_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _cleanup_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_RM_FAIL", "1")
+
+    assert force_remove_named_container(
+        str(runtime),
+        "e2h-replay-check-abc",
+    ) is None
+    assert _records(log) == [
+        ["rm", "-f", "e2h-replay-check-abc"],
+        [
+            "ps",
+            "-aq",
+            "--filter",
+            r"name=^/e2h\-replay\-check\-abc$",
+        ],
     ]
+
+
+def test_named_cleanup_fails_if_container_still_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, _ = _cleanup_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(tmp_path / "docker-log.jsonl"))
+    monkeypatch.setenv("DOCKER_TEST_RM_FAIL", "1")
+    monkeypatch.setenv("DOCKER_TEST_PS_RESULT", "a" * 64)
+
+    error = force_remove_named_container(
+        str(runtime),
+        "e2h-replay-check-abc",
+    )
+    assert error is not None
+    assert "cleanup verification failed" in error
+
+
+def test_named_cleanup_fails_when_absence_cannot_be_verified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, _ = _cleanup_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(tmp_path / "docker-log.jsonl"))
+    monkeypatch.setenv("DOCKER_TEST_RM_FAIL", "1")
+    monkeypatch.setenv("DOCKER_TEST_PS_FAIL", "1")
+
+    error = force_remove_named_container(
+        str(runtime),
+        "e2h-replay-check-abc",
+    )
+    assert error is not None
+    assert "cleanup verification failed" in error
