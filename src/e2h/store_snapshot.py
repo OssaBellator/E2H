@@ -37,6 +37,10 @@ def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
+def _directory_identity(info: os.stat_result) -> tuple[int, int]:
+    return info.st_dev, info.st_ino
+
+
 def _open_absolute_directory(path: Path) -> int:
     if not _DESCRIPTOR_BOUND_SUPPORTED:
         raise StoreSnapshotError(
@@ -46,6 +50,13 @@ def _open_absolute_directory(path: Path) -> int:
         raise StoreSnapshotError("store path must be absolute before snapshotting")
     if any(part in {".", ".."} for part in path.parts):
         raise StoreSnapshotError("store path must not contain relative path segments")
+
+    try:
+        expected = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise StoreSnapshotError(f"unable to bind store parent: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        raise StoreSnapshotError("unable to bind store parent: path is not a real directory")
 
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW
     anchor = Path(path.anchor)
@@ -66,6 +77,8 @@ def _open_absolute_directory(path: Path) -> int:
                 raise
             os.close(descriptor)
             descriptor = next_descriptor
+        if _directory_identity(os.fstat(descriptor)) != _directory_identity(expected):
+            raise StoreSnapshotError("store parent changed while binding")
         return descriptor
     except OSError as exc:
         with suppress(OSError):
