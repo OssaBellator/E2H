@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from time import monotonic
 
-from e2h.directory_binding import DirectoryBindingError, open_relative_directory
+from e2h.directory_binding import (
+    _DIRECTORY_BINDING_SUPPORTED,
+    DirectoryBindingError,
+    open_relative_directory,
+)
 from e2h.failures import (
     FailureImpact,
     FailureRecord,
@@ -34,6 +38,13 @@ from e2h.runner import (
     _skipped,
     _validated_capsule,
 )
+
+
+def handle_bound_local_replay_supported() -> bool:
+    """Return whether the current host can launch handle-bound local replay."""
+    if not _DIRECTORY_BINDING_SUPPORTED or not sys.platform.startswith("linux"):
+        return False
+    return Path(f"/proc/{os.getpid()}/fd").is_dir()
 
 
 def _proc_fd_directory(descriptor: int) -> Path:
