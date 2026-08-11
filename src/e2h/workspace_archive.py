@@ -22,6 +22,9 @@ from e2h.directory_binding import (
     open_absolute_directory,
 )
 
+_MAX_ARCHIVE_DEPTH = 128
+_MAX_ARCHIVE_MEMBER_PATH_BYTES = 4096
+
 
 class WorkspaceArchiveError(RuntimeError):
     """Raised when a replay workspace cannot be captured into a stable archive."""
@@ -70,6 +73,7 @@ def sealed_workspace_archive_supported() -> bool:
         and os.readlink in os.supports_dir_fd
         and os.scandir in os.supports_fd
         and hasattr(os, "memfd_create")
+        and hasattr(os, "MFD_CLOEXEC")
         and hasattr(os, "MFD_ALLOW_SEALING")
         and fcntl is not None
         and all(
@@ -184,7 +188,18 @@ def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
 
 
 def _archive_name(relative: PurePosixPath) -> str:
-    return "." if str(relative) == "." else relative.as_posix()
+    if len(relative.parts) > _MAX_ARCHIVE_DEPTH:
+        raise WorkspaceArchiveError(
+            f"replay workspace exceeds maximum archive depth ({_MAX_ARCHIVE_DEPTH})"
+        )
+    value = "." if str(relative) == "." else relative.as_posix()
+    encoded = value.encode("utf-8", errors="surrogateescape")
+    if len(encoded) > _MAX_ARCHIVE_MEMBER_PATH_BYTES:
+        raise WorkspaceArchiveError(
+            "replay workspace member path exceeds maximum archive bytes "
+            f"({_MAX_ARCHIVE_MEMBER_PATH_BYTES})"
+        )
+    return value
 
 
 def _tar_info(
@@ -409,8 +424,13 @@ def _open_memfd() -> BinaryIO:
     flags = os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
     try:
         descriptor = os.memfd_create("e2h-replay-workspace", flags=flags)
-        return os.fdopen(descriptor, "w+b", buffering=0)
     except OSError as exc:
+        raise WorkspaceArchiveError(f"unable to create replay workspace memfd: {exc}") from exc
+    try:
+        return os.fdopen(descriptor, "w+b", buffering=0)
+    except (OSError, ValueError) as exc:
+        with suppress(OSError):
+            os.close(descriptor)
         raise WorkspaceArchiveError(f"unable to create replay workspace memfd: {exc}") from exc
 
 
@@ -432,7 +452,12 @@ def stable_workspace_archive(
         raise WorkspaceArchiveError(str(exc)) from exc
 
     try:
-        root_info = os.fstat(descriptor)
+        try:
+            root_info = os.fstat(descriptor)
+        except OSError as exc:
+            raise WorkspaceArchiveError(
+                f"unable to inspect bound replay workspace root: {exc}"
+            ) from exc
         state = _ArchiveState(max_bytes=max_bytes, max_entries=max_entries)
         directories = {"."}
         with _open_memfd() as handle:
@@ -462,7 +487,13 @@ def stable_workspace_archive(
                 raise WorkspaceArchiveError(
                     f"unable to create replay workspace archive: {exc}"
                 ) from exc
-            if _directory_identity(os.fstat(descriptor)) != _directory_identity(root_info):
+            try:
+                root_current = os.fstat(descriptor)
+            except OSError as exc:
+                raise WorkspaceArchiveError(
+                    f"unable to revalidate bound replay workspace root: {exc}"
+                ) from exc
+            if _directory_identity(root_current) != _directory_identity(root_info):
                 raise WorkspaceArchiveError("replay workspace root changed while archiving")
             archive_bytes = handle.tell()
             _seal_archive(handle)
