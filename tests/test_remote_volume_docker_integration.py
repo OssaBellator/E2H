@@ -64,13 +64,11 @@ def _resources(runtime: str) -> _DaemonResources:
     )
     names = _docker_lines(
         runtime,
-        ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=e2h-replay-check-"],
+        ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=e2h-replay-"],
     )
     return _DaemonResources(
         volumes=volumes,
-        replay_containers=frozenset(
-            name for name in names if name.startswith("e2h-replay-check-")
-        ),
+        replay_containers=frozenset(name for name in names if name.startswith("e2h-replay-")),
     )
 
 
