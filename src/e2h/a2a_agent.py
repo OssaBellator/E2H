@@ -179,7 +179,8 @@ def _normalized_public_url(value: str) -> str:
 
 
 def _public_error(message: str, *, root: str) -> str:
-    sanitized = message.replace(root, "<root>")
+    root_path = Path(root)
+    sanitized = message if root_path.parent == root_path else message.replace(root, "<root>")
     if len(sanitized) > 4096:
         return sanitized[:4093] + "..."
     return sanitized
@@ -405,8 +406,8 @@ def build_agent_card(
                 id="e2h_replay",
                 name="Replay E2H capsule",
                 description=(
-                    "Run a root-bounded E2H capsule under the operator-selected backend and "
-                    "return replay evidence."
+                    "Run a root-bounded E2H capsule with handle-bound local replay and return "
+                    "replay evidence."
                 ),
                 tags=["verification", "replay", "capsule"],
                 examples=['{"schema_version":"0.1","operation":"replay","capsule":"capsule.yaml"}'],
@@ -477,18 +478,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-replay",
         action="store_true",
-        help="Advertise and enable command-executing replay. Disabled by default.",
+        help="Advertise and enable command-executing local replay. Disabled by default.",
     )
     parser.add_argument(
         "--backend",
         choices=[item.value for item in ExecutionBackend],
         default=ExecutionBackend.AUTO.value,
-        help="Operator-selected replay backend when --allow-replay is enabled.",
+        help="Replay backend; container replay is currently unavailable over A2A.",
     )
     parser.add_argument(
         "--container-runtime",
         default=None,
-        help="Container runtime binary override for replay. Never controlled by A2A messages.",
+        help="Container runtime override reserved for future A2A container replay.",
     )
     parser.add_argument(
         "--expose-replay-output",
