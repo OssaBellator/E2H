@@ -25,6 +25,7 @@ from e2h.a2a_agent import (
     execute_verification_command,
     parse_verification_message,
 )
+from e2h.bound_runner import handle_bound_local_replay_supported
 from e2h.mcp_server import E2HMCPService, MCPServerConfig
 from e2h.runner import ExecutionBackend
 from e2h.snapshot import create_snapshot
@@ -179,11 +180,13 @@ def test_executes_memory_snapshot_and_replay_commands(tmp_path: Path) -> None:
     source.mkdir()
     (source / "data.txt").write_text("data", encoding="utf-8")
     create_snapshot(source, tmp_path / "proof.e2hsnap")
-    _write_capsule(tmp_path / "capsule.json")
+    replay_supported = handle_bound_local_replay_supported()
+    if replay_supported:
+        _write_capsule(tmp_path / "capsule.json")
     service = _service(
         tmp_path,
         store=Path("memory.duckdb"),
-        allow_replay=True,
+        allow_replay=replay_supported,
     )
 
     memory = execute_verification_command(
@@ -202,14 +205,15 @@ def test_executes_memory_snapshot_and_replay_commands(tmp_path: Path) -> None:
     assert snapshot.result is not None
     assert snapshot.result["verified"] is True
 
-    replay = execute_verification_command(
-        service,
-        ReplayCommand(operation="replay", capsule="capsule.json"),
-    )
-    assert replay.ok is True
-    assert replay.result is not None
-    assert replay.result["status"] == "passed"
-    assert replay.result["output_exposed"] is False
+    if replay_supported:
+        replay = execute_verification_command(
+            service,
+            ReplayCommand(operation="replay", capsule="capsule.json"),
+        )
+        assert replay.ok is True
+        assert replay.result is not None
+        assert replay.result["status"] == "passed"
+        assert replay.result["output_exposed"] is False
 
 
 def test_replay_disabled_is_application_error(tmp_path: Path) -> None:
@@ -235,16 +239,17 @@ def test_agent_card_advertises_only_enabled_capabilities(tmp_path: Path) -> None
 
     database = tmp_path / "memory.duckdb"
     initialize_store(database)
+    replay_supported = handle_bound_local_replay_supported()
     enabled = _service(
         tmp_path,
         store=Path("memory.duckdb"),
-        allow_replay=True,
+        allow_replay=replay_supported,
     )
     enabled_ids = {
         skill.id for skill in build_agent_card(enabled, public_url="http://127.0.0.1:41242").skills
     }
     assert "e2h_memory_query" in enabled_ids
-    assert "e2h_replay" in enabled_ids
+    assert ("e2h_replay" in enabled_ids) is replay_supported
 
 
 def test_executor_rejects_invalid_response_limits(tmp_path: Path) -> None:
