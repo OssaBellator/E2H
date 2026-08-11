@@ -52,13 +52,21 @@ def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def _directory_identity(info: os.stat_result) -> tuple[int, int]:
-    return info.st_dev, info.st_ino
+def _directory_snapshot_identity(
+    info: os.stat_result,
+) -> tuple[int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_mode,
+    )
 
 
 def _entry_identity(info: os.stat_result) -> tuple[int, ...]:
     if stat.S_ISDIR(info.st_mode):
-        return _directory_identity(info)
+        return _directory_snapshot_identity(info)
     return _file_identity(info)
 
 
@@ -231,7 +239,8 @@ def _copy_directory_entry(
         opened = os.fstat(child_descriptor)
         if (
             not stat.S_ISDIR(opened.st_mode)
-            or _directory_identity(opened) != _directory_identity(info)
+            or _directory_snapshot_identity(opened)
+            != _directory_snapshot_identity(info)
         ):
             raise WorkspaceSnapshotError(
                 f"replay workspace directory {name!r} changed while opening"
@@ -240,9 +249,10 @@ def _copy_directory_entry(
         _copy_directory(child_descriptor, destination, relative / name, state)
         current = _stat_entry(source_descriptor, name)
         if (
-            _directory_identity(os.fstat(child_descriptor))
-            != _directory_identity(info)
-            or _directory_identity(current) != _directory_identity(info)
+            _directory_snapshot_identity(os.fstat(child_descriptor))
+            != _directory_snapshot_identity(info)
+            or _directory_snapshot_identity(current)
+            != _directory_snapshot_identity(info)
         ):
             raise WorkspaceSnapshotError(
                 f"replay workspace directory {name!r} changed while copying"
@@ -324,8 +334,18 @@ def stable_workspace_snapshot(
                 PurePosixPath("."),
                 state,
             )
+            if _directory_snapshot_identity(os.fstat(descriptor)) != (
+                _directory_snapshot_identity(root_info)
+            ):
+                raise WorkspaceSnapshotError(
+                    "replay workspace root changed while copying"
+                )
             _apply_metadata(private_workspace, root_info)
             yield private_workspace
+    except OSError as exc:
+        raise WorkspaceSnapshotError(
+            f"unable to create isolated replay workspace: {exc}"
+        ) from exc
     finally:
         with suppress(OSError):
             os.close(descriptor)
