@@ -265,9 +265,11 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
             [
                 runtime_binary,
                 "ps",
-                "-aq",
+                "-a",
+                "--format",
+                "{{.Names}}",
                 "--filter",
-                f"name=^/{re.escape(container_name)}$",
+                f"name={container_name}",
             ],
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -279,10 +281,18 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
             f"container force-removal failed with exit {completed.returncode}: "
             f"{removal_error}; unable to verify cleanup: {exc}"
         )
-    if probe.returncode == 0 and not probe.stdout.strip():
-        return None
-    probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
-    detail = probe_error or "container still exists after failed removal"
+    if probe.returncode == 0:
+        names = {
+            line.strip()
+            for line in probe.stdout.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
+        }
+        if container_name not in names:
+            return None
+        detail = "container still exists after failed removal"
+    else:
+        probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
+        detail = probe_error or f"Docker ps failed with exit {probe.returncode}"
     return (
         f"container force-removal failed with exit {completed.returncode}: "
         f"{removal_error}; cleanup verification failed: {detail}"
