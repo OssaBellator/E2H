@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from time import monotonic
 
 from e2h.failures import (
+    FailureCode,
     FailureImpact,
     FailureRecord,
     launch_failure,
@@ -228,7 +229,7 @@ def _execute_volume_command(
             outcome = replace(
                 outcome,
                 error=combined,
-                failure_code=__import__("e2h.failures", fromlist=["FailureCode"]).FailureCode.SANDBOX_CLEANUP,
+                failure_code=FailureCode.SANDBOX_CLEANUP,
             )
     return outcome
 
