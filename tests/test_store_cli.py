@@ -152,3 +152,33 @@ def test_store_cli_reports_invalid_database(tmp_path: Path) -> None:
     result = runner.invoke(app, ["store", "info", str(database)])
     assert result.exit_code == 2
     assert "Unable to inspect store" in result.output
+
+
+def test_store_info_requires_existing_database(tmp_path: Path) -> None:
+    database = tmp_path / "missing.duckdb"
+
+    result = runner.invoke(app, ["store", "info", str(database)])
+
+    assert result.exit_code == 2
+    assert not database.exists()
+
+
+def test_store_info_rejects_old_schema_without_migrating(tmp_path: Path) -> None:
+    database = tmp_path / "schema-v1.duckdb"
+    result = runner.invoke(app, ["store", "init", str(database)])
+    assert result.exit_code == 0, result.output
+
+    with duckdb.connect(str(database)) as connection:
+        connection.execute(
+            "UPDATE store_metadata SET value = '1' WHERE key = 'schema_version'"
+        )
+
+    result = runner.invoke(app, ["store", "info", str(database)])
+
+    assert result.exit_code == 2
+    assert "unsupported store schema version '1'; expected 2" in result.output
+    with duckdb.connect(str(database), read_only=True) as connection:
+        rows = connection.execute(
+            "SELECT value FROM store_metadata WHERE key = 'schema_version'"
+        ).fetchall()
+    assert rows == [("1",)]
