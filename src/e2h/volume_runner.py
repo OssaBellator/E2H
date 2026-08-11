@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
 import tarfile
@@ -44,6 +45,7 @@ from e2h.sandbox import (
 from e2h.workspace_archive import WorkspaceArchive
 
 _MAX_CWD_SYMLINK_RESOLUTIONS = 40
+_DOCKER_RUN_RESERVED_EXIT_CODES = frozenset({125, 126, 127})
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,22 @@ def _validate_remote_policy(capsule: TaskCapsule) -> None:
         raise RunnerError("prepared-volume replay requires sandbox.pull_policy='never'")
 
 
+def _docker_run_reserved_exit_failure(exit_code: int) -> FailureRecord | None:
+    if exit_code == 125:
+        return sandbox_failure()
+    if exit_code == 126:
+        return launch_failure(
+            OSError(errno.ENOEXEC, "container command could not be invoked"),
+            ExecutionBackend.CONTAINER.value,
+        )
+    if exit_code == 127:
+        return launch_failure(
+            FileNotFoundError(errno.ENOENT, "container command was not found"),
+            ExecutionBackend.CONTAINER.value,
+        )
+    return None
+
+
 def _execute_volume_command(
     capsule: TaskCapsule,
     check: CommandCheck,
@@ -342,12 +360,18 @@ def run_capsule_prepared_volume(
                 status = CheckStatus.ERROR
                 failure = output_capture_failure(ExecutionBackend.CONTAINER.value)
                 infrastructure_error = True
+            elif outcome.exit_code is None:
+                raise RunnerError("completed command is missing an exit code")
+            elif outcome.exit_code in _DOCKER_RUN_RESERVED_EXIT_CODES:
+                status = CheckStatus.ERROR
+                failure = _docker_run_reserved_exit_failure(outcome.exit_code)
+                if failure is None:
+                    raise RunnerError("reserved Docker exit status lacks a failure mapping")
+                infrastructure_error = True
             elif outcome.exit_code in check.expected_exit_codes:
                 status = CheckStatus.PASSED
             else:
                 status = CheckStatus.FAILED
-                if outcome.exit_code is None:
-                    raise RunnerError("completed command is missing an exit code")
                 failure = unexpected_exit_failure(
                     outcome.exit_code,
                     sorted(check.expected_exit_codes),
