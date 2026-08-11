@@ -85,6 +85,10 @@ def test_builder_enforces_declared_boundaries(tmp_path: Path) -> None:
         runtime_binary="docker-test",
     )
     assert argv[:3] == ["docker-test", "run", "--rm"]
+    assert argv[argv.index("--log-driver") : argv.index("--log-driver") + 2] == [
+        "--log-driver",
+        "none",
+    ]
     assert argv[argv.index("--network") : argv.index("--network") + 2] == ["--network", "none"]
     assert "--read-only" in argv
     assert "type=bind" in argv[argv.index("--mount") + 1]
@@ -126,6 +130,7 @@ def test_auto_backend_runs_declared_sandbox(
     args = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
     assert args[0] == "run"
     assert "--network" in args
+    assert "--log-driver" in args
     assert IMAGE in args
 
 
