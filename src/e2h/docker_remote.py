@@ -230,11 +230,15 @@ def prepared_workspace_volume(
 
     volume_name = _resource_name("workspace")
     container_name = _resource_name("prepare")
-    volume_created = False
-    container_created = False
+    volume_may_exist = False
+    container_may_exist = False
     primary_error: BaseException | None = None
 
     try:
+        # A create command can time out or lose its response after the daemon has
+        # already created the named resource. Arm cleanup before each create so
+        # an ambiguous client-side failure cannot leak daemon-side state.
+        volume_may_exist = True
         created_volume = _run_docker(
             runtime,
             [
@@ -245,11 +249,11 @@ def prepared_workspace_volume(
                 volume_name,
             ],
         )
-        volume_created = True
         if created_volume != volume_name:
             raise DockerRemoteError("Docker created an unexpected workspace volume")
 
         mount = f"type=volume,src={volume_name},dst={_WORKSPACE_ROOT},volume-nocopy"
+        container_may_exist = True
         created_container = _run_docker(
             runtime,
             [
@@ -274,7 +278,6 @@ def prepared_workspace_volume(
                 "__e2h_workspace_preparation_container_is_never_started__",
             ],
         )
-        container_created = True
         if not created_container:
             raise DockerRemoteError("Docker did not return a preparation container ID")
 
@@ -291,18 +294,18 @@ def prepared_workspace_volume(
         )
 
         _run_docker(runtime, ["rm", "-f", container_name])
-        container_created = False
+        container_may_exist = False
         yield volume_name
     except BaseException as exc:
         primary_error = exc
         raise
     finally:
         cleanup_errors: list[str] = []
-        if container_created:
+        if container_may_exist:
             error = _best_effort_docker(runtime, ["rm", "-f", container_name])
             if error is not None:
                 cleanup_errors.append(error)
-        if volume_created:
+        if volume_may_exist:
             error = _best_effort_docker(runtime, ["volume", "rm", "-f", volume_name])
             if error is not None:
                 cleanup_errors.append(error)
