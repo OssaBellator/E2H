@@ -52,6 +52,13 @@ def open_absolute_directory(path: Path) -> int:
     if not path.is_absolute() or any(part in {".", ".."} for part in path.parts):
         raise DirectoryBindingError("bound directory path must be canonical and absolute")
 
+    try:
+        expected = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise DirectoryBindingError(f"unable to inspect replay directory: {exc}") from exc
+    if stat.S_ISLNK(expected.st_mode) or not stat.S_ISDIR(expected.st_mode):
+        raise DirectoryBindingError("replay directory path is not a directory")
+
     flags = _directory_flags(nofollow=True)
     anchor = Path(path.anchor)
     try:
@@ -71,6 +78,8 @@ def open_absolute_directory(path: Path) -> int:
                 raise
             os.close(descriptor)
             descriptor = next_descriptor
+        if _directory_identity(os.fstat(descriptor)) != _directory_identity(expected):
+            raise DirectoryBindingError("replay directory changed while binding")
         return descriptor
     except OSError as exc:
         with suppress(OSError):
