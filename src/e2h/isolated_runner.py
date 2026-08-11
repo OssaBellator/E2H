@@ -10,7 +10,14 @@ from e2h.docker_remote import DockerRemoteError, prepared_workspace_volume
 from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult, _validated_capsule
 from e2h.volume_runner import run_capsule_prepared_volume
-from e2h.workspace_archive import WorkspaceArchiveError, stable_workspace_archive
+from e2h.workspace_archive import (
+    WorkspaceArchive,
+    WorkspaceArchiveError,
+    stable_workspace_archive,
+)
+
+_REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES = 16 * 1024
+_REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -27,6 +34,34 @@ def isolated_workspace_snapshot_supported() -> bool:
 def isolated_container_replay_supported() -> bool:
     """Return false until the runtime can consume workspace state by stable identity."""
     return False
+
+
+def _max_remote_archive_bytes(max_source_bytes: int, max_entries: int) -> int:
+    """Return a conservative transfer cap for the uncompressed PAX workspace tar."""
+    if max_source_bytes < 1 or max_entries < 1:
+        raise RunnerError("remote workspace archive limits must be positive")
+    return (
+        2 * max_source_bytes
+        + max_entries * _REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES
+        + _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES
+    )
+
+
+def _validate_remote_archive_resources(
+    archive: WorkspaceArchive,
+    *,
+    max_source_bytes: int,
+    max_entries: int,
+) -> None:
+    """Reject unexpected tar amplification before any bytes reach the Docker daemon."""
+    if archive.source_bytes > max_source_bytes or archive.entries > max_entries:
+        raise RunnerError("sealed workspace archive metadata exceeds configured capture limits")
+    max_archive_bytes = _max_remote_archive_bytes(max_source_bytes, max_entries)
+    if archive.archive_bytes > max_archive_bytes:
+        raise RunnerError(
+            "sealed workspace archive exceeds derived transfer bound "
+            f"({max_archive_bytes} bytes)"
+        )
 
 
 def _run_capsule_isolated_container_candidate(
@@ -49,6 +84,11 @@ def _run_capsule_isolated_container_candidate(
             max_bytes=max_workspace_bytes,
             max_entries=max_workspace_entries,
         ) as archive:
+            _validate_remote_archive_resources(
+                archive,
+                max_source_bytes=max_workspace_bytes,
+                max_entries=max_workspace_entries,
+            )
             with prepared_workspace_volume(
                 sandbox,
                 archive,
