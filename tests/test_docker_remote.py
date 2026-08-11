@@ -218,7 +218,7 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     assert create[0] == "create"
     assert create[create.index("--pull") + 1] == "never"
     assert create[create.index("--network") + 1] == "none"
-    assert "--read-only" not in create
+    assert "--read-only" in create
     mount = create[create.index("--mount") + 1]
     assert mount == f"type=volume,src={volume_name},dst=/workspace,volume-nocopy"
     assert "type=bind" not in mount
