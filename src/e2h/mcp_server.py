@@ -21,23 +21,38 @@ from e2h.bound_runner import handle_bound_local_replay_supported, run_capsule_bo
 from e2h.directory_binding import DirectoryBindingError, bound_absolute_directory
 from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
+from e2h.isolated_runner import (
+    isolated_container_replay_supported,
+    run_capsule_isolated_container,
+)
 from e2h.loader import CapsuleLoadError, load_capsule
 from e2h.runner import ExecutionBackend, RunnerError
 from e2h.snapshot import SnapshotError, verify_snapshot_with_archive_sha256
 from e2h.store import StoreError, query_store_with_info
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
 from e2h.store_snapshot import StoreSnapshotError, stable_store_snapshot
+from e2h.workspace_snapshot import WorkspaceSnapshotError
 
 _DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
+_DEFAULT_MAX_REPLAY_WORKSPACE_BYTES = 100 * 1024 * 1024
+_DEFAULT_MAX_REPLAY_WORKSPACE_ENTRIES = 10_000
 _READ_CHUNK_BYTES = 1024 * 1024
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _MCP_CONTAINER_REPLAY_UNAVAILABLE = (
-    "MCP container replay is unavailable until workspace execution can be bound to a stable "
-    "directory identity"
+    "MCP isolated container replay is unavailable because this host does not support the "
+    "required descriptor-bound workspace snapshot path"
+)
+_MCP_CONTAINER_REPLAY_WRITABLE_UNAVAILABLE = (
+    "MCP isolated container replay requires sandbox.workspace_access='read_only' because "
+    "writable private workspace growth is not bounded"
 )
 _MCP_LOCAL_REPLAY_UNAVAILABLE = (
     "MCP local replay is unavailable because this host does not support the required "
     "handle-bound Linux procfs execution path"
+)
+_MCP_REPLAY_UNAVAILABLE = (
+    "MCP replay is unavailable because this host supports neither handle-bound local replay "
+    "nor isolated container workspace capture"
 )
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
@@ -271,6 +286,8 @@ class MCPServerConfig:
     expose_replay_output: bool = False
     max_artifact_bytes: int = _DEFAULT_MAX_ARTIFACT_BYTES
     max_memory_rows: int = 1000
+    max_replay_workspace_bytes: int = _DEFAULT_MAX_REPLAY_WORKSPACE_BYTES
+    max_replay_workspace_entries: int = _DEFAULT_MAX_REPLAY_WORKSPACE_ENTRIES
 
 
 class MCPStatus(StrictModel):
@@ -283,6 +300,8 @@ class MCPStatus(StrictModel):
     replay_output_exposed: bool
     max_artifact_bytes: int = Field(ge=1)
     max_memory_rows: int = Field(ge=1, le=MAX_QUERY_ROWS)
+    max_replay_workspace_bytes: int = Field(ge=1)
+    max_replay_workspace_entries: int = Field(ge=1)
 
 
 class VerifiedMemoryResult(StrictModel):
@@ -342,6 +361,9 @@ class ReplayVerification(StrictModel):
     replay_sha256: str = Field(pattern=_SHA256_PATTERN)
     status: str
     duration_seconds: float = Field(ge=0)
+    execution_backend: str
+    workspace_mode: str
+    workspace_mutations_persisted: bool
     checks: list[ReplayCheck]
     failure_summary: dict[str, Any]
     output_exposed: bool
@@ -358,14 +380,23 @@ class E2HMCPService:
             raise MCPServiceError("max_artifact_bytes must be positive")
         if not 1 <= config.max_memory_rows <= MAX_QUERY_ROWS:
             raise MCPServiceError(f"max_memory_rows must be between 1 and {MAX_QUERY_ROWS}")
+        if config.max_replay_workspace_bytes < 1:
+            raise MCPServiceError("max_replay_workspace_bytes must be positive")
+        if config.max_replay_workspace_entries < 1:
+            raise MCPServiceError("max_replay_workspace_entries must be positive")
         try:
             backend = ExecutionBackend(config.replay_backend)
         except ValueError as exc:
             raise MCPServiceError(f"unknown replay backend: {config.replay_backend}") from exc
-        if config.allow_replay and backend is ExecutionBackend.CONTAINER:
-            raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
-        if config.allow_replay and not handle_bound_local_replay_supported():
-            raise MCPServiceError(_MCP_LOCAL_REPLAY_UNAVAILABLE)
+        if config.allow_replay:
+            local_supported = handle_bound_local_replay_supported()
+            container_supported = isolated_container_replay_supported()
+            if backend is ExecutionBackend.LOCAL and not local_supported:
+                raise MCPServiceError(_MCP_LOCAL_REPLAY_UNAVAILABLE)
+            if backend is ExecutionBackend.CONTAINER and not container_supported:
+                raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
+            if backend is ExecutionBackend.AUTO and not (local_supported or container_supported):
+                raise MCPServiceError(_MCP_REPLAY_UNAVAILABLE)
 
         store: Path | None = None
         if config.store is not None:
@@ -393,6 +424,8 @@ class E2HMCPService:
             replay_output_exposed=self.config.expose_replay_output,
             max_artifact_bytes=self.config.max_artifact_bytes,
             max_memory_rows=self.config.max_memory_rows,
+            max_replay_workspace_bytes=self.config.max_replay_workspace_bytes,
+            max_replay_workspace_entries=self.config.max_replay_workspace_entries,
         )
 
     def memory_query(self, view: QueryView, *, limit: int = 100) -> VerifiedMemoryResult:
@@ -530,19 +563,51 @@ class E2HMCPService:
                     else ExecutionBackend.LOCAL
                 )
             if selected_backend is ExecutionBackend.CONTAINER:
-                raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
-            with bound_absolute_directory(workspace_path) as workspace_descriptor:
-                result = run_capsule_bound_local(
+                if not isolated_container_replay_supported():
+                    raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
+                if loaded.sandbox is None:
+                    raise MCPServiceError("MCP container replay requires capsule.sandbox")
+                if loaded.sandbox.workspace_access != "read_only":
+                    raise MCPServiceError(_MCP_CONTAINER_REPLAY_WRITABLE_UNAVAILABLE)
+                result = run_capsule_isolated_container(
                     loaded,
                     workspace_path,
-                    workspace_descriptor=workspace_descriptor,
+                    max_workspace_bytes=self.config.max_replay_workspace_bytes,
+                    max_workspace_entries=self.config.max_replay_workspace_entries,
+                    container_runtime=self.config.container_runtime,
                 )
-        except (CapsuleLoadError, DirectoryBindingError, RunnerError) as exc:
+                execution_backend = ExecutionBackend.CONTAINER.value
+                workspace_mode = "isolated_copy"
+                workspace_mutations_persisted = False
+            else:
+                if not handle_bound_local_replay_supported():
+                    raise MCPServiceError(_MCP_LOCAL_REPLAY_UNAVAILABLE)
+                with bound_absolute_directory(workspace_path) as workspace_descriptor:
+                    result = run_capsule_bound_local(
+                        loaded,
+                        workspace_path,
+                        workspace_descriptor=workspace_descriptor,
+                    )
+                execution_backend = ExecutionBackend.LOCAL.value
+                workspace_mode = "bound_local"
+                workspace_mutations_persisted = True
+        except (
+            CapsuleLoadError,
+            DirectoryBindingError,
+            RunnerError,
+            WorkspaceSnapshotError,
+        ) as exc:
             raise MCPServiceError(
                 _redact_operation_error(str(exc), self.config.root)
             ) from exc
 
         raw_result = result.model_dump(mode="json")
+        replay_material = {
+            "execution_backend": execution_backend,
+            "workspace_mode": workspace_mode,
+            "workspace_mutations_persisted": workspace_mutations_persisted,
+            "result": raw_result,
+        }
         checks = [
             ReplayCheck(
                 id=check.id,
@@ -567,9 +632,12 @@ class E2HMCPService:
         return ReplayVerification(
             capsule_id=result.capsule_id,
             capsule_sha256=capsule_sha256(loaded),
-            replay_sha256=_digest_json(raw_result),
+            replay_sha256=_digest_json(replay_material),
             status=result.status.value,
             duration_seconds=result.duration_seconds,
+            execution_backend=execution_backend,
+            workspace_mode=workspace_mode,
+            workspace_mutations_persisted=workspace_mutations_persisted,
             checks=checks,
             failure_summary=result.failure_summary.model_dump(mode="json"),
             output_exposed=self.config.expose_replay_output,
@@ -650,12 +718,15 @@ def _parser() -> argparse.ArgumentParser:
         "--backend",
         choices=[item.value for item in ExecutionBackend],
         default=ExecutionBackend.AUTO.value,
-        help="Replay backend; container replay is currently unavailable over MCP.",
+        help=(
+            "Replay backend; local uses handle-bound execution and container uses a bounded "
+            "read-only isolated workspace copy."
+        ),
     )
     parser.add_argument(
         "--container-runtime",
         default=None,
-        help="Container runtime override reserved for future MCP container replay.",
+        help="Container runtime override for isolated container replay.",
     )
     parser.add_argument(
         "--expose-replay-output",
@@ -674,6 +745,18 @@ def _parser() -> argparse.ArgumentParser:
         default=1000,
         help=f"Maximum rows returned by one memory query (hard limit {MAX_QUERY_ROWS}).",
     )
+    parser.add_argument(
+        "--max-replay-workspace-bytes",
+        type=int,
+        default=_DEFAULT_MAX_REPLAY_WORKSPACE_BYTES,
+        help="Maximum bytes copied into one isolated container replay workspace.",
+    )
+    parser.add_argument(
+        "--max-replay-workspace-entries",
+        type=int,
+        default=_DEFAULT_MAX_REPLAY_WORKSPACE_ENTRIES,
+        help="Maximum filesystem entries copied into one isolated container replay workspace.",
+    )
     return parser
 
 
@@ -691,6 +774,8 @@ def main() -> None:
                 expose_replay_output=args.expose_replay_output,
                 max_artifact_bytes=args.max_artifact_bytes,
                 max_memory_rows=args.max_memory_rows,
+                max_replay_workspace_bytes=args.max_replay_workspace_bytes,
+                max_replay_workspace_entries=args.max_replay_workspace_entries,
             )
         )
     except MCPServiceError as exc:
