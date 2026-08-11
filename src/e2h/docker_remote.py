@@ -309,7 +309,9 @@ def prepared_workspace_volume(
             error = _best_effort_docker(runtime, ["volume", "rm", "-f", volume_name])
             if error is not None:
                 cleanup_errors.append(error)
-        if primary_error is None and cleanup_errors:
-            raise DockerRemoteError(
-                "Docker workspace cleanup failed: " + "; ".join(cleanup_errors)
-            )
+        if cleanup_errors:
+            cleanup_message = "Docker workspace cleanup failed: " + "; ".join(cleanup_errors)
+            if primary_error is not None:
+                primary_error.add_note(cleanup_message)
+            else:
+                raise DockerRemoteError(cleanup_message)
