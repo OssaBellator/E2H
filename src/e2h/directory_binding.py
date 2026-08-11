@@ -21,6 +21,11 @@ class DirectoryBindingError(RuntimeError):
     """Raised when a replay directory cannot be bound safely by handle."""
 
 
+def directory_binding_supported() -> bool:
+    """Return whether this host exposes the required directory-binding primitives."""
+    return _DIRECTORY_BINDING_SUPPORTED
+
+
 def _directory_identity(info: os.stat_result) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 

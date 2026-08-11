@@ -17,7 +17,7 @@ from typing import Any
 from mcp.server import MCPServer
 from pydantic import BaseModel, ConfigDict, Field
 
-from e2h.bound_runner import run_capsule_bound_local
+from e2h.bound_runner import handle_bound_local_replay_supported, run_capsule_bound_local
 from e2h.directory_binding import DirectoryBindingError, bound_absolute_directory
 from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
@@ -34,6 +34,10 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _MCP_CONTAINER_REPLAY_UNAVAILABLE = (
     "MCP container replay is unavailable until workspace execution can be bound to a stable "
     "directory identity"
+)
+_MCP_LOCAL_REPLAY_UNAVAILABLE = (
+    "MCP local replay is unavailable because this host does not support the required "
+    "handle-bound Linux procfs execution path"
 )
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
@@ -360,6 +364,8 @@ class E2HMCPService:
             raise MCPServiceError(f"unknown replay backend: {config.replay_backend}") from exc
         if config.allow_replay and backend is ExecutionBackend.CONTAINER:
             raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
+        if config.allow_replay and not handle_bound_local_replay_supported():
+            raise MCPServiceError(_MCP_LOCAL_REPLAY_UNAVAILABLE)
 
         store: Path | None = None
         if config.store is not None:
