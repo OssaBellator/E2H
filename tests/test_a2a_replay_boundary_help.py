@@ -16,18 +16,19 @@ def test_public_error_does_not_mangle_filesystem_root() -> None:
     assert _public_error(message, root="/") == message
 
 
-def test_a2a_help_describes_remote_container_fail_closed_boundary() -> None:
+def test_a2a_help_describes_local_and_isolated_container_replay() -> None:
     help_text = _parser().format_help()
 
-    assert "container replay is currently unavailable over A2A" in help_text
-    assert "command-executing local replay" in help_text
+    assert "read-only isolated workspace copy" in help_text
+    assert "command-executing replay" in help_text
+    assert "currently unavailable" not in help_text
 
 
 @pytest.mark.skipif(
     not handle_bound_local_replay_supported(),
-    reason="replay skill is advertised only on supported handle-bound local hosts",
+    reason="local replay skill check requires supported handle-bound local host",
 )
-def test_replay_skill_advertises_local_handle_bound_execution(tmp_path: Path) -> None:
+def test_replay_skill_advertises_local_and_isolated_execution(tmp_path: Path) -> None:
     service = E2HMCPService(
         MCPServerConfig(
             root=tmp_path,
@@ -40,3 +41,4 @@ def test_replay_skill_advertises_local_handle_bound_execution(tmp_path: Path) ->
     replay = next(skill for skill in card.skills if skill.id == "e2h_replay")
 
     assert "handle-bound local replay" in replay.description
+    assert "read-only isolated container workspace" in replay.description
