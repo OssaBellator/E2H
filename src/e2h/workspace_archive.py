@@ -122,6 +122,25 @@ def _stat_entry(parent_descriptor: int, name: str) -> os.stat_result:
         ) from exc
 
 
+def _capture_directory_names(
+    descriptor: int,
+    state: _ArchiveState,
+) -> list[str]:
+    names: list[str] = []
+    try:
+        with os.scandir(descriptor) as entries:
+            for entry in entries:
+                state.add_entry()
+                names.append(entry.name)
+    except WorkspaceArchiveError:
+        raise
+    except (OSError, TypeError) as exc:
+        raise WorkspaceArchiveError(
+            f"unable to list replay workspace directory: {exc}"
+        ) from exc
+    return sorted(names)
+
+
 def _list_directory(
     descriptor: int,
     *,
@@ -132,9 +151,9 @@ def _list_directory(
     try:
         with os.scandir(descriptor) as entries:
             for entry in entries:
-                names.append(entry.name)
-                if len(names) > max_names:
+                if len(names) >= max_names:
                     raise WorkspaceArchiveError(overflow_message)
+                names.append(entry.name)
     except WorkspaceArchiveError:
         raise
     except (OSError, TypeError) as exc:
@@ -323,16 +342,9 @@ def _add_directory(
     state: _ArchiveState,
     directories: set[str],
 ) -> None:
-    names = _list_directory(
-        source_descriptor,
-        max_names=state.max_entries - state.entries_copied,
-        overflow_message=(
-            f"replay workspace exceeds configured max entries ({state.max_entries})"
-        ),
-    )
+    names = _capture_directory_names(source_descriptor, state)
     expected: dict[str, os.stat_result] = {}
     for name in names:
-        state.add_entry()
         info = _stat_entry(source_descriptor, name)
         expected[name] = info
         child_relative = relative / name if str(relative) != "." else PurePosixPath(name)
