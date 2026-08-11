@@ -15,8 +15,9 @@ def isolated_workspace_snapshot_supported() -> bool:
     return (
         directory_binding_supported()
         and os.stat in os.supports_dir_fd
+        and os.stat in os.supports_follow_symlinks
         and os.readlink in os.supports_dir_fd
-        and os.listdir in os.supports_fd
+        and os.scandir in os.supports_fd
     )
 
 
