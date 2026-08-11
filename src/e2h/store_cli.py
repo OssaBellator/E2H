@@ -141,12 +141,12 @@ def export_store_command(
 
 @store_app.command("info")
 def store_info_command(
-    database: Annotated[Path, typer.Argument(dir_okay=False)],
+    database: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     json_stdout: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Show store schema and row counts."""
+    """Show store schema and row counts without mutating the store."""
     try:
-        info = store_info(database)
+        info = store_info(database, read_only=True)
     except StoreError as exc:
         error_console.print(f"[red]Unable to inspect store:[/red] {exc}")
         raise typer.Exit(code=2) from exc
