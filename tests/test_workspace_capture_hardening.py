@@ -52,12 +52,10 @@ def test_workspace_archive_stops_directory_scan_at_entry_bound(
 ) -> None:
     with monkeypatch.context() as scoped:
         scoped.setattr(workspace_archive.os, "scandir", lambda _descriptor: _BoundedScanner())
-        with pytest.raises(WorkspaceArchiveError, match="bounded entry scan"):
-            workspace_archive._list_directory(
-                123,
-                max_names=1,
-                overflow_message="bounded entry scan",
-            )
+        state = workspace_archive._ArchiveState(max_bytes=1024, max_entries=1)
+        with pytest.raises(WorkspaceArchiveError, match=r"max entries \(1\)"):
+            workspace_archive._capture_directory_names(123, state)
+        assert state.entries_copied == 2
 
 
 def test_workspace_archive_rejects_membership_change_with_restored_mtime(
