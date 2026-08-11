@@ -113,7 +113,9 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
     if "." not in directories:
         raise RunnerError("sealed workspace archive is missing its root directory")
     if frozenset(directories) != archive.directories:
-        raise RunnerError("sealed workspace archive directory metadata does not match archive bytes")
+        raise RunnerError(
+            "sealed workspace archive directory metadata does not match archive bytes"
+        )
     return _WorkspaceTree(
         directories=frozenset(directories),
         symlinks=tuple(sorted(symlinks.items())),
@@ -155,7 +157,9 @@ def _resolve_directory(tree: _WorkspaceTree, base: str, relative: str) -> str | 
         if target is not None:
             followed += 1
             if followed > _MAX_CWD_SYMLINK_RESOLUTIONS:
-                raise RunnerError("sealed workspace archive contains a working-directory symlink loop")
+                raise RunnerError(
+                    "sealed workspace archive contains a working-directory symlink loop"
+                )
             target_parts = list(PurePosixPath(target).parts)
             pending.extendleft(reversed(target_parts))
             continue
