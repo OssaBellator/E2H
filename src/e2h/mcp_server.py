@@ -22,7 +22,7 @@ from e2h.directory_binding import DirectoryBindingError, bound_absolute_director
 from e2h.document import _validate_json_compatible
 from e2h.genome import capsule_sha256
 from e2h.loader import CapsuleLoadError, load_capsule
-from e2h.runner import ExecutionBackend, RunnerError, run_capsule
+from e2h.runner import ExecutionBackend, RunnerError
 from e2h.snapshot import SnapshotError, verify_snapshot_with_archive_sha256
 from e2h.store import StoreError, query_store_with_info
 from e2h.store_models import MAX_QUERY_ROWS, QueryView
@@ -31,6 +31,10 @@ from e2h.store_snapshot import StoreSnapshotError, stable_store_snapshot
 _DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_MCP_CONTAINER_REPLAY_UNAVAILABLE = (
+    "MCP container replay is unavailable until workspace execution can be bound to a stable "
+    "directory identity"
+)
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 _ARTIFACT_DIR_FD_SUPPORTED = _OPEN_SUPPORTS_DIR_FD and _STAT_SUPPORTS_DIR_FD
@@ -345,6 +349,8 @@ class E2HMCPService:
             backend = ExecutionBackend(config.replay_backend)
         except ValueError as exc:
             raise MCPServiceError(f"unknown replay backend: {config.replay_backend}") from exc
+        if config.allow_replay and backend is ExecutionBackend.CONTAINER:
+            raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
 
         store: Path | None = None
         if config.store is not None:
@@ -499,19 +505,13 @@ class E2HMCPService:
                     if loaded.sandbox is not None
                     else ExecutionBackend.LOCAL
                 )
-            if selected_backend is ExecutionBackend.LOCAL:
-                with bound_absolute_directory(workspace_path) as workspace_descriptor:
-                    result = run_capsule_bound_local(
-                        loaded,
-                        workspace_path,
-                        workspace_descriptor=workspace_descriptor,
-                    )
-            else:
-                result = run_capsule(
+            if selected_backend is ExecutionBackend.CONTAINER:
+                raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
+            with bound_absolute_directory(workspace_path) as workspace_descriptor:
+                result = run_capsule_bound_local(
                     loaded,
                     workspace_path,
-                    backend=selected_backend,
-                    container_runtime=self.config.container_runtime,
+                    workspace_descriptor=workspace_descriptor,
                 )
         except (CapsuleLoadError, DirectoryBindingError, RunnerError) as exc:
             raise MCPServiceError(str(exc)) from exc
@@ -624,12 +624,12 @@ def _parser() -> argparse.ArgumentParser:
         "--backend",
         choices=[item.value for item in ExecutionBackend],
         default=ExecutionBackend.AUTO.value,
-        help="Operator-selected replay backend when --allow-replay is enabled.",
+        help="Replay backend; container replay is currently unavailable over MCP.",
     )
     parser.add_argument(
         "--container-runtime",
         default=None,
-        help="Container runtime binary override for replay. Never exposed as a tool argument.",
+        help="Container runtime override reserved for future MCP container replay.",
     )
     parser.add_argument(
         "--expose-replay-output",
