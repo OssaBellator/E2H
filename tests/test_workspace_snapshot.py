@@ -11,10 +11,11 @@ import e2h.workspace_snapshot as workspace_snapshot
 from e2h.workspace_snapshot import WorkspaceSnapshotError, stable_workspace_snapshot
 
 
-def test_workspace_snapshot_copies_nested_files_modes_and_safe_symlinks(tmp_path: Path) -> None:
+def test_workspace_snapshot_copies_files_modes_and_safe_symlinks(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     nested = workspace / "task"
     nested.mkdir(parents=True)
+    workspace.chmod(0o751)
     shared = workspace / "shared.txt"
     shared.write_text("shared", encoding="utf-8")
     script = nested / "run.sh"
@@ -26,12 +27,19 @@ def test_workspace_snapshot_copies_nested_files_modes_and_safe_symlinks(tmp_path
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable: {exc}")
 
-    with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=10) as private:
+    with stable_workspace_snapshot(
+        workspace.resolve(),
+        max_bytes=1024,
+        max_entries=10,
+    ) as private:
+        assert stat.S_IMODE(private.stat().st_mode) == 0o751
         assert (private / "shared.txt").read_text(encoding="utf-8") == "shared"
-        assert (private / "task" / "run.sh").read_text(encoding="utf-8").startswith("#!/bin/sh")
-        assert stat.S_IMODE((private / "task" / "run.sh").stat().st_mode) == 0o755
-        assert (private / "task" / "shared-link").is_symlink()
-        assert (private / "task" / "shared-link").read_text(encoding="utf-8") == "shared"
+        script_copy = private / "task" / "run.sh"
+        assert script_copy.read_text(encoding="utf-8").startswith("#!/bin/sh")
+        assert stat.S_IMODE(script_copy.stat().st_mode) == 0o755
+        link_copy = private / "task" / "shared-link"
+        assert link_copy.is_symlink()
+        assert link_copy.read_text(encoding="utf-8") == "shared"
 
 
 def test_workspace_snapshot_rejects_absolute_symlink(tmp_path: Path) -> None:
@@ -44,7 +52,11 @@ def test_workspace_snapshot_rejects_absolute_symlink(tmp_path: Path) -> None:
         pytest.skip(f"symlinks unavailable: {exc}")
 
     with pytest.raises(WorkspaceSnapshotError, match="symlink target must be relative"):
-        with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=10):
+        with stable_workspace_snapshot(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=10,
+        ):
             raise AssertionError("absolute symlink should not be copied")
 
 
@@ -58,7 +70,11 @@ def test_workspace_snapshot_rejects_relative_symlink_escape(tmp_path: Path) -> N
         pytest.skip(f"symlinks unavailable: {exc}")
 
     with pytest.raises(WorkspaceSnapshotError, match="symlink escapes isolated root"):
-        with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=10):
+        with stable_workspace_snapshot(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=10,
+        ):
             raise AssertionError("escaping symlink should not be copied")
 
 
@@ -67,8 +83,12 @@ def test_workspace_snapshot_enforces_byte_limit(tmp_path: Path) -> None:
     workspace.mkdir()
     (workspace / "data.bin").write_bytes(b"12345")
 
-    with pytest.raises(WorkspaceSnapshotError, match="max bytes \(4\)"):
-        with stable_workspace_snapshot(workspace.resolve(), max_bytes=4, max_entries=10):
+    with pytest.raises(WorkspaceSnapshotError, match=r"max bytes \(4\)"):
+        with stable_workspace_snapshot(
+            workspace.resolve(),
+            max_bytes=4,
+            max_entries=10,
+        ):
             raise AssertionError("oversized workspace should not be copied")
 
 
@@ -78,8 +98,12 @@ def test_workspace_snapshot_enforces_entry_limit(tmp_path: Path) -> None:
     (workspace / "a").write_text("a", encoding="utf-8")
     (workspace / "b").write_text("b", encoding="utf-8")
 
-    with pytest.raises(WorkspaceSnapshotError, match="max entries \(1\)"):
-        with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=1):
+    with pytest.raises(WorkspaceSnapshotError, match=r"max entries \(1\)"):
+        with stable_workspace_snapshot(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=1,
+        ):
             raise AssertionError("workspace with too many entries should not be copied")
 
 
@@ -93,7 +117,11 @@ def test_workspace_snapshot_rejects_special_files(tmp_path: Path) -> None:
         pytest.skip(f"FIFO creation unavailable: {exc}")
 
     with pytest.raises(WorkspaceSnapshotError, match="unsupported file type"):
-        with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=10):
+        with stable_workspace_snapshot(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=10,
+        ):
             raise AssertionError("special file should not be copied")
 
 
@@ -122,7 +150,11 @@ def test_workspace_snapshot_rejects_file_replacement_during_open(
     monkeypatch.setattr(workspace_snapshot.os, "open", swapping_open)
 
     with pytest.raises(WorkspaceSnapshotError, match="changed while opening"):
-        with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=10):
+        with stable_workspace_snapshot(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=10,
+        ):
             raise AssertionError("replaced source file should not be copied")
 
     assert swapped is True
@@ -155,7 +187,11 @@ def test_workspace_snapshot_stays_on_bound_root_after_path_rebinding(
 
     monkeypatch.setattr(workspace_snapshot, "_copy_directory", rebinding_copy)
 
-    with stable_workspace_snapshot(workspace.resolve(), max_bytes=1024, max_entries=10) as private:
+    with stable_workspace_snapshot(
+        workspace.resolve(),
+        max_bytes=1024,
+        max_entries=10,
+    ) as private:
         assert (private / "marker.txt").read_text(encoding="utf-8") == "inside"
 
     assert swapped is True
