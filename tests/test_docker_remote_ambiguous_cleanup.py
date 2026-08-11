@@ -124,3 +124,17 @@ def test_primary_failure_retains_cleanup_failure_as_exception_note(
     assert caught.value.__notes__ == [
         "Docker workspace cleanup failed: volume cleanup failed"
     ]
+
+
+def test_run_docker_wraps_stdin_rewind_failure() -> None:
+    class BrokenStdin:
+        def seek(self, offset: int) -> int:
+            del offset
+            raise OSError("injected rewind failure")
+
+    with pytest.raises(DockerRemoteError, match="injected rewind failure"):
+        docker_remote._run_docker(
+            "docker",
+            ["cp"],
+            stdin=BrokenStdin(),  # type: ignore[arg-type]
+        )
