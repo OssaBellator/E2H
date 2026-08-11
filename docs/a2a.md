@@ -124,13 +124,15 @@ A replay request is then:
 
 The remote A2A caller cannot select the execution backend, container-runtime binary, or isolated workspace limits. Those remain operator-side server settings. Replay output is digest-only by default; bounded stdout/stderr is included only when the operator also starts the server with `--expose-replay-output`.
 
-A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist. Container replay first captures the requested workspace through descriptor-bound filesystem operations into a private temporary tree, then gives only that private path to the container runtime. The private tree is discarded after replay, so container mutations do not write back to the caller workspace.
+A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist. Container replay first captures the requested workspace through descriptor-bound filesystem operations into a private temporary tree, then gives only that private path to the container runtime. The private tree is mounted read-only and discarded after replay, so container checks cannot write back to the caller workspace.
 
-Remote container replay accepts only capsules whose `sandbox.workspace_access` is `read_only`. The input snapshot is bounded by operator-selected byte and entry limits, but a writable bind mount could grow without bound after capture and consume host disk. A2A therefore fails closed for writable remote container workspaces until E2H has a quota-backed writable workspace primitive. The defaults are 100 MiB and 10,000 filesystem entries, configurable with `--max-replay-workspace-bytes` and `--max-replay-workspace-entries`.
+Remote container replay is intentionally stricter than the direct container runner. It requires `sandbox.workspace_access: read_only`, `sandbox.read_only_root: true`, and `sandbox.pull_policy: never`. This prevents remote replays from expanding the private workspace, growing the container writable layer, or triggering a new image download into host runtime storage. Container invocations also use `--log-driver none`, while attached stdout/stderr continues through E2H's bounded capture rather than a separate daemon log file.
+
+The isolated input snapshot is bounded by operator-selected byte and entry limits. The defaults are 100 MiB and 10,000 filesystem entries, configurable with `--max-replay-workspace-bytes` and `--max-replay-workspace-entries`. Hosts that lack the required descriptor-relative filesystem primitives fail closed for isolated container replay.
 
 Replay results explicitly report `execution_backend`, `workspace_mode`, and `workspace_mutations_persisted`. The replay digest binds those semantics together with the full E2H `RunResult`, so persistent local execution and discarded isolated execution cannot share a replay digest merely because command outputs happen to match.
 
-Enabling remote replay is not equivalent to a universal sandbox guarantee. Local replay executes commands directly on the A2A host. Container replay applies the capsule's container sandbox policy plus the read-only isolated workspace boundary. Only enable replay for capsules and container images the operator is prepared to execute.
+Enabling remote replay is not equivalent to a universal sandbox guarantee. Local replay executes commands directly on the A2A host. Container replay applies the capsule's container sandbox policy plus the stricter remote isolation rules above. Only enable replay for capsules and container images the operator is prepared to execute.
 
 ## Trust boundary
 
@@ -143,7 +145,8 @@ The A2A layer reuses the same root-bounded verification service as the MCP integ
 - replay is absent unless operator-enabled;
 - supported local replay binds the workspace/check directory identities before process launch;
 - supported container replay captures a bounded descriptor-bound private copy and mounts it read-only;
-- writable remote container workspaces fail closed instead of exposing unbounded private-copy growth;
+- writable remote workspaces, writable container roots, and runtime image pulls fail closed;
+- container daemon log persistence is disabled while E2H retains bounded attached output;
 - the A2A response size is bounded to prevent large verification results from being copied automatically into another agent's context;
 - local absolute root paths are scrubbed from expected verification errors before they are returned to a remote agent.
 
