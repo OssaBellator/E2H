@@ -103,6 +103,14 @@ def _connection(
         raise StoreError(f"unable to open experiment store: {exc}") from exc
 
 
+def _rollback_best_effort(connection: duckdb.DuckDBPyConnection) -> None:
+    """Attempt transaction rollback without replacing the primary DuckDB failure."""
+    try:
+        connection.execute("ROLLBACK")
+    except duckdb.Error:
+        pass
+
+
 def _scalar_int(connection: duckdb.DuckDBPyConnection, sql: str) -> int:
     rows = connection.execute(sql).fetchall()
     if len(rows) != 1:
@@ -228,7 +236,7 @@ def ingest_artifact(
                 )
             connection.execute("COMMIT")
         except duckdb.Error:
-            connection.execute("ROLLBACK")
+            _rollback_best_effort(connection)
             raise
         return IngestResult(
             source_sha256=source_sha256,
@@ -314,7 +322,7 @@ def query_store_with_info(
                 ]
             connection.execute("COMMIT")
         except duckdb.Error:
-            connection.execute("ROLLBACK")
+            _rollback_best_effort(connection)
             raise
         return info, rows
     except duckdb.Error as exc:
