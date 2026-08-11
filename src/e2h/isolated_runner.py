@@ -16,6 +16,9 @@ from e2h.workspace_archive import (
     stable_workspace_archive,
 )
 
+# Source bytes can appear once as file/link payload and again as PAX string metadata.
+# The per-entry allowance covers the 4096-byte capture path cap plus tar/PAX headers
+# and block padding; the fixed allowance covers the root member and archive trailer.
 _REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES = 16 * 1024
 _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
 
