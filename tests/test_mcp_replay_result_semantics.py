@@ -38,6 +38,12 @@ def _result() -> RunResult:
     )
 
 
+@contextmanager
+def _fake_bind(path: Path, expected: Path) -> Iterator[int]:
+    assert path == expected.resolve()
+    yield 73
+
+
 def test_local_replay_reports_persistent_bound_workspace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -48,8 +54,8 @@ def test_local_replay_reports_persistent_bound_workspace(
 
     @contextmanager
     def fake_bind(path: Path) -> Iterator[int]:
-        assert path == tmp_path.resolve()
-        yield 73
+        with _fake_bind(path, tmp_path) as descriptor:
+            yield descriptor
 
     monkeypatch.setattr(mcp_server, "bound_absolute_directory", fake_bind)
     monkeypatch.setattr(mcp_server, "run_capsule_bound_local", lambda *args, **kwargs: _result())
@@ -93,3 +99,52 @@ def test_container_replay_reports_discarded_isolated_workspace(
     assert result.execution_backend == "container"
     assert result.workspace_mode == "isolated_copy"
     assert result.workspace_mutations_persisted is False
+
+
+def test_replay_digest_binds_workspace_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local_capsule = tmp_path / "local.json"
+    container_capsule = tmp_path / "container.json"
+    _capsule(local_capsule, sandbox=False)
+    _capsule(container_capsule, sandbox=True)
+    monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: True)
+    monkeypatch.setattr(mcp_server, "isolated_container_replay_supported", lambda: True)
+
+    @contextmanager
+    def fake_bind(path: Path) -> Iterator[int]:
+        with _fake_bind(path, tmp_path) as descriptor:
+            yield descriptor
+
+    shared_result = _result()
+    monkeypatch.setattr(mcp_server, "bound_absolute_directory", fake_bind)
+    monkeypatch.setattr(
+        mcp_server,
+        "run_capsule_bound_local",
+        lambda *args, **kwargs: shared_result,
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "run_capsule_isolated_container",
+        lambda *args, **kwargs: shared_result,
+    )
+    local = E2HMCPService(
+        MCPServerConfig(
+            root=tmp_path,
+            allow_replay=True,
+            replay_backend=ExecutionBackend.LOCAL,
+        )
+    )
+    container = E2HMCPService(
+        MCPServerConfig(
+            root=tmp_path,
+            allow_replay=True,
+            replay_backend=ExecutionBackend.CONTAINER,
+        )
+    )
+
+    local_result = local.replay(local_capsule.name)
+    container_result = container.replay(container_capsule.name)
+
+    assert local_result.replay_sha256 != container_result.replay_sha256
