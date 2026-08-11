@@ -249,6 +249,8 @@ def prepared_workspace_volume(
             [
                 "volume",
                 "create",
+                "--driver",
+                "local",
                 "--label",
                 "e2h.remote-replay=workspace",
                 volume_name,
