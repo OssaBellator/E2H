@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - imported only on non-POSIX platforms
+    fcntl = None  # type: ignore[assignment]
 
 from e2h.models import ContainerSandbox
 from e2h.workspace_archive import WorkspaceArchive
@@ -66,6 +72,39 @@ def _validated_remote_sandbox(sandbox: ContainerSandbox) -> ContainerSandbox:
     if validated.pull_policy != "never":
         raise DockerRemoteError("remote Docker replay requires pull_policy='never'")
     return validated
+
+
+def _required_archive_seals() -> int:
+    if fcntl is None:
+        raise DockerRemoteError("sealed workspace archives require Linux file seals")
+    names = ("F_SEAL_WRITE", "F_SEAL_GROW", "F_SEAL_SHRINK", "F_SEAL_SEAL")
+    values = [getattr(fcntl, name, None) for name in names]
+    if any(value is None for value in values):
+        raise DockerRemoteError("sealed workspace archives require Linux file seals")
+    return sum(int(value) for value in values if value is not None)
+
+
+def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
+    if type(archive) is not WorkspaceArchive:
+        raise DockerRemoteError(
+            f"invalid workspace archive: expected WorkspaceArchive, got {type(archive).__name__}"
+        )
+    if archive.source_bytes < 0 or archive.entries < 0 or archive.archive_bytes < 1:
+        raise DockerRemoteError("workspace archive metadata is invalid")
+    required = _required_archive_seals()
+    if fcntl is None or not hasattr(fcntl, "F_GET_SEALS"):
+        raise DockerRemoteError("sealed workspace archives require Linux file seals")
+    try:
+        descriptor = archive.file.fileno()
+        observed = fcntl.fcntl(descriptor, fcntl.F_GET_SEALS)
+        current_size = os.fstat(descriptor).st_size
+    except (OSError, ValueError) as exc:
+        raise DockerRemoteError(f"unable to verify sealed workspace archive: {exc}") from exc
+    if observed & required != required:
+        raise DockerRemoteError("workspace archive is not sealed against mutation")
+    if current_size != archive.archive_bytes:
+        raise DockerRemoteError("workspace archive size does not match captured metadata")
+    return archive
 
 
 def _render_error(value: bytes) -> str:
@@ -186,6 +225,7 @@ def prepared_workspace_volume(
     """Populate one fresh Docker-managed volume from a sealed workspace archive."""
     runtime = _validated_runtime_binary(runtime_binary)
     policy = _validated_remote_sandbox(sandbox)
+    verified_archive = _validated_workspace_archive(archive)
     require_patched_docker_archive(runtime)
 
     volume_name = _resource_name("workspace")
@@ -209,9 +249,7 @@ def prepared_workspace_volume(
         if created_volume != volume_name:
             raise DockerRemoteError("Docker created an unexpected workspace volume")
 
-        mount = (
-            f"type=volume,src={volume_name},dst={_WORKSPACE_ROOT},volume-nocopy"
-        )
+        mount = f"type=volume,src={volume_name},dst={_WORKSPACE_ROOT},volume-nocopy"
         created_container = _run_docker(
             runtime,
             [
@@ -222,7 +260,6 @@ def prepared_workspace_volume(
                 "never",
                 "--network",
                 "none",
-                "--read-only",
                 "--cap-drop",
                 "ALL",
                 "--security-opt",
@@ -250,7 +287,7 @@ def prepared_workspace_volume(
                 "-",
                 f"{container_name}:{_WORKSPACE_ROOT}",
             ],
-            stdin=archive.file,
+            stdin=verified_archive.file,
         )
 
         _run_docker(runtime, ["rm", "-f", container_name])
