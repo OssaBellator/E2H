@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 import stat
 import sys
 import tarfile
@@ -51,7 +50,6 @@ class WorkspaceArchive:
     """One sealed anonymous tar stream plus captured workspace metadata."""
 
     file: BinaryIO
-    root_name: str
     directories: frozenset[str]
     source_bytes: int
     entries: int
@@ -143,20 +141,17 @@ def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
             stack.append(part)
 
 
-def _archive_name(root_name: str, relative: PurePosixPath) -> str:
-    if str(relative) == ".":
-        return root_name
-    return f"{root_name}/{relative.as_posix()}"
+def _archive_name(relative: PurePosixPath) -> str:
+    return "." if str(relative) == "." else relative.as_posix()
 
 
 def _tar_info(
-    root_name: str,
     relative: PurePosixPath,
     info: os.stat_result,
     *,
     entry_type: bytes,
 ) -> tarfile.TarInfo:
-    member = tarfile.TarInfo(_archive_name(root_name, relative))
+    member = tarfile.TarInfo(_archive_name(relative))
     member.mode = stat.S_IMODE(info.st_mode) & 0o777
     member.uid = info.st_uid
     member.gid = info.st_gid
@@ -169,7 +164,6 @@ def _tar_info(
 
 def _add_regular_file(
     archive: tarfile.TarFile,
-    root_name: str,
     parent_descriptor: int,
     name: str,
     relative: PurePosixPath,
@@ -193,7 +187,7 @@ def _add_regular_file(
             raise WorkspaceArchiveError(
                 f"replay workspace file {name!r} changed while opening"
             )
-        member = _tar_info(root_name, relative, expected, entry_type=tarfile.REGTYPE)
+        member = _tar_info(relative, expected, entry_type=tarfile.REGTYPE)
         member.size = expected.st_size
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             archive.addfile(member, source)
@@ -217,7 +211,6 @@ def _add_regular_file(
 
 def _add_symlink(
     archive: tarfile.TarFile,
-    root_name: str,
     parent_descriptor: int,
     name: str,
     relative: PurePosixPath,
@@ -232,7 +225,7 @@ def _add_symlink(
         ) from exc
     _safe_symlink_target(relative.parent, target)
     state.add_bytes(len(target.encode("utf-8", errors="surrogateescape")))
-    member = _tar_info(root_name, relative, expected, entry_type=tarfile.SYMTYPE)
+    member = _tar_info(relative, expected, entry_type=tarfile.SYMTYPE)
     member.linkname = target
     member.size = 0
     try:
@@ -251,7 +244,6 @@ def _add_symlink(
 
 def _add_directory_entry(
     archive: tarfile.TarFile,
-    root_name: str,
     source_descriptor: int,
     name: str,
     relative: PurePosixPath,
@@ -279,18 +271,11 @@ def _add_directory_entry(
             raise WorkspaceArchiveError(
                 f"replay workspace directory {name!r} changed while opening"
             )
-        member = _tar_info(root_name, relative, info, entry_type=tarfile.DIRTYPE)
+        member = _tar_info(relative, info, entry_type=tarfile.DIRTYPE)
         member.size = 0
         archive.addfile(member)
         directories.add(relative.as_posix())
-        _add_directory(
-            archive,
-            root_name,
-            child_descriptor,
-            relative,
-            state,
-            directories,
-        )
+        _add_directory(archive, child_descriptor, relative, state, directories)
         current = _stat_entry(source_descriptor, name)
         if (
             _directory_identity(os.fstat(child_descriptor)) != _directory_identity(info)
@@ -310,7 +295,6 @@ def _add_directory_entry(
 
 def _add_directory(
     archive: tarfile.TarFile,
-    root_name: str,
     source_descriptor: int,
     relative: PurePosixPath,
     state: _ArchiveState,
@@ -324,31 +308,14 @@ def _add_directory(
         expected[name] = info
         child_relative = relative / name if str(relative) != "." else PurePosixPath(name)
         if stat.S_ISREG(info.st_mode):
-            _add_regular_file(
-                archive,
-                root_name,
-                source_descriptor,
-                name,
-                child_relative,
-                info,
-                state,
-            )
+            _add_regular_file(archive, source_descriptor, name, child_relative, info, state)
             continue
         if stat.S_ISLNK(info.st_mode):
-            _add_symlink(
-                archive,
-                root_name,
-                source_descriptor,
-                name,
-                child_relative,
-                info,
-                state,
-            )
+            _add_symlink(archive, source_descriptor, name, child_relative, info, state)
             continue
         if stat.S_ISDIR(info.st_mode):
             _add_directory_entry(
                 archive,
-                root_name,
                 source_descriptor,
                 name,
                 child_relative,
@@ -421,7 +388,6 @@ def stable_workspace_archive(
     try:
         root_info = os.fstat(descriptor)
         state = _ArchiveState(max_bytes=max_bytes, max_entries=max_entries)
-        root_name = f"e2h-workspace-{secrets.token_hex(16)}"
         directories = {"."}
         with _open_memfd() as handle:
             try:
@@ -433,7 +399,6 @@ def stable_workspace_archive(
                     errors="surrogateescape",
                 ) as archive:
                     root_member = _tar_info(
-                        root_name,
                         PurePosixPath("."),
                         root_info,
                         entry_type=tarfile.DIRTYPE,
@@ -442,7 +407,6 @@ def stable_workspace_archive(
                     archive.addfile(root_member)
                     _add_directory(
                         archive,
-                        root_name,
                         descriptor,
                         PurePosixPath("."),
                         state,
@@ -459,7 +423,6 @@ def stable_workspace_archive(
             handle.seek(0)
             yield WorkspaceArchive(
                 file=handle,
-                root_name=root_name,
                 directories=frozenset(directories),
                 source_bytes=state.bytes_copied,
                 entries=state.entries_copied,
