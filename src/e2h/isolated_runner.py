@@ -11,15 +11,16 @@ from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult, _validated_capsule
 from e2h.volume_runner import run_capsule_prepared_volume
 from e2h.workspace_archive import (
+    _MAX_ARCHIVE_MEMBER_PATH_BYTES,
     WorkspaceArchive,
     WorkspaceArchiveError,
     stable_workspace_archive,
 )
 
 # Source bytes can appear once as file/link payload and again as PAX string metadata.
-# The per-entry allowance covers the 4096-byte capture path cap plus tar/PAX headers
-# and block padding; the fixed allowance covers the root member and archive trailer.
-_REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES = 16 * 1024
+# Four times the capture path cap leaves room per entry for long PAX names, tar/PAX
+# headers, and block padding; the fixed allowance covers the root member and trailer.
+_REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES = 4 * _MAX_ARCHIVE_MEMBER_PATH_BYTES
 _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
 
 
