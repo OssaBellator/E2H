@@ -90,3 +90,37 @@ def test_container_create_failure_still_attempts_named_container_cleanup(
     volume_name = calls[0][-1]
     assert calls[2] == ["rm", "-f", container_name]
     assert calls[3] == ["volume", "rm", "-f", volume_name]
+
+
+def test_primary_failure_retains_cleanup_failure_as_exception_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bypass_precreate_dependencies(monkeypatch)
+
+    def fake_run_docker(
+        runtime: str,
+        args: list[str],
+        **kwargs: Any,
+    ) -> str:
+        del runtime, kwargs
+        if args[:2] == ["volume", "create"]:
+            return args[-1]
+        if args and args[0] == "create":
+            return "a" * 64
+        if args[:2] == ["volume", "rm"]:
+            raise DockerRemoteError("volume cleanup failed")
+        return ""
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+
+    with pytest.raises(ValueError, match="body failed") as caught:
+        with prepared_workspace_volume(
+            ContainerSandbox(image=IMAGE),
+            object(),  # type: ignore[arg-type]
+        ):
+            raise ValueError("body failed")
+
+    assert str(caught.value) == "body failed"
+    assert caught.value.__notes__ == [
+        "Docker workspace cleanup failed: volume cleanup failed"
+    ]
