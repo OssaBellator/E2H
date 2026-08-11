@@ -1,15 +1,21 @@
-"""Descriptor-bound anonymous tar capture for future remote container replay."""
+"""Descriptor-bound sealed tar capture for future remote container replay."""
 
 from __future__ import annotations
 
 import os
+import secrets
 import stat
+import sys
 import tarfile
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from tempfile import TemporaryFile
 from typing import BinaryIO, Iterator
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - imported only on non-POSIX platforms
+    fcntl = None  # type: ignore[assignment]
 
 from e2h.directory_binding import DirectoryBindingError, open_absolute_directory
 
@@ -42,13 +48,35 @@ class _ArchiveState:
 
 @dataclass(frozen=True)
 class WorkspaceArchive:
-    """One anonymous tar stream plus captured directory metadata."""
+    """One sealed anonymous tar stream plus captured workspace metadata."""
 
     file: BinaryIO
+    root_name: str
     directories: frozenset[str]
     source_bytes: int
     entries: int
     archive_bytes: int
+
+
+def sealed_workspace_archive_supported() -> bool:
+    """Return whether this host can create and seal anonymous workspace archives."""
+    return (
+        sys.platform.startswith("linux")
+        and hasattr(os, "memfd_create")
+        and hasattr(os, "MFD_ALLOW_SEALING")
+        and fcntl is not None
+        and all(
+            hasattr(fcntl, name)
+            for name in (
+                "F_ADD_SEALS",
+                "F_GET_SEALS",
+                "F_SEAL_SEAL",
+                "F_SEAL_SHRINK",
+                "F_SEAL_GROW",
+                "F_SEAL_WRITE",
+            )
+        )
+    )
 
 
 def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
@@ -115,19 +143,20 @@ def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
             stack.append(part)
 
 
-def _archive_name(relative: PurePosixPath) -> str:
+def _archive_name(root_name: str, relative: PurePosixPath) -> str:
     if str(relative) == ".":
-        return "workspace"
-    return f"workspace/{relative.as_posix()}"
+        return root_name
+    return f"{root_name}/{relative.as_posix()}"
 
 
 def _tar_info(
+    root_name: str,
     relative: PurePosixPath,
     info: os.stat_result,
     *,
     entry_type: bytes,
 ) -> tarfile.TarInfo:
-    member = tarfile.TarInfo(_archive_name(relative))
+    member = tarfile.TarInfo(_archive_name(root_name, relative))
     member.mode = stat.S_IMODE(info.st_mode) & 0o777
     member.uid = info.st_uid
     member.gid = info.st_gid
@@ -140,6 +169,7 @@ def _tar_info(
 
 def _add_regular_file(
     archive: tarfile.TarFile,
+    root_name: str,
     parent_descriptor: int,
     name: str,
     relative: PurePosixPath,
@@ -156,11 +186,14 @@ def _add_regular_file(
         ) from exc
     try:
         opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _file_identity(opened) != _file_identity(expected):
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _file_identity(opened) != _file_identity(expected)
+        ):
             raise WorkspaceArchiveError(
                 f"replay workspace file {name!r} changed while opening"
             )
-        member = _tar_info(relative, expected, entry_type=tarfile.REGTYPE)
+        member = _tar_info(root_name, relative, expected, entry_type=tarfile.REGTYPE)
         member.size = expected.st_size
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             archive.addfile(member, source)
@@ -184,6 +217,7 @@ def _add_regular_file(
 
 def _add_symlink(
     archive: tarfile.TarFile,
+    root_name: str,
     parent_descriptor: int,
     name: str,
     relative: PurePosixPath,
@@ -198,7 +232,7 @@ def _add_symlink(
         ) from exc
     _safe_symlink_target(relative.parent, target)
     state.add_bytes(len(target.encode("utf-8", errors="surrogateescape")))
-    member = _tar_info(relative, expected, entry_type=tarfile.SYMTYPE)
+    member = _tar_info(root_name, relative, expected, entry_type=tarfile.SYMTYPE)
     member.linkname = target
     member.size = 0
     try:
@@ -217,6 +251,7 @@ def _add_symlink(
 
 def _add_directory_entry(
     archive: tarfile.TarFile,
+    root_name: str,
     source_descriptor: int,
     name: str,
     relative: PurePosixPath,
@@ -224,7 +259,11 @@ def _add_directory_entry(
     state: _ArchiveState,
     directories: set[str],
 ) -> None:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         child_descriptor = os.open(name, flags, dir_fd=source_descriptor)
     except OSError as exc:
@@ -233,15 +272,25 @@ def _add_directory_entry(
         ) from exc
     try:
         opened = os.fstat(child_descriptor)
-        if not stat.S_ISDIR(opened.st_mode) or _directory_identity(opened) != _directory_identity(info):
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or _directory_identity(opened) != _directory_identity(info)
+        ):
             raise WorkspaceArchiveError(
                 f"replay workspace directory {name!r} changed while opening"
             )
-        member = _tar_info(relative, info, entry_type=tarfile.DIRTYPE)
+        member = _tar_info(root_name, relative, info, entry_type=tarfile.DIRTYPE)
         member.size = 0
         archive.addfile(member)
         directories.add(relative.as_posix())
-        _add_directory(archive, child_descriptor, relative, state, directories)
+        _add_directory(
+            archive,
+            root_name,
+            child_descriptor,
+            relative,
+            state,
+            directories,
+        )
         current = _stat_entry(source_descriptor, name)
         if (
             _directory_identity(os.fstat(child_descriptor)) != _directory_identity(info)
@@ -261,6 +310,7 @@ def _add_directory_entry(
 
 def _add_directory(
     archive: tarfile.TarFile,
+    root_name: str,
     source_descriptor: int,
     relative: PurePosixPath,
     state: _ArchiveState,
@@ -274,14 +324,31 @@ def _add_directory(
         expected[name] = info
         child_relative = relative / name if str(relative) != "." else PurePosixPath(name)
         if stat.S_ISREG(info.st_mode):
-            _add_regular_file(archive, source_descriptor, name, child_relative, info, state)
+            _add_regular_file(
+                archive,
+                root_name,
+                source_descriptor,
+                name,
+                child_relative,
+                info,
+                state,
+            )
             continue
         if stat.S_ISLNK(info.st_mode):
-            _add_symlink(archive, source_descriptor, name, child_relative, info, state)
+            _add_symlink(
+                archive,
+                root_name,
+                source_descriptor,
+                name,
+                child_relative,
+                info,
+                state,
+            )
             continue
         if stat.S_ISDIR(info.st_mode):
             _add_directory_entry(
                 archive,
+                root_name,
                 source_descriptor,
                 name,
                 child_relative,
@@ -304,6 +371,36 @@ def _add_directory(
             )
 
 
+def _seal_archive(handle: BinaryIO) -> None:
+    if not sealed_workspace_archive_supported() or fcntl is None:
+        raise WorkspaceArchiveError("sealed replay workspace archives are unavailable")
+    seals = (
+        fcntl.F_SEAL_WRITE
+        | fcntl.F_SEAL_GROW
+        | fcntl.F_SEAL_SHRINK
+        | fcntl.F_SEAL_SEAL
+    )
+    try:
+        handle.flush()
+        fcntl.fcntl(handle.fileno(), fcntl.F_ADD_SEALS, seals)
+        observed = fcntl.fcntl(handle.fileno(), fcntl.F_GET_SEALS)
+    except OSError as exc:
+        raise WorkspaceArchiveError(f"unable to seal replay workspace archive: {exc}") from exc
+    if observed & seals != seals:
+        raise WorkspaceArchiveError("replay workspace archive seal verification failed")
+
+
+def _open_memfd() -> BinaryIO:
+    if not sealed_workspace_archive_supported():
+        raise WorkspaceArchiveError("sealed replay workspace archives are unavailable")
+    flags = os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
+    try:
+        descriptor = os.memfd_create("e2h-replay-workspace", flags=flags)
+        return os.fdopen(descriptor, "w+b")
+    except OSError as exc:
+        raise WorkspaceArchiveError(f"unable to create replay workspace memfd: {exc}") from exc
+
+
 @contextmanager
 def stable_workspace_archive(
     workspace: Path,
@@ -311,13 +408,11 @@ def stable_workspace_archive(
     max_bytes: int,
     max_entries: int,
 ) -> Iterator[WorkspaceArchive]:
-    """Yield an anonymous tar stream captured from one descriptor-bound workspace."""
+    """Yield a sealed tar stream captured from one descriptor-bound workspace."""
     if max_bytes < 1:
         raise WorkspaceArchiveError("max replay workspace bytes must be positive")
     if max_entries < 1:
         raise WorkspaceArchiveError("max replay workspace entries must be positive")
-    if os.name != "posix":
-        raise WorkspaceArchiveError("anonymous replay workspace archives require POSIX")
     try:
         descriptor = open_absolute_directory(workspace)
     except DirectoryBindingError as exc:
@@ -326,12 +421,9 @@ def stable_workspace_archive(
     try:
         root_info = os.fstat(descriptor)
         state = _ArchiveState(max_bytes=max_bytes, max_entries=max_entries)
+        root_name = f"e2h-workspace-{secrets.token_hex(16)}"
         directories = {"."}
-        with TemporaryFile(mode="w+b") as handle:
-            if not isinstance(handle.name, int):
-                raise WorkspaceArchiveError(
-                    "replay workspace archive must not have a discoverable filesystem pathname"
-                )
+        with _open_memfd() as handle:
             try:
                 with tarfile.open(
                     fileobj=handle,
@@ -341,6 +433,7 @@ def stable_workspace_archive(
                     errors="surrogateescape",
                 ) as archive:
                     root_member = _tar_info(
+                        root_name,
                         PurePosixPath("."),
                         root_info,
                         entry_type=tarfile.DIRTYPE,
@@ -349,6 +442,7 @@ def stable_workspace_archive(
                     archive.addfile(root_member)
                     _add_directory(
                         archive,
+                        root_name,
                         descriptor,
                         PurePosixPath("."),
                         state,
@@ -361,9 +455,11 @@ def stable_workspace_archive(
             if _directory_identity(os.fstat(descriptor)) != _directory_identity(root_info):
                 raise WorkspaceArchiveError("replay workspace root changed while archiving")
             archive_bytes = handle.tell()
+            _seal_archive(handle)
             handle.seek(0)
             yield WorkspaceArchive(
                 file=handle,
+                root_name=root_name,
                 directories=frozenset(directories),
                 source_bytes=state.bytes_copied,
                 entries=state.entries_copied,
