@@ -6,7 +6,12 @@ from pathlib import Path
 
 from e2h.models import TaskCapsule
 from e2h.runner import ExecutionBackend, RunResult, run_capsule
-from e2h.workspace_snapshot import stable_workspace_snapshot
+from e2h.workspace_snapshot import stable_workspace_snapshot, workspace_snapshot_supported
+
+
+def isolated_container_replay_supported() -> bool:
+    """Return whether the current host can capture stable isolated replay workspaces."""
+    return workspace_snapshot_supported()
 
 
 def run_capsule_isolated_container(
