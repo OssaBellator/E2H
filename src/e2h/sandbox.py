@@ -257,7 +257,33 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
         )
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         return f"unable to force-remove timed-out container: {exc}"
-    if completed.returncode != 0:
-        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
-        return f"container force-removal failed with exit {completed.returncode}: {stderr}"
-    return None
+    if completed.returncode == 0:
+        return None
+    removal_error = completed.stderr.decode("utf-8", errors="replace").strip()
+    try:
+        probe = subprocess.run(
+            [
+                runtime_binary,
+                "ps",
+                "-aq",
+                "--filter",
+                f"name=^/{re.escape(container_name)}$",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return (
+            f"container force-removal failed with exit {completed.returncode}: "
+            f"{removal_error}; unable to verify cleanup: {exc}"
+        )
+    if probe.returncode == 0 and not probe.stdout.strip():
+        return None
+    probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
+    detail = probe_error or "container still exists after failed removal"
+    return (
+        f"container force-removal failed with exit {completed.returncode}: "
+        f"{removal_error}; cleanup verification failed: {detail}"
+    )
