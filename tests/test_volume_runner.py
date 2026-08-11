@@ -86,6 +86,8 @@ if args and args[0] == "rm":
     raise SystemExit(0)
 command = args[-1] if args else ""
 print(f"executed:{{command}}")
+if command.startswith("docker-exit-"):
+    raise SystemExit(int(command.removeprefix("docker-exit-")))
 raise SystemExit(7 if command == "fail" else 0)
 """,
         encoding="utf-8",
@@ -182,6 +184,47 @@ def test_prepared_volume_runner_preserves_continue_on_failure(
         CheckStatus.PASSED,
     ]
     assert [record[-1] for record in _records(log)] == ["fail", "pass"]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "failure_code"),
+    [
+        (125, FailureCode.SANDBOX_RUNTIME),
+        (126, FailureCode.PROCESS_LAUNCH_ERROR),
+        (127, FailureCode.COMMAND_NOT_FOUND),
+    ],
+)
+def test_prepared_volume_runner_treats_reserved_docker_exits_as_infrastructure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_code: int,
+    failure_code: FailureCode,
+) -> None:
+    runtime, log = _fake_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    archive = _archive(directories=["."])
+    capsule = _capsule(
+        [
+            CommandCheck(
+                id="reserved",
+                argv=[f"docker-exit-{exit_code}"],
+                expected_exit_codes={exit_code},
+            )
+        ]
+    )
+
+    result = run_capsule_prepared_volume(
+        capsule,
+        archive,
+        "e2h-replay-workspace-abc",
+        container_runtime=str(runtime),
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.checks[0].exit_code == exit_code
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is failure_code
 
 
 def test_prepared_volume_timeout_uses_generated_name_cleanup(
