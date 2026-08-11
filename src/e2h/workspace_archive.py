@@ -16,7 +16,11 @@ try:
 except ImportError:  # pragma: no cover - imported only on non-POSIX platforms
     fcntl = None  # type: ignore[assignment]
 
-from e2h.directory_binding import DirectoryBindingError, open_absolute_directory
+from e2h.directory_binding import (
+    DirectoryBindingError,
+    directory_binding_supported,
+    open_absolute_directory,
+)
 
 
 class WorkspaceArchiveError(RuntimeError):
@@ -60,6 +64,11 @@ def sealed_workspace_archive_supported() -> bool:
     """Return whether this host can create and seal anonymous workspace archives."""
     return (
         sys.platform.startswith("linux")
+        and directory_binding_supported()
+        and os.stat in os.supports_dir_fd
+        and os.stat in os.supports_follow_symlinks
+        and os.readlink in os.supports_dir_fd
+        and os.scandir in os.supports_fd
         and hasattr(os, "memfd_create")
         and hasattr(os, "MFD_ALLOW_SEALING")
         and fcntl is not None
@@ -88,11 +97,12 @@ def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def _directory_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+def _directory_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return (
         info.st_dev,
         info.st_ino,
         info.st_mtime_ns,
+        info.st_ctime_ns,
         info.st_mode,
     )
 
@@ -112,13 +122,26 @@ def _stat_entry(parent_descriptor: int, name: str) -> os.stat_result:
         ) from exc
 
 
-def _list_directory(descriptor: int) -> list[str]:
+def _list_directory(
+    descriptor: int,
+    *,
+    max_names: int,
+    overflow_message: str,
+) -> list[str]:
+    names: list[str] = []
     try:
-        return sorted(os.listdir(descriptor))
+        with os.scandir(descriptor) as entries:
+            for entry in entries:
+                names.append(entry.name)
+                if len(names) > max_names:
+                    raise WorkspaceArchiveError(overflow_message)
+    except WorkspaceArchiveError:
+        raise
     except (OSError, TypeError) as exc:
         raise WorkspaceArchiveError(
             f"unable to list replay workspace directory: {exc}"
         ) from exc
+    return sorted(names)
 
 
 def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
@@ -300,7 +323,13 @@ def _add_directory(
     state: _ArchiveState,
     directories: set[str],
 ) -> None:
-    names = _list_directory(source_descriptor)
+    names = _list_directory(
+        source_descriptor,
+        max_names=state.max_entries - state.entries_copied,
+        overflow_message=(
+            f"replay workspace exceeds configured max entries ({state.max_entries})"
+        ),
+    )
     expected: dict[str, os.stat_result] = {}
     for name in names:
         state.add_entry()
@@ -328,7 +357,12 @@ def _add_directory(
             f"replay workspace entry {name!r} has unsupported file type"
         )
 
-    if _list_directory(source_descriptor) != names:
+    current_names = _list_directory(
+        source_descriptor,
+        max_names=len(names),
+        overflow_message="replay workspace directory changed while archiving",
+    )
+    if current_names != names:
         raise WorkspaceArchiveError("replay workspace directory changed while archiving")
     for name, before in expected.items():
         current = _stat_entry(source_descriptor, name)
