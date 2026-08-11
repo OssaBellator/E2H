@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import e2h.volume_runner as volume_runner
 from e2h.isolated_runner import (
     _run_capsule_isolated_container_candidate,
     run_capsule_isolated_container,
@@ -17,7 +18,7 @@ from e2h.models import (
     SuccessSpec,
     TaskCapsule,
 )
-from e2h.runner import CheckStatus, RunnerError, RunStatus
+from e2h.runner import CheckStatus, RunnerError, RunStatus, _ProcessOutcome
 from e2h.workspace_archive import sealed_workspace_archive_supported
 
 IMAGE = "python@sha256:" + "0" * 64
@@ -60,6 +61,7 @@ elif args[:2] == ["volume", "rm"]:
     pass
 elif args and args[0] == "run":
     print("remote-ok")
+    raise SystemExit(int(os.environ.get("DOCKER_TEST_RUN_EXIT", "0")))
 else:
     raise SystemExit(13)
 """,
@@ -71,6 +73,18 @@ else:
 
 def _records(log: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def _workspace(tmp_path: Path) -> Path:
+    workspace = tmp_path / "workspace"
+    (workspace / "task").mkdir(parents=True)
+    (workspace / "shared" / "nested").mkdir(parents=True)
+    link = workspace / "task" / "link"
+    try:
+        link.symlink_to("../shared")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+    return workspace
 
 
 def _capsule() -> TaskCapsule:
@@ -95,15 +109,7 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace = tmp_path / "workspace"
-    (workspace / "task").mkdir(parents=True)
-    (workspace / "shared" / "nested").mkdir(parents=True)
-    link = workspace / "task" / "link"
-    try:
-        link.symlink_to("../shared")
-    except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"symlinks unavailable: {exc}")
-
+    workspace = _workspace(tmp_path)
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
 
@@ -145,6 +151,69 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert run[run.index("--workdir") + 1] == "/workspace/shared/nested"
     assert commands[6] == ["volume", "rm", "-f", volume_name]
     assert int(records[3]["stdin_bytes"]) > 0
+
+
+def test_candidate_command_failure_still_removes_volume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path)
+    runtime, log = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_RUN_EXIT", "7")
+
+    result = _run_capsule_isolated_container_candidate(
+        _capsule(),
+        workspace.resolve(),
+        max_workspace_bytes=1024,
+        max_workspace_entries=20,
+        container_runtime=str(runtime),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.checks[0].status is CheckStatus.FAILED
+    commands = [record["args"] for record in _records(log)]
+    volume_name = str(commands[1][-1])
+    assert commands[-1] == ["volume", "rm", "-f", volume_name]
+
+
+def test_candidate_timeout_removes_named_check_and_volume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path)
+    runtime, log = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+
+    monkeypatch.setattr(
+        volume_runner,
+        "_execute_process",
+        lambda *args, **kwargs: _ProcessOutcome(
+            exit_code=None,
+            timed_out=True,
+            stdout="",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+        ),
+    )
+
+    result = _run_capsule_isolated_container_candidate(
+        _capsule(),
+        workspace.resolve(),
+        max_workspace_bytes=1024,
+        max_workspace_entries=20,
+        container_runtime=str(runtime),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.checks[0].status is CheckStatus.TIMED_OUT
+    commands = [record["args"] for record in _records(log)]
+    volume_name = str(commands[1][-1])
+    check_cleanup = commands[-2]
+    assert check_cleanup[:2] == ["rm", "-f"]
+    assert str(check_cleanup[-1]).startswith("e2h-replay-check-")
+    assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
 
 def test_public_isolated_runner_remains_fail_closed_before_docker(
