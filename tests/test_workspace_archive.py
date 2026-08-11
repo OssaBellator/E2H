@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import errno
 import os
-import stat
 import subprocess
 import sys
 import tarfile
@@ -22,12 +21,6 @@ pytestmark = pytest.mark.skipif(
     not sealed_workspace_archive_supported(),
     reason="sealed workspace archives require Linux memfd seals",
 )
-
-
-def _members(capture: workspace_archive.WorkspaceArchive) -> dict[str, tarfile.TarInfo]:
-    capture.file.seek(0)
-    with tarfile.open(fileobj=capture.file, mode="r:*") as archive:
-        return {member.name: member for member in archive.getmembers()}
 
 
 def test_workspace_archive_is_sealed_and_preserves_safe_tree(tmp_path: Path) -> None:
@@ -74,11 +67,14 @@ def test_workspace_archive_is_sealed_and_preserves_safe_tree(tmp_path: Path) -> 
             root = archive.getmember(".")
             assert root.isdir()
             assert root.mode == 0o751
-            shared_member = archive.getmember("shared.txt")
-            assert archive.extractfile(shared_member).read() == b"shared"  # type: ignore[union-attr]
+            shared_member = archive.extractfile("shared.txt")
+            assert shared_member is not None
+            assert shared_member.read() == b"shared"
             script_member = archive.getmember("task/run.sh")
             assert script_member.mode == 0o755
-            assert archive.extractfile(script_member).read().startswith(b"#!/bin/sh")  # type: ignore[union-attr]
+            script_file = archive.extractfile(script_member)
+            assert script_file is not None
+            assert script_file.read().startswith(b"#!/bin/sh")
             link_member = archive.getmember("task/shared-link")
             assert link_member.issym()
             assert link_member.linkname == "../shared.txt"
