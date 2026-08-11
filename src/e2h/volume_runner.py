@@ -78,6 +78,7 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
     directories: set[str] = set()
     symlinks: dict[str, str] = {}
     seen: set[str] = set()
+    source_bytes = 0
     try:
         archive.file.seek(0)
         with tarfile.open(
@@ -96,8 +97,12 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
                 if member.isdir():
                     directories.add(name)
                 elif member.issym():
-                    symlinks[name] = _symlink_target(member.linkname)
-                elif not member.isfile():
+                    target = _symlink_target(member.linkname)
+                    symlinks[name] = target
+                    source_bytes += len(target.encode("utf-8", errors="surrogateescape"))
+                elif member.isfile():
+                    source_bytes += member.size
+                else:
                     raise RunnerError(
                         f"sealed workspace archive contains unsupported member {name!r}"
                     )
@@ -115,6 +120,10 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
     if frozenset(directories) != archive.directories:
         raise RunnerError(
             "sealed workspace archive directory metadata does not match archive bytes"
+        )
+    if len(seen) != archive.entries + 1 or source_bytes != archive.source_bytes:
+        raise RunnerError(
+            "sealed workspace archive capture metadata does not match archive bytes"
         )
     return _WorkspaceTree(
         directories=frozenset(directories),
