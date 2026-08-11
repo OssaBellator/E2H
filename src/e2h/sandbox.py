@@ -10,6 +10,8 @@ from e2h.models import AllowedActions, CommandCheck, ContainerSandbox, TaskCapsu
 
 _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
+_CONTAINER_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+_VOLUME_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 
 
@@ -57,6 +59,12 @@ def _validated_runtime_binary(runtime_binary: str) -> str:
     return runtime_binary
 
 
+def _validated_resource_name(value: str, *, noun: str, pattern: re.Pattern[str]) -> str:
+    if pattern.fullmatch(value) is None:
+        raise SandboxError(f"invalid Docker {noun} name")
+    return value
+
+
 def _container_workdir(relative_cwd: str) -> str:
     if "\x00" in relative_cwd:
         raise SandboxError("container working directory must not contain NUL")
@@ -68,28 +76,15 @@ def _container_workdir(relative_cwd: str) -> str:
     return str(_CONTAINER_ROOT.joinpath(path))
 
 
-def build_container_argv(
-    capsule: TaskCapsule,
+def _container_argv(
+    sandbox: ContainerSandbox,
+    allowed_actions: AllowedActions,
     check: CommandCheck,
-    workspace_root: Path,
     relative_cwd: str,
-    cidfile: Path,
-    *,
-    runtime_binary: str | None = None,
+    runtime: str,
+    identity_args: list[str],
+    mount: str,
 ) -> list[str]:
-    """Build a deterministic Docker invocation for one capsule check."""
-    sandbox, allowed_actions = _validated_capsule_policy(capsule)
-    check = _validated_check(check)
-    runtime = _validated_runtime_binary(
-        sandbox.engine if runtime_binary is None else runtime_binary
-    )
-    workspace_text = str(workspace_root)
-    cidfile_text = str(cidfile)
-    if "\x00" in workspace_text or "\x00" in cidfile_text:
-        raise SandboxError("container filesystem arguments must not contain NUL")
-    mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
-    if sandbox.workspace_access == "read_only":
-        mount += ",readonly"
     argv = [
         runtime,
         "run",
@@ -97,8 +92,7 @@ def build_container_argv(
         "--init",
         "--log-driver",
         "none",
-        "--cidfile",
-        cidfile_text,
+        *identity_args,
         "--pull",
         sandbox.pull_policy,
         "--hostname",
@@ -133,6 +127,85 @@ def build_container_argv(
     return argv
 
 
+def build_container_argv(
+    capsule: TaskCapsule,
+    check: CommandCheck,
+    workspace_root: Path,
+    relative_cwd: str,
+    cidfile: Path,
+    *,
+    runtime_binary: str | None = None,
+) -> list[str]:
+    """Build a deterministic Docker invocation for one capsule check."""
+    sandbox, allowed_actions = _validated_capsule_policy(capsule)
+    check = _validated_check(check)
+    runtime = _validated_runtime_binary(
+        sandbox.engine if runtime_binary is None else runtime_binary
+    )
+    workspace_text = str(workspace_root)
+    cidfile_text = str(cidfile)
+    if "\x00" in workspace_text or "\x00" in cidfile_text:
+        raise SandboxError("container filesystem arguments must not contain NUL")
+    mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
+    if sandbox.workspace_access == "read_only":
+        mount += ",readonly"
+    return _container_argv(
+        sandbox,
+        allowed_actions,
+        check,
+        relative_cwd,
+        runtime,
+        ["--cidfile", cidfile_text],
+        mount,
+    )
+
+
+def build_container_volume_argv(
+    capsule: TaskCapsule,
+    check: CommandCheck,
+    volume_name: str,
+    relative_cwd: str,
+    container_name: str,
+    *,
+    runtime_binary: str | None = None,
+) -> list[str]:
+    """Build one remote replay invocation against a read-only named volume."""
+    sandbox, allowed_actions = _validated_capsule_policy(capsule)
+    check = _validated_check(check)
+    runtime = _validated_runtime_binary(
+        sandbox.engine if runtime_binary is None else runtime_binary
+    )
+    volume_name = _validated_resource_name(
+        volume_name,
+        noun="volume",
+        pattern=_VOLUME_NAME_PATTERN,
+    )
+    container_name = _validated_resource_name(
+        container_name,
+        noun="container",
+        pattern=_CONTAINER_NAME_PATTERN,
+    )
+    if sandbox.workspace_access != "read_only":
+        raise SandboxError("remote container replay requires workspace_access='read_only'")
+    if not sandbox.read_only_root:
+        raise SandboxError("remote container replay requires read_only_root=true")
+    if sandbox.pull_policy != "never":
+        raise SandboxError("remote container replay requires pull_policy='never'")
+    mount = (
+        f"type=volume,src={volume_name},dst={_CONTAINER_ROOT},"
+        "volume-nocopy,readonly"
+    )
+    return _container_argv(
+        sandbox,
+        allowed_actions,
+        check,
+        relative_cwd,
+        runtime,
+        ["--name", container_name],
+        mount,
+    )
+
+
 def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
     """Best-effort force removal after the attached runtime process times out."""
     try:
@@ -150,6 +223,33 @@ def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
     try:
         completed = subprocess.run(
             [runtime_binary, "rm", "-f", container_id],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return f"unable to force-remove timed-out container: {exc}"
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        return f"container force-removal failed with exit {completed.returncode}: {stderr}"
+    return None
+
+
+def force_remove_named_container(runtime_binary: str, container_name: str) -> str | None:
+    """Best-effort force removal of a remote replay container by generated name."""
+    try:
+        runtime_binary = _validated_runtime_binary(runtime_binary)
+        container_name = _validated_resource_name(
+            container_name,
+            noun="container",
+            pattern=_CONTAINER_NAME_PATTERN,
+        )
+    except SandboxError as exc:
+        return str(exc)
+    try:
+        completed = subprocess.run(
+            [runtime_binary, "rm", "-f", container_name],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_CLEANUP_TIMEOUT_SECONDS,
