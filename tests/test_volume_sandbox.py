@@ -159,6 +159,7 @@ def test_named_cleanup_accepts_verified_auto_remove_race(
     runtime, log = _cleanup_runtime(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
     monkeypatch.setenv("DOCKER_TEST_RM_FAIL", "1")
+    monkeypatch.setenv("DOCKER_TEST_PS_RESULT", "e2h-replay-check-other")
 
     assert force_remove_named_container(
         str(runtime),
@@ -168,21 +169,26 @@ def test_named_cleanup_accepts_verified_auto_remove_race(
         ["rm", "-f", "e2h-replay-check-abc"],
         [
             "ps",
-            "-aq",
+            "-a",
+            "--format",
+            "{{.Names}}",
             "--filter",
-            r"name=^/e2h\-replay\-check\-abc$",
+            "name=e2h-replay-check-abc",
         ],
     ]
 
 
-def test_named_cleanup_fails_if_container_still_exists(
+def test_named_cleanup_fails_if_exact_container_still_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime, _ = _cleanup_runtime(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(tmp_path / "docker-log.jsonl"))
     monkeypatch.setenv("DOCKER_TEST_RM_FAIL", "1")
-    monkeypatch.setenv("DOCKER_TEST_PS_RESULT", "a" * 64)
+    monkeypatch.setenv(
+        "DOCKER_TEST_PS_RESULT",
+        "e2h-replay-check-other\ne2h-replay-check-abc",
+    )
 
     error = force_remove_named_container(
         str(runtime),
