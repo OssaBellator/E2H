@@ -121,9 +121,9 @@ def _run_docker(
     stdin: BinaryIO | None = None,
     timeout: float = _CONTROL_TIMEOUT_SECONDS,
 ) -> str:
-    if stdin is not None:
-        stdin.seek(0)
     try:
+        if stdin is not None:
+            stdin.seek(0)
         completed = subprocess.run(
             [runtime, *args],
             stdin=subprocess.DEVNULL if stdin is None else stdin,
@@ -264,6 +264,7 @@ def prepared_workspace_volume(
                 "never",
                 "--network",
                 "none",
+                "--read-only",
                 "--cap-drop",
                 "ALL",
                 "--security-opt",
