@@ -76,15 +76,28 @@ def _container_workdir(relative_cwd: str) -> str:
     return str(_CONTAINER_ROOT.joinpath(path))
 
 
-def _container_argv(
-    sandbox: ContainerSandbox,
-    allowed_actions: AllowedActions,
+def build_container_argv(
+    capsule: TaskCapsule,
     check: CommandCheck,
+    workspace_root: Path,
     relative_cwd: str,
-    runtime: str,
-    identity_args: list[str],
-    mount: str,
+    cidfile: Path,
+    *,
+    runtime_binary: str | None = None,
 ) -> list[str]:
+    """Build a deterministic Docker invocation for one capsule check."""
+    sandbox, allowed_actions = _validated_capsule_policy(capsule)
+    check = _validated_check(check)
+    runtime = _validated_runtime_binary(
+        sandbox.engine if runtime_binary is None else runtime_binary
+    )
+    workspace_text = str(workspace_root)
+    cidfile_text = str(cidfile)
+    if "\x00" in workspace_text or "\x00" in cidfile_text:
+        raise SandboxError("container filesystem arguments must not contain NUL")
+    mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
+    if sandbox.workspace_access == "read_only":
+        mount += ",readonly"
     argv = [
         runtime,
         "run",
@@ -92,7 +105,8 @@ def _container_argv(
         "--init",
         "--log-driver",
         "none",
-        *identity_args,
+        "--cidfile",
+        cidfile_text,
         "--pull",
         sandbox.pull_policy,
         "--hostname",
@@ -125,39 +139,6 @@ def _container_argv(
     argv.append(sandbox.image)
     argv.extend(check.argv)
     return argv
-
-
-def build_container_argv(
-    capsule: TaskCapsule,
-    check: CommandCheck,
-    workspace_root: Path,
-    relative_cwd: str,
-    cidfile: Path,
-    *,
-    runtime_binary: str | None = None,
-) -> list[str]:
-    """Build a deterministic Docker invocation for one capsule check."""
-    sandbox, allowed_actions = _validated_capsule_policy(capsule)
-    check = _validated_check(check)
-    runtime = _validated_runtime_binary(
-        sandbox.engine if runtime_binary is None else runtime_binary
-    )
-    workspace_text = str(workspace_root)
-    cidfile_text = str(cidfile)
-    if "\x00" in workspace_text or "\x00" in cidfile_text:
-        raise SandboxError("container filesystem arguments must not contain NUL")
-    mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
-    if sandbox.workspace_access == "read_only":
-        mount += ",readonly"
-    return _container_argv(
-        sandbox,
-        allowed_actions,
-        check,
-        relative_cwd,
-        runtime,
-        ["--cidfile", cidfile_text],
-        mount,
-    )
 
 
 def build_container_volume_argv(
@@ -195,15 +176,46 @@ def build_container_volume_argv(
         f"type=volume,src={volume_name},dst={_CONTAINER_ROOT},"
         "volume-nocopy,readonly"
     )
-    return _container_argv(
-        sandbox,
-        allowed_actions,
-        check,
-        relative_cwd,
+    argv = [
         runtime,
-        ["--name", container_name],
+        "run",
+        "--rm",
+        "--init",
+        "--log-driver",
+        "none",
+        "--name",
+        container_name,
+        "--pull",
+        sandbox.pull_policy,
+        "--hostname",
+        "e2h",
+        "--workdir",
+        _container_workdir(relative_cwd),
+        "--mount",
         mount,
-    )
+        "--network",
+        "none" if allowed_actions.network == "deny" else "bridge",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        str(sandbox.pids_limit),
+        "--memory",
+        f"{sandbox.memory_mb}m",
+        "--cpus",
+        f"{sandbox.cpus:g}",
+        "--user",
+        sandbox.user,
+        "--tmpfs",
+        f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--read-only",
+    ]
+    for key, value in sorted(check.env.items()):
+        argv.extend(["--env", f"{key}={value}"])
+    argv.append(sandbox.image)
+    argv.extend(check.argv)
+    return argv
 
 
 def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
