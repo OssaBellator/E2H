@@ -135,6 +135,8 @@ def _stable_file_sha256(
 ) -> tuple[int, str]:
     if "\x00" in os.fspath(path):
         raise MCPServiceError("artifact path must not contain NUL")
+    if root is not None and path == root:
+        raise MCPServiceError("artifact is not a regular file")
     requested_parent = path.parent.absolute()
     try:
         parent = requested_parent.resolve(strict=True)
