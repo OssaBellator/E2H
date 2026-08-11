@@ -65,6 +65,14 @@ class _FailingQueryConnection(_FakeConnection):
         return _QueryCursor()
 
 
+class _FailingQueryAndRollbackConnection(_FailingQueryConnection):
+    def execute(self, sql: str) -> Any:
+        if sql == "ROLLBACK":
+            self.sql.append(sql)
+            raise store.duckdb.Error("rollback failed")
+        return super().execute(sql)
+
+
 def test_schema_version_row_fully_consumes_result() -> None:
     cursor = _SchemaCursor([("2",)])
     connection = _SchemaConnection(cursor)
@@ -125,5 +133,26 @@ def test_query_store_with_info_rolls_back_failed_transaction(
         )
 
     assert connection.sql[0] == "BEGIN TRANSACTION"
+    assert connection.sql[-1] == "ROLLBACK"
+    assert connection.closed is True
+
+
+def test_query_store_with_info_preserves_primary_error_when_rollback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "evidence.duckdb"
+    connection = _FailingQueryAndRollbackConnection()
+
+    monkeypatch.setattr(store, "_connection", lambda *args, **kwargs: connection)
+
+    with pytest.raises(store.StoreError, match="unable to query store: query failed"):
+        store.query_store_with_info(
+            database,
+            QueryView.SOURCES,
+            limit=7,
+            read_only=True,
+        )
+
     assert connection.sql[-1] == "ROLLBACK"
     assert connection.closed is True
