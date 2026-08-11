@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from e2h.docker_remote import require_patched_docker_archive
+from e2h.failures import FailureCode
 from e2h.isolated_runner import _run_capsule_isolated_container_candidate
 from e2h.models import CommandCheck, ContainerSandbox, InitialState, SuccessSpec, TaskCapsule
 from e2h.runner import CheckStatus, RunStatus
@@ -197,6 +198,50 @@ def test_real_docker_command_failure_still_cleans_volume(tmp_path: Path) -> None
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.FAILED
     assert result.checks[0].exit_code == 7
+    _assert_no_new_resources(before, _resources(runtime))
+
+
+@pytest.mark.parametrize(
+    ("argv", "exit_code", "failure_code"),
+    [
+        (["/etc"], 126, FailureCode.PROCESS_LAUNCH_ERROR),
+        (["e2h-command-that-does-not-exist"], 127, FailureCode.COMMAND_NOT_FOUND),
+    ],
+)
+def test_real_docker_reserved_command_exit_is_error_and_cleans_resources(
+    tmp_path: Path,
+    argv: list[str],
+    exit_code: int,
+    failure_code: FailureCode,
+) -> None:
+    runtime, image = _preflight()
+    workspace = _workspace(tmp_path)
+    before = _resources(runtime)
+    capsule = _capsule(
+        image,
+        [
+            CommandCheck(
+                id="reserved",
+                cwd="link/nested",
+                argv=argv,
+                expected_exit_codes={exit_code},
+            )
+        ],
+    )
+
+    result = _run_capsule_isolated_container_candidate(
+        capsule,
+        workspace.resolve(),
+        max_workspace_bytes=1024 * 1024,
+        max_workspace_entries=100,
+        container_runtime=runtime,
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.checks[0].exit_code == exit_code
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is failure_code
     _assert_no_new_resources(before, _resources(runtime))
 
 
