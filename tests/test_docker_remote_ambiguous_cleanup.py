@@ -138,3 +138,9 @@ def test_run_docker_wraps_stdin_rewind_failure() -> None:
             ["cp"],
             stdin=BrokenStdin(),  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize("value", ["29.7.2-rc.1", "30.0.0-beta1", "30.0.0-preview.2"])
+def test_docker_prerelease_versions_do_not_satisfy_security_gate(value: str) -> None:
+    with pytest.raises(DockerRemoteError, match="prerelease version is not accepted"):
+        docker_remote._parse_version(value, noun="client")
