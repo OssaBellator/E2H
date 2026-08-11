@@ -5,7 +5,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from tempfile import TemporaryFile
 
 import pytest
 
@@ -311,12 +310,14 @@ def test_prepared_workspace_volume_rejects_unsealed_archive_before_docker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if not hasattr(os, "memfd_create") or not hasattr(os, "MFD_ALLOW_SEALING"):
+        pytest.skip("unsealed memfd regression requires Linux memfd sealing")
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
 
-    with TemporaryFile(mode="w+b") as handle:
+    descriptor = os.memfd_create("e2h-unsealed-test", flags=os.MFD_ALLOW_SEALING)
+    with os.fdopen(descriptor, "w+b", buffering=0) as handle:
         handle.write(b"not sealed")
-        handle.flush()
         forged = WorkspaceArchive(
             file=handle,
             directories=frozenset({"."}),
