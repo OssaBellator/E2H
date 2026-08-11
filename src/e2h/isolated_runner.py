@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from e2h.directory_binding import directory_binding_supported
 from e2h.models import TaskCapsule
 from e2h.runner import ExecutionBackend, RunResult, run_capsule
-from e2h.workspace_snapshot import stable_workspace_snapshot, workspace_snapshot_supported
+from e2h.workspace_snapshot import stable_workspace_snapshot
 
 
 def isolated_container_replay_supported() -> bool:
-    """Return whether the current host can capture stable isolated replay workspaces."""
-    return workspace_snapshot_supported()
+    """Return whether the current host exposes every primitive required for safe capture."""
+    return (
+        directory_binding_supported()
+        and os.stat in os.supports_dir_fd
+        and os.readlink in os.supports_dir_fd
+        and os.listdir in os.supports_fd
+    )
 
 
 def run_capsule_isolated_container(
