@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+import e2h.docker_remote as docker_remote
+from e2h.docker_remote import DockerRemoteError, prepared_workspace_volume
+from e2h.models import ContainerSandbox
+
+IMAGE = "python@sha256:" + "0" * 64
+
+
+def _bypass_precreate_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        docker_remote,
+        "_validated_workspace_archive",
+        lambda archive: archive,
+    )
+    monkeypatch.setattr(
+        docker_remote,
+        "require_patched_docker_archive",
+        lambda runtime_binary: None,
+    )
+
+
+def test_volume_create_failure_still_attempts_named_volume_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bypass_precreate_dependencies(monkeypatch)
+    calls: list[list[str]] = []
+
+    def fake_run_docker(
+        runtime: str,
+        args: list[str],
+        **kwargs: Any,
+    ) -> str:
+        del runtime, kwargs
+        calls.append(list(args))
+        if args[:2] == ["volume", "create"]:
+            raise DockerRemoteError("lost response after daemon-side volume create")
+        return ""
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+
+    with pytest.raises(DockerRemoteError, match="lost response"):
+        with prepared_workspace_volume(
+            ContainerSandbox(image=IMAGE),
+            object(),  # type: ignore[arg-type]
+        ):
+            raise AssertionError("failed create must not yield")
+
+    assert len(calls) == 2
+    assert calls[0][:2] == ["volume", "create"]
+    assert calls[1][:3] == ["volume", "rm", "-f"]
+    assert calls[1][-1] == calls[0][-1]
+
+
+def test_container_create_failure_still_attempts_named_container_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bypass_precreate_dependencies(monkeypatch)
+    calls: list[list[str]] = []
+
+    def fake_run_docker(
+        runtime: str,
+        args: list[str],
+        **kwargs: Any,
+    ) -> str:
+        del runtime, kwargs
+        calls.append(list(args))
+        if args[:2] == ["volume", "create"]:
+            return args[-1]
+        if args and args[0] == "create":
+            raise DockerRemoteError("lost response after daemon-side container create")
+        return ""
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+
+    with pytest.raises(DockerRemoteError, match="lost response"):
+        with prepared_workspace_volume(
+            ContainerSandbox(image=IMAGE),
+            object(),  # type: ignore[arg-type]
+        ):
+            raise AssertionError("failed create must not yield")
+
+    assert [args[0] for args in calls] == ["volume", "create", "rm", "volume"]
+    create_args = calls[1]
+    container_name = create_args[create_args.index("--name") + 1]
+    volume_name = calls[0][-1]
+    assert calls[2] == ["rm", "-f", container_name]
+    assert calls[3] == ["volume", "rm", "-f", volume_name]
