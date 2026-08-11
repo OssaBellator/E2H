@@ -44,6 +44,13 @@ class MCPServiceError(ValueError):
     """Raised when an MCP-facing operation cannot be completed safely."""
 
 
+def _redact_operation_error(message: str, root: Path) -> str:
+    """Remove the configured absolute root from model-facing operation errors."""
+    if root.parent == root:
+        return message
+    return message.replace(os.fspath(root), "<root>")
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", revalidate_instances="always")
 
@@ -405,7 +412,9 @@ class E2HMCPService:
                     read_only=True,
                 )
         except (StoreError, StoreSnapshotError, ValueError) as exc:
-            raise MCPServiceError(str(exc)) from exc
+            raise MCPServiceError(
+                _redact_operation_error(str(exc), self.config.root)
+            ) from exc
         material = {
             "view": selected.value,
             "rows": rows,
@@ -443,11 +452,16 @@ class E2HMCPService:
             raise MCPServiceError("max_bytes must be non-negative")
         if min_bytes is not None and max_bytes is not None and min_bytes > max_bytes:
             raise MCPServiceError("min_bytes must not exceed max_bytes")
-        size, digest = _stable_file_sha256(
-            path,
-            max_bytes=self.config.max_artifact_bytes,
-            root=self.config.root,
-        )
+        try:
+            size, digest = _stable_file_sha256(
+                path,
+                max_bytes=self.config.max_artifact_bytes,
+                root=self.config.root,
+            )
+        except MCPServiceError as exc:
+            raise MCPServiceError(
+                _redact_operation_error(str(exc), self.config.root)
+            ) from exc
         digest_matches = None if expected_sha256 is None else digest == expected_sha256
         size_matches = (min_bytes is None or size >= min_bytes) and (
             max_bytes is None or size <= max_bytes
@@ -476,7 +490,9 @@ class E2HMCPService:
                 containment_root=self.config.root,
             )
         except SnapshotError as exc:
-            raise MCPServiceError(str(exc)) from exc
+            raise MCPServiceError(
+                _redact_operation_error(str(exc), self.config.root)
+            ) from exc
         return SnapshotVerification(
             archive=relative,
             snapshot_id=manifest.snapshot_id,
@@ -516,7 +532,9 @@ class E2HMCPService:
                     workspace_descriptor=workspace_descriptor,
                 )
         except (CapsuleLoadError, DirectoryBindingError, RunnerError) as exc:
-            raise MCPServiceError(str(exc)) from exc
+            raise MCPServiceError(
+                _redact_operation_error(str(exc), self.config.root)
+            ) from exc
 
         raw_result = result.model_dump(mode="json")
         checks = [
