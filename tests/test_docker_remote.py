@@ -47,7 +47,7 @@ if args and args[0] == "version":
     if os.environ.get("DOCKER_TEST_FAIL"):
         print("version probe failed", file=sys.stderr)
         raise SystemExit(7)
-    print(os.environ.get("DOCKER_TEST_VERSIONS", "29.7.2 29.7.2"))
+    print(os.environ.get("DOCKER_TEST_VERSIONS", "29.5.2 29.5.2"))
 elif args[:2] == ["volume", "create"]:
     if os.environ.get("DOCKER_TEST_VOLUME_CREATE_FAIL"):
         print("volume create failed", file=sys.stderr)
@@ -95,13 +95,19 @@ def _sealed_archive(tmp_path: Path):
 
 
 def test_parse_docker_version_accepts_release_suffix() -> None:
-    assert _parse_version("29.6.2-ce", noun="client") == DockerVersion(29, 6, 2)
+    assert _parse_version("29.5.2-ce", noun="client") == DockerVersion(29, 5, 2)
     assert _parse_version("30.0.0+vendor", noun="server") == DockerVersion(30, 0, 0)
 
 
 def test_parse_docker_version_rejects_incomplete_value() -> None:
     with pytest.raises(DockerRemoteError, match="parse Docker client version"):
         _parse_version("29.6", noun="client")
+
+
+@pytest.mark.parametrize("value", ["29.5.2-dev", "29.5.2-nightly", "29.5.2-snapshot"])
+def test_parse_docker_version_rejects_unknown_hyphen_suffix(value: str) -> None:
+    with pytest.raises(DockerRemoteError, match="prerelease version is not accepted"):
+        _parse_version(value, noun="client")
 
 
 def test_inspect_docker_versions_reads_client_and_server(
@@ -125,13 +131,13 @@ def test_patched_docker_archive_requires_both_sides_at_minimum(
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
 
-    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.7.2 29.7.2")
+    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.5.2 29.5.2")
     assert patched_docker_archive_supported(str(runtime)) is True
 
-    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.7.1 29.7.2")
+    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.5.1 29.5.2")
     assert patched_docker_archive_supported(str(runtime)) is False
 
-    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.7.2 29.7.1")
+    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.5.2 29.5.1")
     assert patched_docker_archive_supported(str(runtime)) is False
 
 
@@ -141,11 +147,11 @@ def test_require_patched_docker_archive_reports_observed_versions(
 ) -> None:
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
-    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.7.1 29.7.2")
+    monkeypatch.setenv("DOCKER_TEST_VERSIONS", "29.5.1 29.5.2")
 
     with pytest.raises(
         DockerRemoteError,
-        match=r"client and server >= 29\.7\.2; observed client 29\.7\.1, server 29\.7\.2",
+        match=r"client and server >= 29\.5\.2; observed client 29\.5\.1, server 29\.5\.2",
     ):
         require_patched_docker_archive(str(runtime))
 
