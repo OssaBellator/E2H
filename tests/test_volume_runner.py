@@ -30,13 +30,14 @@ def _archive(
     directories: list[str],
     symlinks: dict[str, str] | None = None,
 ) -> WorkspaceArchive:
+    symlinks = symlinks or {}
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as handle:
         for name in directories:
             member = tarfile.TarInfo(name)
             member.type = tarfile.DIRTYPE
             handle.addfile(member)
-        for name, target in sorted((symlinks or {}).items()):
+        for name, target in sorted(symlinks.items()):
             member = tarfile.TarInfo(name)
             member.type = tarfile.SYMTYPE
             member.linkname = target
@@ -46,8 +47,11 @@ def _archive(
     return WorkspaceArchive(
         file=stream,
         directories=frozenset(directories),
-        source_bytes=0,
-        entries=len(directories) - 1 + len(symlinks or {}),
+        source_bytes=sum(
+            len(target.encode("utf-8", errors="surrogateescape"))
+            for target in symlinks.values()
+        ),
+        entries=len(directories) - 1 + len(symlinks),
         archive_bytes=archive_bytes,
     )
 
@@ -279,6 +283,47 @@ def test_workspace_tree_rejects_archive_directory_metadata_mismatch() -> None:
     )
 
     with pytest.raises(volume_runner.RunnerError, match="metadata does not match"):
+        run_capsule_prepared_volume(
+            _capsule([CommandCheck(id="check", argv=["never"])]),
+            forged,
+            "e2h-replay-workspace-abc",
+            container_runtime="does-not-exist",
+        )
+
+
+def test_workspace_tree_rejects_archive_entry_count_metadata_mismatch() -> None:
+    archive = _archive(directories=[".", "task"])
+    forged = WorkspaceArchive(
+        file=archive.file,
+        directories=archive.directories,
+        source_bytes=archive.source_bytes,
+        entries=archive.entries + 1,
+        archive_bytes=archive.archive_bytes,
+    )
+
+    with pytest.raises(volume_runner.RunnerError, match="capture metadata does not match"):
+        run_capsule_prepared_volume(
+            _capsule([CommandCheck(id="check", argv=["never"])]),
+            forged,
+            "e2h-replay-workspace-abc",
+            container_runtime="does-not-exist",
+        )
+
+
+def test_workspace_tree_rejects_archive_source_byte_metadata_mismatch() -> None:
+    archive = _archive(
+        directories=[".", "task"],
+        symlinks={"task/link": "."},
+    )
+    forged = WorkspaceArchive(
+        file=archive.file,
+        directories=archive.directories,
+        source_bytes=archive.source_bytes + 1,
+        entries=archive.entries,
+        archive_bytes=archive.archive_bytes,
+    )
+
+    with pytest.raises(volume_runner.RunnerError, match="capture metadata does not match"):
         run_capsule_prepared_volume(
             _capsule([CommandCheck(id="check", argv=["never"])]),
             forged,
