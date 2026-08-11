@@ -26,7 +26,7 @@ def test_explicit_local_replay_requires_handle_bound_local_support(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: False)
-    monkeypatch.setattr(mcp_server, "isolated_container_replay_supported", lambda: True)
+    monkeypatch.setattr(mcp_server, "isolated_container_replay_supported", lambda: False)
 
     with pytest.raises(MCPServiceError, match="MCP local replay is unavailable"):
         E2HMCPService(
@@ -38,7 +38,7 @@ def test_explicit_local_replay_requires_handle_bound_local_support(
         )
 
 
-def test_explicit_container_replay_requires_isolated_snapshot_support(
+def test_explicit_container_replay_remains_fail_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -55,7 +55,7 @@ def test_explicit_container_replay_requires_isolated_snapshot_support(
         )
 
 
-def test_auto_replay_rejects_host_without_any_supported_backend(
+def test_auto_replay_requires_supported_local_backend(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -72,26 +72,12 @@ def test_auto_replay_rejects_host_without_any_supported_backend(
         )
 
 
-@pytest.mark.parametrize(
-    ("local_supported", "container_supported"),
-    [(True, False), (False, True), (True, True)],
-)
-def test_auto_replay_constructs_when_at_least_one_backend_is_supported(
+def test_auto_replay_constructs_with_handle_bound_local_support(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    local_supported: bool,
-    container_supported: bool,
 ) -> None:
-    monkeypatch.setattr(
-        mcp_server,
-        "handle_bound_local_replay_supported",
-        lambda: local_supported,
-    )
-    monkeypatch.setattr(
-        mcp_server,
-        "isolated_container_replay_supported",
-        lambda: container_supported,
-    )
+    monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: True)
+    monkeypatch.setattr(mcp_server, "isolated_container_replay_supported", lambda: False)
 
     service = E2HMCPService(
         MCPServerConfig(
