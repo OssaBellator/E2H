@@ -20,7 +20,7 @@ from e2h.workspace_archive import WorkspaceArchive
 
 _MIN_DOCKER_ARCHIVE_VERSION = (29, 5, 2)
 _VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)([-+].*)?$")
-_STABLE_HYPHEN_SUFFIX_PATTERN = re.compile(r"^-(?:ce|ee)(?:[.+-][0-9a-z.-]+)?$")
+_STABLE_HYPHEN_SUFFIXES = frozenset({"-ce", "-ee"})
 _RESOURCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _VERSION_TIMEOUT_SECONDS = 10.0
 _CONTROL_TIMEOUT_SECONDS = 30.0
@@ -48,7 +48,7 @@ def _parse_version(value: str, *, noun: str) -> DockerVersion:
     if match is None:
         raise DockerRemoteError(f"unable to parse Docker {noun} version: {value!r}")
     suffix = (match.group(4) or "").lower()
-    if suffix.startswith("-") and _STABLE_HYPHEN_SUFFIX_PATTERN.fullmatch(suffix) is None:
+    if suffix.startswith("-") and suffix not in _STABLE_HYPHEN_SUFFIXES:
         raise DockerRemoteError(f"Docker {noun} prerelease version is not accepted: {value!r}")
     return DockerVersion(*(int(match.group(index)) for index in range(1, 4)))
 
