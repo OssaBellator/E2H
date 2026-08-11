@@ -95,6 +95,8 @@ def build_container_argv(
         "run",
         "--rm",
         "--init",
+        "--log-driver",
+        "none",
         "--cidfile",
         cidfile_text,
         "--pull",

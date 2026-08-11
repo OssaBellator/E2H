@@ -96,9 +96,9 @@ Malformed verification commands and expected verification failures are returned 
 
 ## Capability discovery
 
-The Agent Card always advertises status, artifact verification, and snapshot verification. It advertises memory queries only when the operator configured an existing E2H experiment store. It advertises replay only when replay was explicitly enabled.
+The Agent Card always advertises status, artifact verification, and snapshot verification. It advertises memory queries only when the operator configured an existing E2H experiment store. It advertises replay only when replay was explicitly enabled and the selected server configuration has a supported replay path.
 
-This matters because Agent Cards are capability declarations, not merely documentation: remote agents should not be told that E2H can execute replay when the local operator did not permit it. The current replay capability is the handle-bound local path; container-backed remote replay remains disabled until issue #288 is resolved.
+This matters because Agent Cards are capability declarations, not merely documentation: remote agents should not be told that E2H can execute replay when the local operator did not permit it. Remote replay uses either the handle-bound local path or the bounded read-only isolated-container path selected by the operator.
 
 ## Replay is opt-in
 
@@ -108,7 +108,7 @@ Replay executes capsule-declared commands and is disabled by default:
 uv run e2h-a2a \
   --root . \
   --allow-replay \
-  --backend local
+  --backend auto
 ```
 
 A replay request is then:
@@ -122,11 +122,17 @@ A replay request is then:
 }
 ```
 
-The remote A2A caller cannot select the execution backend or container-runtime binary. Those remain operator-side server settings. Replay output is digest-only by default; bounded stdout/stderr is included only when the operator also starts the server with `--expose-replay-output`.
+The remote A2A caller cannot select the execution backend, container-runtime binary, or isolated workspace limits. Those remain operator-side server settings. Replay output is digest-only by default; bounded stdout/stderr is included only when the operator also starts the server with `--expose-replay-output`.
 
-A2A reuses the MCP verification service. Effective local replay is handle-bound on supported Linux hosts. Explicit container replay configuration is rejected, and `auto` rejects a sandbox capsule before any container runtime is launched. The normal direct E2H CLI/library container runner remains available outside A2A/MCP for trusted local use.
+A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist. Container replay first captures the requested workspace through descriptor-bound filesystem operations into a private temporary tree, then gives only that private path to the container runtime. The private tree is mounted read-only and discarded after replay, so container checks cannot write back to the caller workspace.
 
-Enabling remote replay is not equivalent to sandboxing. The currently supported A2A replay path executes commands directly on the A2A host, so enable it only for capsules you are prepared to execute there. For container-isolated replay, use the normal trusted local E2H CLI/library path until the remote container workspace boundary can be re-enabled safely.
+Remote container replay is intentionally stricter than the direct container runner. It requires `sandbox.workspace_access: read_only`, `sandbox.read_only_root: true`, and `sandbox.pull_policy: never`. This prevents remote replays from expanding the private workspace, growing the container writable layer, or triggering a new image download into host runtime storage. Container invocations also use `--log-driver none`, while attached stdout/stderr continues through E2H's bounded capture rather than a separate daemon log file.
+
+The isolated input snapshot is bounded by operator-selected byte and entry limits. The defaults are 100 MiB and 10,000 filesystem entries, configurable with `--max-replay-workspace-bytes` and `--max-replay-workspace-entries`. Hosts that lack the required descriptor-relative filesystem primitives fail closed for isolated container replay.
+
+Replay results explicitly report `execution_backend`, `workspace_mode`, and `workspace_mutations_persisted`. The replay digest binds those semantics together with the full E2H `RunResult`, so persistent local execution and discarded isolated execution cannot share a replay digest merely because command outputs happen to match.
+
+Enabling remote replay is not equivalent to a universal sandbox guarantee. Local replay executes commands directly on the A2A host. Container replay applies the capsule's container sandbox policy plus the stricter remote isolation rules above. Only enable replay for capsules and container images the operator is prepared to execute.
 
 ## Trust boundary
 
@@ -138,7 +144,9 @@ The A2A layer reuses the same root-bounded verification service as the MCP integ
 - snapshot checks verify manifest structure, archive members, sizes, and content digests;
 - replay is absent unless operator-enabled;
 - supported local replay binds the workspace/check directory identities before process launch;
-- remote container replay fails closed until a stable mount/workdir design is available;
+- supported container replay captures a bounded descriptor-bound private copy and mounts it read-only;
+- writable remote workspaces, writable container roots, and runtime image pulls fail closed;
+- container daemon log persistence is disabled while E2H retains bounded attached output;
 - the A2A response size is bounded to prevent large verification results from being copied automatically into another agent's context;
 - local absolute root paths are scrubbed from expected verification errors before they are returned to a remote agent.
 
