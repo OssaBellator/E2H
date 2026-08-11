@@ -56,8 +56,8 @@ def test_remote_container_replay_remains_fail_closed() -> None:
     assert isolated_runner.isolated_container_replay_supported() is False
 
 
-def test_isolated_container_runner_refuses_mutable_host_path(tmp_path: Path) -> None:
-    with pytest.raises(RunnerError, match="same-UID-mutable host pathname"):
+def test_isolated_container_runner_waits_for_real_runtime_validation(tmp_path: Path) -> None:
+    with pytest.raises(RunnerError, match="real patched Docker runtime"):
         isolated_runner.run_capsule_isolated_container(
             _capsule(),
             tmp_path,
