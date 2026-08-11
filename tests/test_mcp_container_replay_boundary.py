@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import e2h.mcp_server as mcp_server
 from e2h.mcp_server import E2HMCPService, MCPServerConfig, MCPServiceError
 from e2h.runner import ExecutionBackend
 
@@ -38,7 +39,11 @@ def test_mcp_rejects_explicit_container_replay_configuration(tmp_path: Path) -> 
         )
 
 
-def test_mcp_auto_rejects_sandbox_capsule_before_container_launch(tmp_path: Path) -> None:
+def test_mcp_auto_rejects_sandbox_capsule_before_container_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: True)
     capsule = tmp_path / "capsule.json"
     _sandbox_capsule(capsule)
     workspace = tmp_path / "workspace"

@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
 
 import pytest
 
-import e2h.directory_binding as directory_binding
-from e2h.bound_runner import run_capsule_bound_local
+from e2h.bound_runner import handle_bound_local_replay_supported, run_capsule_bound_local
 from e2h.directory_binding import bound_absolute_directory
 from e2h.models import TaskCapsule
 from e2h.runner import CheckStatus, RunnerError, RunStatus
 
 pytestmark = pytest.mark.skipif(
-    not directory_binding._DIRECTORY_BINDING_SUPPORTED or not sys.platform.startswith("linux"),
-    reason="handle-bound local replay requires Linux directory descriptors and procfs",
+    not handle_bound_local_replay_supported(),
+    reason="handle-bound local replay requires supported Linux directory handles and procfs",
 )
 
 

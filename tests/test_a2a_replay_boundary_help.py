@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from e2h.a2a_agent import _parser, _public_error, build_agent_card
+from e2h.bound_runner import handle_bound_local_replay_supported
 from e2h.mcp_server import E2HMCPService, MCPServerConfig
 from e2h.runner import ExecutionBackend
 
@@ -20,6 +23,10 @@ def test_a2a_help_describes_remote_container_fail_closed_boundary() -> None:
     assert "command-executing local replay" in help_text
 
 
+@pytest.mark.skipif(
+    not handle_bound_local_replay_supported(),
+    reason="replay skill is advertised only on supported handle-bound local hosts",
+)
 def test_replay_skill_advertises_local_handle_bound_execution(tmp_path: Path) -> None:
     service = E2HMCPService(
         MCPServerConfig(
