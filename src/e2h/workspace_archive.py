@@ -363,7 +363,7 @@ def _open_memfd() -> BinaryIO:
     flags = os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
     try:
         descriptor = os.memfd_create("e2h-replay-workspace", flags=flags)
-        return os.fdopen(descriptor, "w+b")
+        return os.fdopen(descriptor, "w+b", buffering=0)
     except OSError as exc:
         raise WorkspaceArchiveError(f"unable to create replay workspace memfd: {exc}") from exc
 
