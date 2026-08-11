@@ -52,14 +52,11 @@ def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def _directory_snapshot_identity(
-    info: os.stat_result,
-) -> tuple[int, int, int, int, int]:
+def _directory_snapshot_identity(info: os.stat_result) -> tuple[int, int, int, int]:
     return (
         info.st_dev,
         info.st_ino,
         info.st_mtime_ns,
-        info.st_ctime_ns,
         info.st_mode,
     )
 
