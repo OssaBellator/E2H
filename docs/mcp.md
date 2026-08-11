@@ -31,18 +31,22 @@ uv run e2h-mcp \
   --root . \
   --store .e2h/evidence.duckdb \
   --allow-replay \
-  --backend local
+  --backend auto
 ```
 
-`e2h_replay` accepts only a capsule path and workspace path relative to the configured root. The execution backend is server configuration, not a model-controlled tool argument.
+`e2h_replay` accepts only a capsule path and workspace path relative to the configured root. The execution backend is server configuration, not a model-controlled tool argument. `auto` selects container replay for capsules with a sandbox and local replay otherwise.
 
-On native Linux, effective local MCP replay binds the canonical workspace with no-follow directory opens before command execution. Each declared working directory is then opened relative to held directory descriptors and checked to remain beneath that bound workspace. The child process receives a `/proc/<server-pid>/fd/<check-directory-fd>` working directory while the server keeps that descriptor open for the full command. Rebinding the original workspace pathname after the handle is acquired therefore cannot redirect the local child to a different directory. Missing executables still use the runner's normal typed launch failures, and the existing POSIX process-group timeout cleanup remains in effect. Local MCP replay fails closed on platforms where this handle-bound Linux/procfs path is unavailable; direct library-level `run_capsule()` behavior is unchanged.
+On native Linux, local MCP replay binds the canonical workspace with no-follow directory opens before command execution. Each declared working directory is then opened relative to held directory descriptors and checked to remain beneath that bound workspace. The child process receives a `/proc/<server-pid>/fd/<check-directory-fd>` working directory while the server keeps that descriptor open for the full command. Rebinding the original workspace pathname after the handle is acquired therefore cannot redirect the local child to a different directory. Local replay runs against the caller workspace, so successful command mutations persist. Missing executables still use the runner's normal typed launch failures, and the existing POSIX process-group timeout cleanup remains in effect. Local MCP replay fails closed on platforms where this handle-bound Linux/procfs path is unavailable; direct library-level `run_capsule()` behavior is unchanged.
 
-MCP container replay currently fails closed. An explicit `--allow-replay --backend container` configuration is rejected when the server is constructed, and an `auto` replay request is rejected if the loaded capsule would select the container backend. The normal library/CLI container runner remains available outside MCP. This temporary boundary prevents the remote MCP surface from claiming configured-root containment while Docker/Podman would still re-consult mutable host workspace and workdir pathnames. Re-enabling container replay requires a mechanism that binds both the container mount source and effective working directory to stable identities; that work remains tracked in issue #288.
+Container MCP replay uses a different workspace contract. Before the runtime is invoked, E2H binds the requested source directory by descriptor and captures a private temporary copy while enforcing byte and entry limits. Regular files and directories are revalidated during capture, unsupported special files are rejected, and only relative symlinks whose lexical target remains inside the isolated tree are preserved. The container runtime receives only the private copy path, so rebinding the caller's original workspace pathname after capture cannot redirect the runtime to another source tree.
 
-By default replay results omit stdout and stderr and return their SHA-256 digests, character counts, truncation flags, status, failures, and an exact replay-result digest. This keeps routine MCP calls from automatically copying command output into model context. An operator can deliberately expose E2H's already bounded command output with `--expose-replay-output`.
+Remote container replay is intentionally limited to capsules whose `sandbox.workspace_access` is `read_only`. The capture limits bound the input copy, but they cannot bound arbitrary file growth after a read-write bind mount is handed to Docker or Podman; accepting writable remote workspaces would therefore expose an unbounded host-disk resource path. Writable isolated workspace replay remains available only through trusted direct library/CLI use until E2H has a quota-backed writable workspace primitive. Container mutations never write back to the caller workspace, and the private copy is discarded after replay.
 
-Enabling MCP replay is not a sandbox by itself. The currently supported MCP replay path is the handle-bound local backend, so only enable it for commands you are prepared to execute directly on the MCP host. For container-isolated replay, use the normal trusted local E2H CLI/library path until the MCP container workspace boundary is re-enabled safely.
+The isolated capture limit defaults are 100 MiB and 10,000 filesystem entries. Operators can change them with `--max-replay-workspace-bytes` and `--max-replay-workspace-entries`. Hosts that do not provide every descriptor primitive required by the capture path fail closed for container replay instead of silently falling back to pathname-based copying.
+
+By default replay results omit stdout and stderr and return their SHA-256 digests, character counts, truncation flags, status, failures, and an exact replay-result digest. Each result also reports `execution_backend`, `workspace_mode`, and `workspace_mutations_persisted`, so callers can distinguish persistent handle-bound local execution from discarded isolated-copy execution. `replay_sha256` binds those workspace semantics together with the full `RunResult`; the validated capsule has its own `capsule_sha256`. An operator can deliberately expose E2H's already bounded command output with `--expose-replay-output`.
+
+Enabling MCP replay is not a general sandbox guarantee. Local replay executes declared commands directly on the MCP host. Container replay uses the capsule's existing container sandbox policy plus the additional read-only isolated-workspace boundary described above. Only enable replay for capsules and container images the operator is prepared to execute.
 
 ## Example host configuration
 
@@ -76,6 +80,6 @@ The MCP layer does not claim that a SHA-256 digest proves an external statement 
 - memory responses receive a digest over the exact bounded query result and selected store metadata;
 - artifact checks hash the exact stable file observed during the call;
 - snapshot checks reuse E2H's manifest and blob verification;
-- replay responses bind both the validated capsule and the exact full `RunResult`, even when raw command output is omitted from the MCP response.
+- replay responses return a capsule digest plus a replay digest over the full `RunResult` and the backend/workspace persistence semantics, even when raw command output is omitted from the MCP response.
 
 These boundaries are intended to make agent-visible memory and verification results auditable without promoting hidden reasoning or unverified text into trusted executable state.
