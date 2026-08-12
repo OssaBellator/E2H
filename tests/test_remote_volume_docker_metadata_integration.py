@@ -72,15 +72,35 @@ import os
 import stat
 from pathlib import Path
 
-path = Path('marker.txt')
-info = os.stat(path, follow_symlinks=False)
-print(json.dumps({
-    'content': path.read_text(),
-    'uid': info.st_uid,
-    'gid': info.st_gid,
-    'mode': stat.S_IMODE(info.st_mode),
-}, sort_keys=True))
+
+def metadata(path: Path):
+    info = os.stat(path, follow_symlinks=False)
+    return {
+        'uid': info.st_uid,
+        'gid': info.st_gid,
+        'mode': stat.S_IMODE(info.st_mode),
+    }
+
+marker = Path('marker.txt')
+payload = {
+    'root': metadata(Path('.')),
+    'nested': metadata(Path('nested')),
+    'marker': {
+        **metadata(marker),
+        'content': marker.read_text(),
+    },
+}
+print(json.dumps(payload, sort_keys=True))
 """.strip()
+
+
+def _expected_metadata(path: Path) -> dict[str, int]:
+    info = path.stat(follow_symlinks=False)
+    return {
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+        "mode": stat.S_IMODE(info.st_mode),
+    }
 
 
 def test_real_docker_import_preserves_workspace_ownership_and_mode(tmp_path: Path) -> None:
@@ -93,17 +113,24 @@ def test_real_docker_import_preserves_workspace_ownership_and_mode(tmp_path: Pat
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    workspace.chmod(0o1755)
+    nested = workspace / "nested"
+    nested.mkdir()
+    nested.chmod(0o2755)
     marker = workspace / "marker.txt"
     marker.write_text("trusted", encoding="utf-8")
     marker.chmod(0o4755)
-    source = marker.stat(follow_symlinks=False)
     expected = {
-        "content": "trusted",
-        "uid": source.st_uid,
-        "gid": source.st_gid,
-        "mode": stat.S_IMODE(source.st_mode),
+        "root": _expected_metadata(workspace),
+        "nested": _expected_metadata(nested),
+        "marker": {
+            **_expected_metadata(marker),
+            "content": "trusted",
+        },
     }
-    assert expected["mode"] == 0o4755
+    assert expected["root"]["mode"] == 0o1755
+    assert expected["nested"]["mode"] == 0o2755
+    assert expected["marker"]["mode"] == 0o4755
 
     before = _resources(runtime)
     capsule = TaskCapsule(
