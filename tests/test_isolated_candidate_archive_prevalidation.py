@@ -58,6 +58,40 @@ def _escaping_symlink_archive() -> WorkspaceArchive:
     )
 
 
+def _symlink_parent_archive(*, child_first: bool) -> WorkspaceArchive:
+    target = "."
+    payload = b"x"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as handle:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+
+        link = tarfile.TarInfo("alias")
+        link.type = tarfile.SYMTYPE
+        link.linkname = target
+
+        child = tarfile.TarInfo("alias/payload.txt")
+        child.size = len(payload)
+
+        if child_first:
+            handle.addfile(child, io.BytesIO(payload))
+            handle.addfile(link)
+        else:
+            handle.addfile(link)
+            handle.addfile(child, io.BytesIO(payload))
+
+    archive_bytes = stream.tell()
+    stream.seek(0)
+    return WorkspaceArchive(
+        file=stream,
+        directories=frozenset({"."}),
+        source_bytes=len(target.encode("utf-8")) + len(payload),
+        entries=2,
+        archive_bytes=archive_bytes,
+    )
+
+
 def _capsule() -> TaskCapsule:
     return TaskCapsule(
         id="preimport-archive-validation",
@@ -118,6 +152,29 @@ def test_candidate_rejects_escaping_symlink_before_docker_import(
     imported = _install_preflight_stubs(monkeypatch, _escaping_symlink_archive())
 
     with pytest.raises(RunnerError, match="symlink escapes workspace root"):
+        isolated_runner._run_capsule_isolated_container_candidate(
+            _capsule(),
+            tmp_path / "unused-workspace",
+            max_workspace_bytes=1024 * 1024,
+            max_workspace_entries=10,
+            container_runtime="docker-test",
+        )
+
+    assert imported == [False]
+
+
+@pytest.mark.parametrize("child_first", [False, True])
+def test_candidate_rejects_member_under_symlink_before_docker_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    child_first: bool,
+) -> None:
+    imported = _install_preflight_stubs(
+        monkeypatch,
+        _symlink_parent_archive(child_first=child_first),
+    )
+
+    with pytest.raises(RunnerError, match="nested under symlink 'alias'"):
         isolated_runner._run_capsule_isolated_container_candidate(
             _capsule(),
             tmp_path / "unused-workspace",
