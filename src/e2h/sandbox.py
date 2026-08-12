@@ -106,8 +106,6 @@ def build_container_argv(
         "--log-driver",
         "none",
         "--no-healthcheck",
-        "--entrypoint",
-        "",
         "--cidfile",
         cidfile_text,
         "--pull",
@@ -134,13 +132,15 @@ def build_container_argv(
         sandbox.user,
         "--tmpfs",
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--entrypoint",
+        check.argv[0],
     ]
     if sandbox.read_only_root:
         argv.append("--read-only")
     for key, value in sorted(check.env.items()):
         argv.extend(["--env", f"{key}={value}"])
     argv.append(sandbox.image)
-    argv.extend(check.argv)
+    argv.extend(check.argv[1:])
     return argv
 
 
@@ -186,8 +186,6 @@ def build_container_volume_argv(
         "--log-driver",
         "none",
         "--no-healthcheck",
-        "--entrypoint",
-        "",
         "--name",
         container_name,
         "--pull",
@@ -214,12 +212,14 @@ def build_container_volume_argv(
         sandbox.user,
         "--tmpfs",
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--entrypoint",
+        check.argv[0],
         "--read-only",
     ]
     for key, value in sorted(check.env.items()):
         argv.extend(["--env", f"{key}={value}"])
     argv.append(sandbox.image)
-    argv.extend(check.argv)
+    argv.extend(check.argv[1:])
     return argv
 
 
