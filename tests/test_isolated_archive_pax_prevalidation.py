@@ -81,6 +81,33 @@ def test_unsupported_pax_key_is_rejected_before_logical_tar_parse(
         _validate_archive_member_ancestry(archive)
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("uid", "9" * 100),
+        ("gid", "-1"),
+        ("mtime", "1.1234567890"),
+        ("path", "p" * 4097),
+        ("hdrcharset", "UTF-8"),
+    ],
+)
+def test_allowed_pax_key_with_invalid_value_fails_before_logical_tar_parse(
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    value: str,
+) -> None:
+    archive = _archive(member_pax={key: value})
+
+    def forbidden_open(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("invalid PAX values must fail before tarfile.open")
+
+    monkeypatch.setattr(isolated_runner.tarfile, "open", forbidden_open)
+
+    with pytest.raises(RunnerError, match=r"PAX .* value"):
+        _validate_archive_member_ancestry(archive)
+
+
 def test_archive_ancestry_rejects_unsupported_global_pax_metadata() -> None:
     archive = _archive(global_pax={"SCHILY.xattr.user.e2h": "blocked"})
 
