@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 import tarfile
+from collections.abc import Callable
 
 import pytest
 
@@ -14,7 +15,7 @@ from e2h.workspace_archive import WorkspaceArchive
 IMAGE = "python@sha256:" + "0" * 64
 
 
-def _sealed_gnu_long_name_archive() -> WorkspaceArchive:
+def _require_seal_support() -> None:
     if docker_remote.fcntl is None or not hasattr(os, "memfd_create"):
         pytest.skip("sealed memfd archive test requires Linux file seals")
     required = (
@@ -35,18 +36,21 @@ def _sealed_gnu_long_name_archive() -> WorkspaceArchive:
     if not required:
         pytest.skip("sealed memfd archive test requires Linux file seals")
 
+
+def _sealed_archive(
+    write_members: Callable[[tarfile.TarFile], None],
+    *,
+    archive_format: int = tarfile.PAX_FORMAT,
+) -> WorkspaceArchive:
+    _require_seal_support()
+    assert docker_remote.fcntl is not None
     descriptor = os.memfd_create(
         "e2h-test-forged-archive",
         flags=os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING,
     )
     stream = os.fdopen(descriptor, "w+b", buffering=0)
-    with tarfile.open(fileobj=stream, mode="w", format=tarfile.GNU_FORMAT) as handle:
-        root = tarfile.TarInfo(".")
-        root.type = tarfile.DIRTYPE
-        handle.addfile(root)
-        payload = tarfile.TarInfo("n" * 150)
-        payload.size = 0
-        handle.addfile(payload, io.BytesIO())
+    with tarfile.open(fileobj=stream, mode="w", format=archive_format) as handle:
+        write_members(handle)
     archive_bytes = stream.tell()
     seals = (
         docker_remote.fcntl.F_SEAL_WRITE
@@ -65,10 +69,52 @@ def _sealed_gnu_long_name_archive() -> WorkspaceArchive:
     )
 
 
-def test_importer_rejects_nonproducer_tar_shape_before_docker_contact(
+def _sealed_gnu_long_name_archive() -> WorkspaceArchive:
+    def write_members(handle: tarfile.TarFile) -> None:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+        payload = tarfile.TarInfo("n" * 150)
+        payload.size = 0
+        handle.addfile(payload, io.BytesIO())
+
+    return _sealed_archive(write_members, archive_format=tarfile.GNU_FORMAT)
+
+
+def _sealed_missing_mtime_archive() -> WorkspaceArchive:
+    def write_members(handle: tarfile.TarFile) -> None:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+        payload = tarfile.TarInfo("payload.txt")
+        payload.type = tarfile.REGTYPE
+        payload.size = 0
+        handle.addfile(payload, io.BytesIO())
+
+    return _sealed_archive(write_members)
+
+
+def _sealed_alternate_regular_type_archive() -> WorkspaceArchive:
+    def write_members(handle: tarfile.TarFile) -> None:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        root.pax_headers["mtime"] = "0"
+        handle.addfile(root)
+        payload = tarfile.TarInfo("payload.txt")
+        payload.type = tarfile.AREGTYPE
+        payload.pax_headers["mtime"] = "0"
+        payload.size = 0
+        handle.addfile(payload, io.BytesIO())
+
+    return _sealed_archive(write_members)
+
+
+def _assert_rejected_before_docker(
+    archive: WorkspaceArchive,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    message: str,
 ) -> None:
-    archive = _sealed_gnu_long_name_archive()
     docker_contacted = False
 
     def forbidden_docker(*args: object, **kwargs: object) -> str:
@@ -82,9 +128,39 @@ def test_importer_rejects_nonproducer_tar_shape_before_docker_contact(
     monkeypatch.setattr(docker_remote, "_require_volume_free_image", forbidden_docker)
 
     try:
-        with pytest.raises(DockerRemoteError, match="unsupported tar header type"):
+        with pytest.raises(DockerRemoteError, match=message):
             with prepared_workspace_volume(ContainerSandbox(image=IMAGE), archive):
                 raise AssertionError("invalid archive must not yield a Docker volume")
         assert docker_contacted is False
     finally:
         archive.file.close()
+
+
+def test_importer_rejects_nonproducer_tar_shape_before_docker_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_rejected_before_docker(
+        _sealed_gnu_long_name_archive(),
+        monkeypatch,
+        message="unsupported tar header type",
+    )
+
+
+def test_importer_rejects_archive_member_without_producer_pax_mtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_rejected_before_docker(
+        _sealed_missing_mtime_archive(),
+        monkeypatch,
+        message="missing producer PAX mtime",
+    )
+
+
+def test_importer_rejects_alternate_regular_file_header_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_rejected_before_docker(
+        _sealed_alternate_regular_type_archive(),
+        monkeypatch,
+        message="producer regular file type",
+    )
