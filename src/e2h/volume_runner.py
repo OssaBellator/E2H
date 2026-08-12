@@ -41,7 +41,7 @@ from e2h.runner import (
 )
 from e2h.sandbox import (
     SandboxError,
-    build_container_volume_argv,
+    build_container_volume_create_argv,
     force_remove_named_container,
 )
 from e2h.workspace_archive import (
@@ -322,6 +322,18 @@ def _inspect_named_container_state(
     )
 
 
+def _created_state_error(state: _DockerContainerState) -> str | None:
+    if state.status != "created" or state.running:
+        return f"Docker container did not remain in a stopped created state ({state.status})"
+    if state.error:
+        return f"Docker container reported a pre-start runtime error: {state.error}"
+    if state.oom_killed:
+        return "Docker container reported OOMKilled before start"
+    if state.exit_code != 0:
+        return f"Docker created container reported unexpected exit state {state.exit_code}"
+    return None
+
+
 def _runtime_state_error(
     outcome: _ProcessOutcome,
     state: _DockerContainerState,
@@ -333,12 +345,47 @@ def _runtime_state_error(
     if state.oom_killed:
         return "Docker container was OOM-killed"
     if outcome.exit_code is None:
-        return "Docker run completed without an exit status"
+        return "Docker start --attach completed without an exit status"
     if outcome.exit_code != state.exit_code:
         return (
-            "Docker run exit status does not match inspected container state "
+            "Docker start --attach exit status does not match inspected container state "
             f"({outcome.exit_code} != {state.exit_code})"
         )
+    return None
+
+
+def _control_failure_outcome(
+    error: str,
+    *,
+    cleanup_error: str | None,
+) -> _ProcessOutcome:
+    combined = "; ".join(item for item in (error, cleanup_error) if item)
+    return _ProcessOutcome(
+        exit_code=None,
+        timed_out=False,
+        stdout="",
+        stderr="",
+        stdout_truncated=False,
+        stderr_truncated=False,
+        error=combined,
+        failure_code=(
+            FailureCode.SANDBOX_CLEANUP
+            if cleanup_error is not None
+            else FailureCode.SANDBOX_RUNTIME
+        ),
+    )
+
+
+def _create_outcome_error(outcome: _ProcessOutcome) -> str | None:
+    if outcome.timed_out:
+        return "Docker container creation timed out before execution"
+    if outcome.error is not None:
+        return f"Docker container creation output could not be captured: {outcome.error}"
+    if outcome.exit_code is None:
+        return "Docker container creation completed without an exit status"
+    if outcome.exit_code != 0:
+        detail = outcome.stderr.strip() or outcome.stdout.strip() or f"exit {outcome.exit_code}"
+        return f"Docker container creation failed: {detail}"
     return None
 
 
@@ -355,7 +402,7 @@ def _execute_volume_command(
         raise SandboxError("container execution requires capsule.sandbox")
     runtime = runtime_binary or capsule.sandbox.engine
     container_name = f"e2h-replay-check-{secrets.token_hex(16)}"
-    argv = build_container_volume_argv(
+    create_argv = build_container_volume_create_argv(
         capsule,
         check,
         volume_name,
@@ -364,8 +411,38 @@ def _execute_volume_command(
         runtime_binary=runtime,
     )
     try:
+        create_outcome = _execute_process(
+            create_argv,
+            Path("/"),
+            os.environ.copy(),
+            _CONTROL_TIMEOUT_SECONDS,
+            _CONTROL_OUTPUT_CHARS,
+        )
+    except BaseException as exc:
+        cleanup_error = force_remove_named_container(runtime, container_name)
+        if cleanup_error is not None:
+            exc.add_note(
+                "Docker replay check cleanup failed after creation interruption: "
+                + cleanup_error
+            )
+        raise
+
+    create_error = _create_outcome_error(create_outcome)
+    if create_error is None:
+        try:
+            created_state = _inspect_named_container_state(runtime, container_name)
+        except SandboxError as exc:
+            create_error = str(exc)
+        else:
+            create_error = _created_state_error(created_state)
+    if create_error is not None:
+        cleanup_error = force_remove_named_container(runtime, container_name)
+        return _control_failure_outcome(create_error, cleanup_error=cleanup_error)
+
+    start_argv = [runtime, "start", "--attach", container_name]
+    try:
         outcome = _execute_process(
-            argv,
+            start_argv,
             Path("/"),
             os.environ.copy(),
             timeout,
