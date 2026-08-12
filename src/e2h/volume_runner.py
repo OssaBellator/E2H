@@ -67,6 +67,7 @@ class _DockerContainerState:
     running: bool
     exit_code: int
     error: str
+    oom_killed: bool = False
 
 
 def _member_path(value: str) -> str:
@@ -291,11 +292,13 @@ def _inspect_named_container_state(
     running = payload.get("Running")
     exit_code = payload.get("ExitCode")
     error = payload.get("Error")
+    oom_killed = payload.get("OOMKilled", False)
     if (
         type(status) is not str
         or type(running) is not bool
         or type(exit_code) is not int
         or type(error) is not str
+        or type(oom_killed) is not bool
     ):
         raise SandboxError("Docker container state inspection returned invalid fields")
     return _DockerContainerState(
@@ -303,6 +306,7 @@ def _inspect_named_container_state(
         running=running,
         exit_code=exit_code,
         error=error,
+        oom_killed=oom_killed,
     )
 
 
@@ -314,6 +318,8 @@ def _runtime_state_error(
         return f"Docker container did not reach a stable exited state ({state.status})"
     if state.error:
         return f"Docker container reported a runtime error: {state.error}"
+    if state.oom_killed:
+        return "Docker container was OOM-killed"
     if outcome.exit_code is None:
         return "Docker run completed without an exit status"
     if outcome.exit_code != state.exit_code:
