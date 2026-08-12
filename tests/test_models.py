@@ -65,3 +65,18 @@ def test_capsule_rejects_empty_argv_item() -> None:
     data["success"] = {"commands": [{"id": "bad", "argv": ["python", ""]}]}
     with pytest.raises(ValidationError, match="non-empty"):
         TaskCapsule.model_validate(data)
+
+
+def test_capsule_rejects_negative_expected_exit_code() -> None:
+    data = capsule_data()
+    data["success"] = {
+        "commands": [
+            {
+                "id": "signal",
+                "argv": ["python", "-V"],
+                "expected_exit_codes": [-9],
+            }
+        ]
+    }
+    with pytest.raises(ValidationError, match="non-negative"):
+        TaskCapsule.model_validate(data)
