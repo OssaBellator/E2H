@@ -96,6 +96,20 @@ def _symlink_target(value: str) -> str:
     return value
 
 
+def _validate_symlink_containment(member_name: str, target: str) -> None:
+    parent = PurePosixPath(member_name).parent
+    stack = [part for part in parent.parts if part not in {"", "."}]
+    for part in PurePosixPath(target).parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not stack:
+                raise RunnerError("sealed workspace archive symlink escapes workspace root")
+            stack.pop()
+            continue
+        stack.append(part)
+
+
 def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
     if type(archive) is not WorkspaceArchive:
         raise RunnerError(
@@ -134,6 +148,7 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
                     directories.add(name)
                 elif member.issym():
                     target = _symlink_target(member.linkname)
+                    _validate_symlink_containment(name, target)
                     symlinks[name] = target
                     source_bytes += len(target.encode("utf-8", errors="surrogateescape"))
                 elif member.isfile():
