@@ -148,6 +148,73 @@ def _validate_producer_archive_encoding(archive: WorkspaceArchive) -> None:
             pass
 
 
+def _archive_stat_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mode)
+
+
+def _private_workspace_archive_reader(
+    archive: WorkspaceArchive,
+    descriptor: int,
+    expected: os.stat_result,
+    required_seals: int,
+) -> WorkspaceArchive:
+    """Reopen the sealed memfd with an independent read offset and verify its identity."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    try:
+        private_descriptor = os.open(f"/proc/self/fd/{descriptor}", flags)
+    except OSError as exc:
+        raise DockerRemoteError(
+            f"unable to open private sealed workspace archive reader: {exc}"
+        ) from exc
+
+    private_file: io.FileIO | None = None
+    try:
+        private_info = os.fstat(private_descriptor)
+        if fcntl is None:
+            raise DockerRemoteError("sealed workspace archives require Linux file seals")
+        private_seals = fcntl.fcntl(private_descriptor, fcntl.F_GET_SEALS)
+        if (
+            _archive_stat_identity(private_info) != _archive_stat_identity(expected)
+            or private_seals & required_seals != required_seals
+        ):
+            raise DockerRemoteError(
+                "private workspace archive reader identity verification failed"
+            )
+        opened = os.fdopen(private_descriptor, "rb", buffering=0)
+        if type(opened) is not io.FileIO:
+            opened.close()
+            raise DockerRemoteError("private workspace archive reader is not unbuffered FileIO")
+        private_file = opened
+        private_descriptor = -1
+        return WorkspaceArchive(
+            file=private_file,
+            directories=archive.directories,
+            source_bytes=archive.source_bytes,
+            entries=archive.entries,
+            archive_bytes=archive.archive_bytes,
+        )
+    except DockerRemoteError:
+        if private_file is not None:
+            private_file.close()
+        elif private_descriptor >= 0:
+            try:
+                os.close(private_descriptor)
+            except OSError:
+                pass
+        raise
+    except (OSError, ValueError) as exc:
+        if private_file is not None:
+            private_file.close()
+        elif private_descriptor >= 0:
+            try:
+                os.close(private_descriptor)
+            except OSError:
+                pass
+        raise DockerRemoteError(
+            f"unable to verify private sealed workspace archive reader: {exc}"
+        ) from exc
+
+
 def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
     if type(archive) is not WorkspaceArchive:
         raise DockerRemoteError(
@@ -163,13 +230,20 @@ def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
     try:
         descriptor = archive.file.fileno()
         observed = fcntl.fcntl(descriptor, fcntl.F_GET_SEALS)
-        current_size = os.fstat(descriptor).st_size
+        original_info = os.fstat(descriptor)
     except (OSError, ValueError) as exc:
         raise DockerRemoteError(f"unable to verify sealed workspace archive: {exc}") from exc
     if observed & required != required:
         raise DockerRemoteError("workspace archive is not sealed against mutation")
-    if current_size != archive.archive_bytes:
+    if original_info.st_size != archive.archive_bytes:
         raise DockerRemoteError("workspace archive size does not match captured metadata")
+
+    private_archive = _private_workspace_archive_reader(
+        archive,
+        descriptor,
+        original_info,
+        required,
+    )
 
     # Keep the importer safe when it is called directly rather than only through
     # isolated_runner. Lazy imports avoid a module-import cycle while reusing the
@@ -179,12 +253,16 @@ def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
     from e2h.volume_runner import _workspace_tree
 
     try:
-        _validate_archive_member_ancestry(archive)
-        _validate_producer_archive_encoding(archive)
-        _workspace_tree(archive)
+        _validate_archive_member_ancestry(private_archive)
+        _validate_producer_archive_encoding(private_archive)
+        _workspace_tree(private_archive)
     except RunnerError as exc:
+        private_archive.file.close()
         raise DockerRemoteError(f"workspace archive structure is invalid: {exc}") from exc
-    return archive
+    except BaseException:
+        private_archive.file.close()
+        raise
+    return private_archive
 
 
 def _render_error(value: bytes) -> str:
@@ -406,17 +484,21 @@ def prepared_workspace_volume(
     runtime = _validated_runtime_binary(runtime_binary)
     policy = _validated_remote_sandbox(sandbox)
     verified_archive = _validated_workspace_archive(archive)
-    require_patched_docker_archive(runtime)
-    _require_volume_free_image(runtime, policy.image)
-
-    volume_name = _resource_name("workspace")
-    container_name = _resource_name("prepare")
-    container_identity = container_name
+    owns_verified_archive = verified_archive is not archive
+    volume_name: str | None = None
+    container_name: str | None = None
+    container_identity: str | None = None
     volume_may_exist = False
     container_may_exist = False
     primary_error: BaseException | None = None
 
     try:
+        require_patched_docker_archive(runtime)
+        _require_volume_free_image(runtime, policy.image)
+        volume_name = _resource_name("workspace")
+        container_name = _resource_name("prepare")
+        container_identity = container_name
+
         # A create command can time out or lose its response after the daemon has
         # already created the named resource. Arm cleanup before each create so
         # an ambiguous client-side failure cannot leak daemon-side state.
@@ -490,17 +572,22 @@ def prepared_workspace_volume(
         raise
     finally:
         cleanup_errors: list[str] = []
-        if container_may_exist:
+        if container_may_exist and container_identity is not None:
             if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_identity) is not None:
                 error = _remove_confirmed_preparation_container(runtime, container_identity)
             else:
                 error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_identity])
             if error is not None:
                 cleanup_errors.append(error)
-        if volume_may_exist:
+        if volume_may_exist and volume_name is not None:
             error = _best_effort_docker(runtime, ["volume", "rm", "-f", volume_name])
             if error is not None:
                 cleanup_errors.append(error)
+        if owns_verified_archive:
+            try:
+                verified_archive.file.close()
+            except (OSError, ValueError):
+                pass
         if cleanup_errors:
             cleanup_message = "Docker workspace cleanup failed: " + "; ".join(cleanup_errors)
             if primary_error is None:
