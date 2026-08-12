@@ -299,9 +299,13 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
             for line in probe.stdout.decode("utf-8", errors="replace").splitlines()
             if line.strip()
         }
-        if container_name not in names:
-            return None
-        detail = "container still exists after failed removal"
+        if container_name in names:
+            detail = "container still exists after failed removal"
+        else:
+            detail = (
+                "container is absent from the immediate probe, but cleanup cannot be proven "
+                "after a failed removal"
+            )
     else:
         probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
         detail = probe_error or f"Docker ps failed with exit {probe.returncode}"
