@@ -207,7 +207,10 @@ def test_revalidation_rejects_canonical_invalid_python_values() -> None:
     current_capsule = capsule()
     current_capsule.metadata = {"not_json": {"value"}}
 
-    with pytest.raises(OpenAIRuntimeError, match=r"invalid task capsule:.*canonical JSON"):
+    with pytest.raises(
+        OpenAIRuntimeError,
+        match=r"(?s)invalid task capsule:.*canonical JSON",
+    ):
         revalidate_runtime_inputs(
             document(),
             current_capsule,
