@@ -84,6 +84,7 @@ _FAILURE_CODES_BY_CHECK_STATUS: dict[CheckStatus, frozenset[FailureCode]] = {
             FailureCode.WORKING_DIRECTORY_MISSING,
             FailureCode.SANDBOX_CONFIGURATION,
             FailureCode.SANDBOX_RUNTIME,
+            FailureCode.SANDBOX_CLEANUP,
             FailureCode.OUTPUT_CAPTURE,
         }
     ),
