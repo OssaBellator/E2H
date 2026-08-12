@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 import e2h.isolated_runner as isolated_runner
-from e2h.isolated_runner import _validate_remote_host_limits
 from e2h.models import (
     CommandCheck,
     ContainerSandbox,
@@ -13,6 +12,7 @@ from e2h.models import (
     SuccessSpec,
     TaskCapsule,
 )
+from e2h.replay_budget import validate_replay_host_limits
 from e2h.runner import RunnerError
 
 IMAGE = "python@sha256:" + "0" * 64
@@ -48,22 +48,22 @@ def _capsule(
 
 
 def test_default_maximum_command_envelope_fits_remote_host_budgets() -> None:
-    _validate_remote_host_limits(_capsule(50))
+    validate_replay_host_limits(_capsule(50))
 
 
 def test_remote_host_budget_rejects_too_many_commands() -> None:
     with pytest.raises(RunnerError, match="host command budget"):
-        _validate_remote_host_limits(_capsule(51))
+        validate_replay_host_limits(_capsule(51))
 
 
 def test_remote_host_budget_rejects_aggregate_retained_output() -> None:
     with pytest.raises(RunnerError, match="aggregate retained-output budget"):
-        _validate_remote_host_limits(_capsule(2, max_output_chars=500_001))
+        validate_replay_host_limits(_capsule(2, max_output_chars=500_001))
 
 
 def test_remote_host_budget_rejects_aggregate_check_timeout() -> None:
     with pytest.raises(RunnerError, match="aggregate check-timeout budget"):
-        _validate_remote_host_limits(_capsule(2, per_check_timeout=901.0))
+        validate_replay_host_limits(_capsule(2, per_check_timeout=901.0))
 
 
 def test_remote_host_budget_fails_before_docker_probe(
