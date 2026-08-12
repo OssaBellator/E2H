@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import sys
@@ -24,6 +25,9 @@ from e2h.directory_binding import (
 
 _MAX_ARCHIVE_DEPTH = 128
 _MAX_ARCHIVE_MEMBER_PATH_BYTES = 4096
+_XATTR_UNSUPPORTED_ERRNOS = {errno.ENOTSUP}
+if hasattr(errno, "EOPNOTSUPP"):
+    _XATTR_UNSUPPORTED_ERRNOS.add(errno.EOPNOTSUPP)
 
 
 class WorkspaceArchiveError(RuntimeError):
@@ -72,6 +76,7 @@ def sealed_workspace_archive_supported() -> bool:
         and os.stat in os.supports_follow_symlinks
         and os.readlink in os.supports_dir_fd
         and os.scandir in os.supports_fd
+        and hasattr(os, "listxattr")
         and hasattr(os, "memfd_create")
         and hasattr(os, "MFD_CLOEXEC")
         and hasattr(os, "MFD_ALLOW_SEALING")
@@ -124,6 +129,37 @@ def _stat_entry(parent_descriptor: int, name: str) -> os.stat_result:
         raise WorkspaceArchiveError(
             f"unable to inspect replay workspace entry {name!r}: {exc}"
         ) from exc
+
+
+def _reject_descriptor_xattrs(descriptor: int, *, noun: str) -> None:
+    try:
+        names = os.listxattr(descriptor)
+    except OSError as exc:
+        if exc.errno in _XATTR_UNSUPPORTED_ERRNOS:
+            return
+        raise WorkspaceArchiveError(
+            f"unable to inspect replay workspace {noun} extended attributes: {exc}"
+        ) from exc
+    if names:
+        raise WorkspaceArchiveError(
+            f"replay workspace {noun} has extended attributes that cannot be preserved"
+        )
+
+
+def _reject_symlink_xattrs(parent_descriptor: int, name: str) -> None:
+    proc_path = f"/proc/self/fd/{parent_descriptor}/{name}"
+    try:
+        names = os.listxattr(proc_path, follow_symlinks=False)
+    except OSError as exc:
+        if exc.errno in _XATTR_UNSUPPORTED_ERRNOS:
+            return
+        raise WorkspaceArchiveError(
+            f"unable to inspect replay workspace symlink {name!r} extended attributes: {exc}"
+        ) from exc
+    if names:
+        raise WorkspaceArchiveError(
+            f"replay workspace symlink {name!r} has extended attributes that cannot be preserved"
+        )
 
 
 def _capture_directory_names(
@@ -248,6 +284,7 @@ def _add_regular_file(
             raise WorkspaceArchiveError(
                 f"replay workspace file {name!r} changed while opening"
             )
+        _reject_descriptor_xattrs(descriptor, noun=f"file {name!r}")
         member = _tar_info(relative, expected, entry_type=tarfile.REGTYPE)
         member.size = expected.st_size
         with os.fdopen(descriptor, "rb", closefd=False) as source:
@@ -289,6 +326,7 @@ def _add_symlink(
             f"unable to read replay workspace symlink {name!r}: {exc}"
         ) from exc
     _safe_symlink_target(relative.parent, target)
+    _reject_symlink_xattrs(parent_descriptor, name)
     state.add_bytes(len(target.encode("utf-8", errors="surrogateescape")))
     member = _tar_info(relative, expected, entry_type=tarfile.SYMTYPE)
     member.linkname = target
@@ -336,6 +374,7 @@ def _add_directory_entry(
             raise WorkspaceArchiveError(
                 f"replay workspace directory {name!r} changed while opening"
             )
+        _reject_descriptor_xattrs(child_descriptor, noun=f"directory {name!r}")
         member = _tar_info(relative, info, entry_type=tarfile.DIRTYPE)
         member.size = 0
         archive.addfile(member)
@@ -466,6 +505,7 @@ def stable_workspace_archive(
             raise WorkspaceArchiveError(
                 f"unable to inspect bound replay workspace root: {exc}"
             ) from exc
+        _reject_descriptor_xattrs(descriptor, noun="root")
         state = _ArchiveState(max_bytes=max_bytes, max_entries=max_entries)
         directories = {"."}
         with _open_memfd() as handle:
