@@ -11,7 +11,7 @@ import pytest
 import e2h.volume_runner as volume_runner
 from e2h.failures import FailureCode
 from e2h.models import CommandCheck, ContainerSandbox, SuccessSpec, TaskCapsule
-from e2h.runner import CheckStatus, RunStatus, _ProcessOutcome
+from e2h.runner import CheckStatus, RunnerError, RunStatus, _ProcessOutcome
 from e2h.volume_runner import run_capsule_prepared_volume
 from e2h.workspace_archive import WorkspaceArchive
 
@@ -147,22 +147,19 @@ def test_oom_killed_expected_137_is_infrastructure_error(
     assert cleanup_ids == [CONTAINER_ID]
 
 
-def test_non_oom_expected_137_remains_normal_task_exit(
+def test_non_oom_exit_137_is_rejected_as_signal_ambiguous(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cleanup_ids = _install_state_runtime(monkeypatch, _state(oom_killed=False))
 
-    result = run_capsule_prepared_volume(
-        _capsule(),
-        _archive(),
-        "e2h-replay-workspace-abc",
-        container_runtime="docker-test",
-    )
+    with pytest.raises(RunnerError, match="signal-ambiguous Docker exit status"):
+        run_capsule_prepared_volume(
+            _capsule(),
+            _archive(),
+            "e2h-replay-workspace-abc",
+            container_runtime="docker-test",
+        )
 
-    assert result.status is RunStatus.PASSED
-    assert result.checks[0].status is CheckStatus.PASSED
-    assert result.checks[0].exit_code == 137
-    assert result.checks[0].failure is None
     assert cleanup_ids == [CONTAINER_ID]
 
 
