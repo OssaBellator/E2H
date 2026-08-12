@@ -67,7 +67,6 @@ def test_candidate_rejects_hidden_tar_payload_before_docker_import(
 
     monkeypatch.setattr(isolated_runner, "_validated_remote_sandbox", lambda sandbox: sandbox)
     monkeypatch.setattr(isolated_runner, "require_patched_docker_archive", lambda runtime: None)
-    monkeypatch.setattr(isolated_runner, "require_docker_resource_limits", lambda runtime: None)
     monkeypatch.setattr(isolated_runner, "_require_volume_free_image", lambda runtime, image: None)
     monkeypatch.setattr(isolated_runner, "stable_workspace_archive", fake_capture)
     monkeypatch.setattr(isolated_runner, "prepared_workspace_volume", forbidden_import)
