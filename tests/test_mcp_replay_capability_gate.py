@@ -51,6 +51,7 @@ def test_explicit_container_replay_remains_fail_closed(
                 root=tmp_path,
                 allow_replay=True,
                 replay_backend=ExecutionBackend.CONTAINER,
+                trusted_container_control_plane=True,
             )
         )
 
