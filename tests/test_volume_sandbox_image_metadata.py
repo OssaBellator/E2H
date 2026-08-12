@@ -27,7 +27,7 @@ def test_volume_runner_ignores_image_execution_hooks() -> None:
 
     assert argv.count("--no-healthcheck") == 1
     entrypoint = argv.index("--entrypoint")
-    assert argv[entrypoint + 1] == ""
+    assert argv[entrypoint + 1] == "python"
     image = argv.index(IMAGE)
     assert entrypoint < image
-    assert argv[image + 1 :] == ["python", "-c", "print('ok')"]
+    assert argv[image + 1 :] == ["-c", "print('ok')"]
