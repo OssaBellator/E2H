@@ -209,7 +209,7 @@ def _tar_info(
     entry_type: bytes,
 ) -> tarfile.TarInfo:
     member = tarfile.TarInfo(_archive_name(relative))
-    member.mode = stat.S_IMODE(info.st_mode) & 0o777
+    member.mode = stat.S_IMODE(info.st_mode)
     member.uid = info.st_uid
     member.gid = info.st_gid
     member.uname = ""
