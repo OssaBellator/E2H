@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import tarfile
@@ -44,12 +45,22 @@ from e2h.sandbox import (
 from e2h.workspace_archive import WorkspaceArchive
 
 _MAX_CWD_SYMLINK_RESOLUTIONS = 40
+_CONTROL_OUTPUT_CHARS = 8192
+_CONTROL_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass(frozen=True)
 class _WorkspaceTree:
     directories: frozenset[str]
     symlinks: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class _DockerContainerState:
+    status: str
+    running: bool
+    exit_code: int
+    error: str
 
 
 def _member_path(value: str) -> str:
@@ -207,6 +218,75 @@ def _validate_remote_policy(capsule: TaskCapsule) -> None:
         raise RunnerError("prepared-volume replay requires sandbox.pull_policy='never'")
 
 
+def _inspect_named_container_state(
+    runtime: str,
+    container_name: str,
+) -> _DockerContainerState:
+    outcome = _execute_process(
+        [
+            runtime,
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{json .State}}",
+            container_name,
+        ],
+        Path("/"),
+        os.environ.copy(),
+        _CONTROL_TIMEOUT_SECONDS,
+        _CONTROL_OUTPUT_CHARS,
+    )
+    if outcome.timed_out:
+        raise SandboxError("Docker container state inspection timed out")
+    if outcome.error is not None:
+        raise SandboxError(f"unable to capture Docker container state: {outcome.error}")
+    if outcome.exit_code != 0:
+        detail = outcome.stderr.strip() or f"exit {outcome.exit_code}"
+        raise SandboxError(f"unable to inspect Docker container state: {detail}")
+    try:
+        payload = json.loads(outcome.stdout)
+    except (TypeError, ValueError) as exc:
+        raise SandboxError("Docker container state inspection returned invalid JSON") from exc
+    if type(payload) is not dict:
+        raise SandboxError("Docker container state inspection returned an invalid object")
+    status = payload.get("Status")
+    running = payload.get("Running")
+    exit_code = payload.get("ExitCode")
+    error = payload.get("Error")
+    if (
+        type(status) is not str
+        or type(running) is not bool
+        or type(exit_code) is not int
+        or type(error) is not str
+    ):
+        raise SandboxError("Docker container state inspection returned invalid fields")
+    return _DockerContainerState(
+        status=status,
+        running=running,
+        exit_code=exit_code,
+        error=error,
+    )
+
+
+def _runtime_state_error(
+    outcome: _ProcessOutcome,
+    state: _DockerContainerState,
+) -> str | None:
+    if state.status != "exited" or state.running:
+        return f"Docker container did not reach a stable exited state ({state.status})"
+    if state.error:
+        return f"Docker container reported a runtime error: {state.error}"
+    if outcome.exit_code is None:
+        return "Docker run completed without an exit status"
+    if outcome.exit_code != state.exit_code:
+        return (
+            "Docker run exit status does not match inspected container state "
+            f"({outcome.exit_code} != {state.exit_code})"
+        )
+    return None
+
+
 def _execute_volume_command(
     capsule: TaskCapsule,
     check: CommandCheck,
@@ -244,6 +324,29 @@ def _execute_volume_command(
                 error=combined,
                 failure_code=FailureCode.SANDBOX_CLEANUP,
             )
+        return outcome
+
+    state_error: str | None = None
+    state: _DockerContainerState | None = None
+    try:
+        state = _inspect_named_container_state(runtime, container_name)
+    except SandboxError as exc:
+        state_error = str(exc)
+    if state is not None:
+        state_error = _runtime_state_error(outcome, state)
+        if state_error is None:
+            outcome = replace(outcome, exit_code=state.exit_code)
+
+    cleanup_error = force_remove_named_container(runtime, container_name)
+    if state_error is not None or cleanup_error is not None:
+        combined = "; ".join(
+            item for item in (outcome.error, state_error, cleanup_error) if item
+        )
+        outcome = replace(
+            outcome,
+            error=combined,
+            failure_code=FailureCode.SANDBOX_RUNTIME,
+        )
     return outcome
 
 
@@ -340,7 +443,11 @@ def run_capsule_prepared_volume(
                     infrastructure_error = True
             elif outcome.error is not None:
                 status = CheckStatus.ERROR
-                failure = output_capture_failure(ExecutionBackend.CONTAINER.value)
+                failure = (
+                    sandbox_failure()
+                    if outcome.failure_code is FailureCode.SANDBOX_RUNTIME
+                    else output_capture_failure(ExecutionBackend.CONTAINER.value)
+                )
                 infrastructure_error = True
             elif outcome.exit_code is None:
                 raise RunnerError("completed command is missing an exit code")
