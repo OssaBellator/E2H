@@ -227,6 +227,10 @@ def _add_regular_file(
     expected: os.stat_result,
     state: _ArchiveState,
 ) -> None:
+    if expected.st_nlink > 1:
+        raise WorkspaceArchiveError(
+            f"replay workspace regular file {name!r} has multiple hard links"
+        )
     state.add_bytes(expected.st_size)
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
