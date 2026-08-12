@@ -363,13 +363,22 @@ def _execute_volume_command(
         container_name,
         runtime_binary=runtime,
     )
-    outcome = _execute_process(
-        argv,
-        Path("/"),
-        os.environ.copy(),
-        timeout,
-        max_output_chars,
-    )
+    try:
+        outcome = _execute_process(
+            argv,
+            Path("/"),
+            os.environ.copy(),
+            timeout,
+            max_output_chars,
+        )
+    except BaseException as exc:
+        cleanup_error = force_remove_named_container(runtime, container_name)
+        if cleanup_error is not None:
+            exc.add_note(
+                "Docker replay check cleanup failed after execution interruption: "
+                + cleanup_error
+            )
+        raise
     if outcome.timed_out:
         cleanup_error = force_remove_named_container(runtime, container_name)
         if cleanup_error is not None:
