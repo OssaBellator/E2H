@@ -44,6 +44,17 @@ Examples of in-scope reports include:
 
 E2H does not claim that arbitrary candidate code, imported content, model output, or third-party dependencies are inherently trustworthy. A report should describe how E2H violates a documented security boundary rather than only demonstrating that untrusted code can behave maliciously when executed without an appropriate sandbox.
 
+## Container runtime trust boundary
+
+When an E2H deployment delegates container execution or workspace preparation to Docker, the Docker daemon and every principal with unrestricted access to that daemon's API or control socket are part of the trusted operator boundary. Docker-control-plane access can enumerate, mount, modify, remove, or otherwise interfere with daemon-managed containers and volumes; E2H does not claim to isolate replay state from a peer that holds equivalent unrestricted Docker authority.
+
+A remote replay service must therefore use one of these deployment models before Docker-backed replay can be treated as a security boundary:
+
+- keep the Docker API/socket restricted to trusted operator processes, excluding untrusted peer workloads and principals; or
+- place Docker behind a narrower broker/helper that exposes only the bounded create, archive-import, run, inspect, and cleanup operations required by E2H and does not grant the replay service ambient access to the general Docker control plane.
+
+Filesystem protections such as descriptor-bound capture and sealed in-memory archives protect against pathname rebinding and same-UID mutation that do not require Docker authority. They do not convert the Docker control plane itself into an untrusted boundary. Runtime documentation and validation must state which deployment model is assumed whenever Docker-backed remote replay is enabled.
+
 ## Handling reports
 
 Maintainers should reproduce reports with synthetic data when possible, minimize redistribution of sensitive artifacts, and add an adversarial regression test for confirmed boundary failures.
