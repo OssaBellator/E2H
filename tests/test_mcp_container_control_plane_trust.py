@@ -40,9 +40,13 @@ def test_container_control_plane_attestation_is_default_deny_and_visible_in_stat
     tmp_path: Path,
 ) -> None:
     service = E2HMCPService(MCPServerConfig(root=tmp_path))
+    status = service.status()
+    payload = status.model_dump(mode="json")
 
     assert service.config.trusted_container_control_plane is False
-    assert service.status().container_control_plane_attested is False
+    assert status.container_control_plane_attested is False
+    assert payload["container_control_plane_attested"] is False
+    assert "container_control_plane_trusted" not in payload
 
 
 def test_explicit_container_replay_requires_trust_before_replay_probe_or_launch(
