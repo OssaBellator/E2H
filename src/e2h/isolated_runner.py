@@ -49,6 +49,8 @@ _REMOTE_ALLOWED_TAR_HEADER_TYPES = frozenset(
 )
 _MAX_PAX_KEY_BYTES = 128
 _MAX_PAX_LENGTH_DIGITS = 20
+_MAX_PAX_NUMERIC_BYTES = 20
+_MAX_PAX_MTIME_BYTES = 64
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -120,8 +122,67 @@ def _require_utf8_archive_text(value: str, *, noun: str) -> None:
         raise RunnerError(f"sealed workspace archive {noun} is not valid UTF-8") from exc
 
 
+def _decimal_pax_value(value: bytes, *, key: str) -> int:
+    if (
+        not value
+        or len(value) > _MAX_PAX_NUMERIC_BYTES
+        or any(byte < ord("0") or byte > ord("9") for byte in value)
+    ):
+        raise RunnerError(f"sealed workspace archive contains an invalid PAX {key} value")
+    return int(value)
+
+
+def _validate_pax_mtime(value: bytes) -> None:
+    if not value or len(value) > _MAX_PAX_MTIME_BYTES:
+        raise RunnerError("sealed workspace archive contains an invalid PAX mtime value")
+    unsigned = value[1:] if value.startswith(b"-") else value
+    if not unsigned:
+        raise RunnerError("sealed workspace archive contains an invalid PAX mtime value")
+    seconds, separator, fraction = unsigned.partition(b".")
+    if not seconds or any(byte < ord("0") or byte > ord("9") for byte in seconds):
+        raise RunnerError("sealed workspace archive contains an invalid PAX mtime value")
+    if separator and (
+        not fraction
+        or len(fraction) > 9
+        or any(byte < ord("0") or byte > ord("9") for byte in fraction)
+    ):
+        raise RunnerError("sealed workspace archive contains an invalid PAX mtime value")
+
+
+def _pax_value_limit(key: str) -> int:
+    if key in {"path", "linkpath"}:
+        return _MAX_ARCHIVE_MEMBER_PATH_BYTES
+    if key in {"uid", "gid", "size"}:
+        return _MAX_PAX_NUMERIC_BYTES
+    if key == "mtime":
+        return _MAX_PAX_MTIME_BYTES
+    if key == "hdrcharset":
+        return len(b"BINARY")
+    raise RunnerError(f"sealed workspace archive contains unsupported PAX metadata key {key!r}")
+
+
+def _validate_pax_value(key: str, value: bytes) -> int | None:
+    if key in {"path", "linkpath"}:
+        if not value or b"\x00" in value:
+            raise RunnerError(f"sealed workspace archive contains an invalid PAX {key} value")
+        return None
+    if key in {"uid", "gid"}:
+        _decimal_pax_value(value, key=key)
+        return None
+    if key == "size":
+        return _decimal_pax_value(value, key=key)
+    if key == "mtime":
+        _validate_pax_mtime(value)
+        return None
+    if key == "hdrcharset":
+        if value != b"BINARY":
+            raise RunnerError("sealed workspace archive contains an invalid PAX hdrcharset value")
+        return None
+    raise RunnerError(f"sealed workspace archive contains unsupported PAX metadata key {key!r}")
+
+
 def _validate_pax_payload(archive: WorkspaceArchive, payload_size: int) -> int | None:
-    """Validate PAX record keys and return an optional following-member size override."""
+    """Validate PAX records before the generic tar parser interprets their values."""
     if payload_size < 1:
         raise RunnerError("sealed workspace archive contains an empty PAX extension")
     remaining = payload_size
@@ -184,19 +245,15 @@ def _validate_pax_payload(archive: WorkspaceArchive, payload_size: int) -> int |
         if body_remaining < 1:
             raise RunnerError("sealed workspace archive PAX record is missing its terminator")
         value_size = body_remaining - 1
-        if key == "size":
-            if value_size < 1 or value_size > _MAX_PAX_LENGTH_DIGITS:
-                raise RunnerError("sealed workspace archive contains an invalid PAX size value")
-            value = archive.file.read(value_size)
-            if len(value) != value_size:
-                raise RunnerError("sealed workspace archive contains a truncated PAX size value")
-            remaining -= value_size
-            if any(byte < ord("0") or byte > ord("9") for byte in value):
-                raise RunnerError("sealed workspace archive contains a non-numeric PAX size value")
-            size_override = int(value)
-        elif value_size:
-            archive.file.seek(value_size, 1)
-            remaining -= value_size
+        if value_size > _pax_value_limit(key):
+            raise RunnerError(f"sealed workspace archive contains an oversized PAX {key} value")
+        value = archive.file.read(value_size)
+        if len(value) != value_size:
+            raise RunnerError("sealed workspace archive contains a truncated PAX value")
+        remaining -= value_size
+        parsed_size = _validate_pax_value(key, value)
+        if parsed_size is not None:
+            size_override = parsed_size
 
         terminator = archive.file.read(1)
         if len(terminator) != 1:
