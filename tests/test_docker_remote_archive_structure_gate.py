@@ -4,6 +4,7 @@ import io
 import os
 import tarfile
 from collections.abc import Callable
+from typing import BinaryIO
 
 import pytest
 
@@ -13,6 +14,28 @@ from e2h.models import ContainerSandbox
 from e2h.workspace_archive import WorkspaceArchive
 
 IMAGE = "python@sha256:" + "0" * 64
+
+
+class _DescriptorWrapper:
+    """Expose a real descriptor through a non-producer Python stream object."""
+
+    def __init__(self, handle: BinaryIO) -> None:
+        self._handle = handle
+
+    def fileno(self) -> int:
+        return self._handle.fileno()
+
+    def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
+        return self._handle.seek(offset, whence)
+
+    def read(self, size: int = -1) -> bytes:
+        return self._handle.read(size)
+
+    def tell(self) -> int:
+        return self._handle.tell()
+
+    def close(self) -> None:
+        self._handle.close()
 
 
 def _require_seal_support() -> None:
@@ -109,6 +132,21 @@ def _sealed_alternate_regular_type_archive() -> WorkspaceArchive:
     return _sealed_archive(write_members)
 
 
+def _sealed_producer_encoding_archive() -> WorkspaceArchive:
+    def write_members(handle: tarfile.TarFile) -> None:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        root.pax_headers["mtime"] = "0"
+        handle.addfile(root)
+        payload = tarfile.TarInfo("payload.txt")
+        payload.type = tarfile.REGTYPE
+        payload.pax_headers["mtime"] = "0"
+        payload.size = 0
+        handle.addfile(payload, io.BytesIO())
+
+    return _sealed_archive(write_members)
+
+
 def _assert_rejected_before_docker(
     archive: WorkspaceArchive,
     monkeypatch: pytest.MonkeyPatch,
@@ -163,4 +201,22 @@ def test_importer_rejects_alternate_regular_file_header_type(
         _sealed_alternate_regular_type_archive(),
         monkeypatch,
         message="producer regular file type",
+    )
+
+
+def test_importer_rejects_nonproducer_file_object_even_with_sealed_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _sealed_producer_encoding_archive()
+    wrapped = WorkspaceArchive(
+        file=_DescriptorWrapper(archive.file),  # type: ignore[arg-type]
+        directories=archive.directories,
+        source_bytes=archive.source_bytes,
+        entries=archive.entries,
+        archive_bytes=archive.archive_bytes,
+    )
+    _assert_rejected_before_docker(
+        wrapped,
+        monkeypatch,
+        message="unbuffered FileIO",
     )
