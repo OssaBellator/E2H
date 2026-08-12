@@ -14,6 +14,7 @@ from e2h.volume_runner import run_capsule_prepared_volume
 from e2h.workspace_archive import WorkspaceArchive
 
 IMAGE = "python@sha256:" + "0" * 64
+CONTAINER_ID = "a" * 64
 
 
 def _archive() -> WorkspaceArchive:
@@ -56,14 +57,14 @@ def _successful_create() -> _ProcessOutcome:
     return _ProcessOutcome(
         exit_code=0,
         timed_out=False,
-        stdout="container-id\n",
+        stdout=CONTAINER_ID + "\n",
         stderr="",
         stdout_truncated=False,
         stderr_truncated=False,
     )
 
 
-def _assert_cleanup_priority(result: object, launch_text: str) -> None:
+def _assert_cleanup_priority(result: object, launch_text: str, cleanup_text: str) -> None:
     assert isinstance(result, volume_runner.RunResult)
     assert result.status is RunStatus.ERROR
     assert result.checks[0].status is CheckStatus.ERROR
@@ -71,7 +72,7 @@ def _assert_cleanup_priority(result: object, launch_text: str) -> None:
     assert result.checks[0].failure.code is FailureCode.SANDBOX_CLEANUP
     error = result.checks[0].error or ""
     assert launch_text in error
-    assert "generated-name cleanup could not be proven" in error
+    assert cleanup_text in error
 
 
 def test_create_launch_error_plus_cleanup_failure_is_sandbox_cleanup(
@@ -95,10 +96,14 @@ def test_create_launch_error_plus_cleanup_failure_is_sandbox_cleanup(
         container_runtime="docker-test",
     )
 
-    _assert_cleanup_priority(result, "create launch failed")
+    _assert_cleanup_priority(
+        result,
+        "create launch failed",
+        "generated-name cleanup could not be proven",
+    )
 
 
-def test_start_launch_error_plus_cleanup_failure_is_sandbox_cleanup(
+def test_start_launch_error_plus_confirmed_cleanup_failure_is_sandbox_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = 0
@@ -110,19 +115,21 @@ def test_start_launch_error_plus_cleanup_failure_is_sandbox_cleanup(
         if calls == 1:
             assert argv[1] == "create"
             return _successful_create()
-        assert argv[1] == "start"
+        assert argv == ["docker-test", "start", "--attach", CONTAINER_ID]
         raise OSError("start launch failed")
 
     monkeypatch.setattr(volume_runner, "_execute_process", fail_start)
     monkeypatch.setattr(
         volume_runner,
         "_inspect_named_container_state",
-        lambda runtime, name: _created_state(),
+        lambda runtime, identity: _created_state()
+        if identity == CONTAINER_ID
+        else pytest.fail("pre-start inspect used the generated name"),
     )
     monkeypatch.setattr(
         volume_runner,
-        "force_remove_named_container",
-        lambda runtime, name: "generated-name cleanup could not be proven",
+        "force_remove_confirmed_container",
+        lambda runtime, container_id: "confirmed-ID cleanup could not be proven",
     )
 
     result = run_capsule_prepared_volume(
@@ -132,4 +139,8 @@ def test_start_launch_error_plus_cleanup_failure_is_sandbox_cleanup(
         container_runtime="docker-test",
     )
 
-    _assert_cleanup_priority(result, "start launch failed")
+    _assert_cleanup_priority(
+        result,
+        "start launch failed",
+        "confirmed-ID cleanup could not be proven",
+    )
