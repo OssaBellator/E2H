@@ -23,6 +23,7 @@ from e2h.volume_runner import run_capsule_prepared_volume
 from e2h.workspace_archive import WorkspaceArchive
 
 IMAGE = "python@sha256:" + "0" * 64
+CONTAINER_ID = "a" * 64
 
 
 def _archive(
@@ -203,11 +204,11 @@ def test_prepared_volume_runner_resolves_symlinked_workdir(
         "type=volume,src=e2h-replay-workspace-abc,dst=/workspace,"
         "volume-nocopy,readonly"
     )
-    name = args[args.index("--name") + 1]
-    assert records[1][-1] == name
-    assert records[2] == ["start", "--attach", name]
-    assert records[3][-1] == name
-    assert records[4] == ["rm", "-f", "-v", name]
+    assert args[args.index("--name") + 1].startswith("e2h-replay-check-")
+    assert records[1][-1] == CONTAINER_ID
+    assert records[2] == ["start", "--attach", CONTAINER_ID]
+    assert records[3][-1] == CONTAINER_ID
+    assert records[4] == ["rm", "-f", "-v", CONTAINER_ID]
 
 
 def test_prepared_volume_runner_missing_cwd_fails_before_runtime(tmp_path: Path) -> None:
@@ -377,7 +378,7 @@ def _exited_state() -> volume_runner._DockerContainerState:
     )
 
 
-def test_prepared_volume_timeout_uses_generated_name_cleanup(
+def test_prepared_volume_timeout_uses_confirmed_id_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     archive = _archive(directories=["."])
@@ -396,12 +397,12 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
             return _ProcessOutcome(
                 exit_code=0,
                 timed_out=False,
-                stdout="a" * 64 + "\n",
+                stdout=CONTAINER_ID + "\n",
                 stderr="",
                 stdout_truncated=False,
                 stderr_truncated=False,
             )
-        assert argv[1] == "start"
+        assert argv == ["docker-test", "start", "--attach", CONTAINER_ID]
         observed["argv"] = argv
         return _ProcessOutcome(
             exit_code=None,
@@ -412,14 +413,14 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
             stderr_truncated=False,
         )
 
-    def fake_cleanup(runtime: str, container_name: str) -> None:
+    def fake_cleanup(runtime: str, container_id: str) -> None:
         observed["runtime"] = runtime
-        observed["cleanup_name"] = container_name
+        observed["cleanup_id"] = container_id
         return None
 
     monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
     monkeypatch.setattr(volume_runner, "_inspect_named_container_state", lambda *args: _created_state())
-    monkeypatch.setattr(volume_runner, "force_remove_named_container", fake_cleanup)
+    monkeypatch.setattr(volume_runner, "force_remove_confirmed_container", fake_cleanup)
 
     result = run_capsule_prepared_volume(
         capsule,
@@ -430,12 +431,7 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
 
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.TIMED_OUT
-    argv = observed["argv"]
-    assert isinstance(argv, list)
-    assert argv[1:3] == ["start", "--attach"]
-    name = argv[-1]
-    assert observed["cleanup_name"] == name
-    assert str(name).startswith("e2h-replay-check-")
+    assert observed["cleanup_id"] == CONTAINER_ID
 
 
 def test_prepared_volume_timeout_cleanup_failure_is_infrastructure_error(
@@ -449,11 +445,12 @@ def test_prepared_volume_timeout_cleanup_failure_is_infrastructure_error(
             return _ProcessOutcome(
                 exit_code=0,
                 timed_out=False,
-                stdout="a" * 64 + "\n",
+                stdout=CONTAINER_ID + "\n",
                 stderr="",
                 stdout_truncated=False,
                 stderr_truncated=False,
             )
+        assert argv[-1] == CONTAINER_ID
         return _ProcessOutcome(
             exit_code=None,
             timed_out=True,
@@ -467,7 +464,7 @@ def test_prepared_volume_timeout_cleanup_failure_is_infrastructure_error(
     monkeypatch.setattr(volume_runner, "_inspect_named_container_state", lambda *args: _created_state())
     monkeypatch.setattr(
         volume_runner,
-        "force_remove_named_container",
+        "force_remove_confirmed_container",
         lambda *args, **kwargs: "cleanup failed",
     )
 
@@ -496,7 +493,7 @@ def test_completed_container_cleanup_failure_is_infrastructure_error(
         return _ProcessOutcome(
             exit_code=0,
             timed_out=False,
-            stdout="" if argv[1] == "create" else "ok\n",
+            stdout=CONTAINER_ID + "\n" if argv[1] == "create" else "ok\n",
             stderr="",
             stdout_truncated=False,
             stderr_truncated=False,
@@ -510,7 +507,7 @@ def test_completed_container_cleanup_failure_is_infrastructure_error(
     )
     monkeypatch.setattr(
         volume_runner,
-        "force_remove_named_container",
+        "force_remove_confirmed_container",
         lambda *args, **kwargs: "cleanup failed",
     )
 
