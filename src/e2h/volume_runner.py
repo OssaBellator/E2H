@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import tarfile
 from collections import deque
@@ -42,6 +43,7 @@ from e2h.runner import (
 from e2h.sandbox import (
     SandboxError,
     build_container_volume_create_argv,
+    force_remove_confirmed_container,
     force_remove_named_container,
 )
 from e2h.workspace_archive import (
@@ -54,6 +56,7 @@ _MAX_CWD_SYMLINK_RESOLUTIONS = 40
 _CONTROL_OUTPUT_CHARS = 8192
 _CONTROL_TIMEOUT_SECONDS = 10.0
 _MAX_TAR_TRAILER_BYTES = tarfile.RECORDSIZE + tarfile.BLOCKSIZE
+_CREATED_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -270,7 +273,7 @@ def _completed_cleanup_failure() -> FailureRecord:
 
 def _inspect_named_container_state(
     runtime: str,
-    container_name: str,
+    container_identity: str,
 ) -> _DockerContainerState:
     outcome = _execute_process(
         [
@@ -280,7 +283,7 @@ def _inspect_named_container_state(
             "container",
             "--format",
             "{{json .State}}",
-            container_name,
+            container_identity,
         ],
         Path("/"),
         os.environ.copy(),
@@ -389,6 +392,13 @@ def _create_outcome_error(outcome: _ProcessOutcome) -> str | None:
     return None
 
 
+def _created_container_id(outcome: _ProcessOutcome) -> str | None:
+    container_id = outcome.stdout.strip()
+    if _CREATED_CONTAINER_ID_PATTERN.fullmatch(container_id) is None:
+        return None
+    return container_id
+
+
 def _execute_volume_command(
     capsule: TaskCapsule,
     check: CommandCheck,
@@ -433,18 +443,31 @@ def _execute_volume_command(
         raise
 
     create_error = _create_outcome_error(create_outcome)
+    container_id: str | None = None
     if create_error is None:
+        container_id = _created_container_id(create_outcome)
+        if container_id is None:
+            create_error = "Docker container creation returned an invalid full container ID"
+    if create_error is None:
+        if container_id is None:
+            raise RunnerError("confirmed Docker create is missing its container ID")
         try:
-            created_state = _inspect_named_container_state(runtime, container_name)
+            created_state = _inspect_named_container_state(runtime, container_id)
         except SandboxError as exc:
             create_error = str(exc)
         else:
             create_error = _created_state_error(created_state)
     if create_error is not None:
-        cleanup_error = force_remove_named_container(runtime, container_name)
+        cleanup_error = (
+            force_remove_confirmed_container(runtime, container_id)
+            if container_id is not None
+            else force_remove_named_container(runtime, container_name)
+        )
         return _control_failure_outcome(create_error, cleanup_error=cleanup_error)
 
-    start_argv = [runtime, "start", "--attach", container_name]
+    if container_id is None:
+        raise RunnerError("confirmed Docker create is missing its container ID")
+    start_argv = [runtime, "start", "--attach", container_id]
     try:
         outcome = _execute_process(
             start_argv,
@@ -454,7 +477,7 @@ def _execute_volume_command(
             max_output_chars,
         )
     except BaseException as exc:
-        cleanup_error = force_remove_named_container(runtime, container_name)
+        cleanup_error = force_remove_confirmed_container(runtime, container_id)
         if cleanup_error is not None:
             if isinstance(exc, Exception):
                 return _control_failure_outcome(
@@ -467,7 +490,7 @@ def _execute_volume_command(
             )
         raise
     if outcome.timed_out:
-        cleanup_error = force_remove_named_container(runtime, container_name)
+        cleanup_error = force_remove_confirmed_container(runtime, container_id)
         if cleanup_error is not None:
             combined = "; ".join(item for item in (outcome.error, cleanup_error) if item)
             outcome = replace(
@@ -480,7 +503,7 @@ def _execute_volume_command(
     state_error: str | None = None
     state: _DockerContainerState | None = None
     try:
-        state = _inspect_named_container_state(runtime, container_name)
+        state = _inspect_named_container_state(runtime, container_id)
     except SandboxError as exc:
         state_error = str(exc)
     if state is not None:
@@ -488,7 +511,7 @@ def _execute_volume_command(
         if state_error is None:
             outcome = replace(outcome, exit_code=state.exit_code)
 
-    cleanup_error = force_remove_named_container(runtime, container_name)
+    cleanup_error = force_remove_confirmed_container(runtime, container_id)
     if state_error is not None or cleanup_error is not None:
         combined = "; ".join(
             item for item in (outcome.error, state_error, cleanup_error) if item
