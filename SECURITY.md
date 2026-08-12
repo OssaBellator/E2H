@@ -44,6 +44,16 @@ Examples of in-scope reports include:
 
 E2H does not claim that arbitrary candidate code, imported content, model output, or third-party dependencies are inherently trustworthy. A report should describe how E2H violates a documented security boundary rather than only demonstrating that untrusted code can behave maliciously when executed without an appropriate sandbox.
 
+## Local replay trust boundary
+
+MCP/A2A handle-bound local replay protects the identity of the selected workspace and command working directories against pathname rebinding. It is **not** a filesystem, credential, syscall, process, or privilege sandbox.
+
+Local replay commands execute as the MCP/A2A service account with that account's ordinary host permissions. The local runner also inherits the service process environment before applying capsule-declared environment overrides. A command can therefore observe environment values delivered to it and can access host files, processes, network resources, and other state that the service account itself is permitted to access. Descriptor-bound working directories do not change those ambient permissions.
+
+When local replay is enabled, run the verification service under a dedicated low-privilege account or similarly isolated service context, minimize credentials and secrets in that process environment, and do not grant the service account access to host data that replayed capsules are not allowed to reach. Treat every capsule that can be selected through the configured root as executable code trusted to run with those service-account permissions.
+
+The shared MCP/A2A replay host budgets limit aggregate command count, retained output, and declared check timeout. Those bounds reduce one class of resource exhaustion but do not turn local replay into a sandbox or prevent a command from consuming other host resources available to the service account while it runs.
+
 ## Container runtime trust boundary
 
 When an E2H deployment delegates container execution or workspace preparation to Docker, the Docker daemon and every principal with unrestricted access to that daemon's API or control socket are part of the trusted operator boundary. Docker-control-plane access can enumerate, mount, modify, remove, or otherwise interfere with daemon-managed containers and volumes; E2H does not claim to isolate replay state from a peer that holds equivalent unrestricted Docker authority.
