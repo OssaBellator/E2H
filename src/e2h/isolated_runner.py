@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import signal
 import tarfile
 from pathlib import Path, PurePosixPath
 
@@ -16,7 +15,12 @@ from e2h.docker_remote import (
 from e2h.models import TaskCapsule
 from e2h.replay_budget import validate_replay_host_limits
 from e2h.runner import CheckStatus, RunnerError, RunResult, _validated_capsule
-from e2h.volume_runner import _member_path, _workspace_tree, run_capsule_prepared_volume
+from e2h.volume_runner import (
+    _REMOTE_SIGNAL_EXIT_CODES,
+    _member_path,
+    _workspace_tree,
+    run_capsule_prepared_volume,
+)
 from e2h.workspace_archive import (
     _MAX_ARCHIVE_MEMBER_PATH_BYTES,
     WorkspaceArchive,
@@ -30,9 +34,6 @@ from e2h.workspace_archive import (
 # headers, and block padding; the fixed allowance covers the root member and trailer.
 _REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES = 4 * _MAX_ARCHIVE_MEMBER_PATH_BYTES
 _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
-_REMOTE_SIGNAL_EXIT_CODES = frozenset(
-    128 + int(value) for value in signal.valid_signals() if int(value) > 0
-)
 _REMOTE_ALLOWED_PAX_HEADERS = frozenset({"path", "linkpath", "mtime", "uid", "gid", "size"})
 # Python's PAX writer adds hdrcharset=BINARY when source names/targets contain
 # undecodable bytes. Permit that transport marker through the raw scan only so the
