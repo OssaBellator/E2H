@@ -18,11 +18,13 @@ def _sealed_gnu_long_name_archive() -> WorkspaceArchive:
     if docker_remote.fcntl is None or not hasattr(os, "memfd_create"):
         pytest.skip("sealed memfd archive test requires Linux file seals")
     required = (
-        hasattr(os, "MFD_ALLOW_SEALING")
+        hasattr(os, "MFD_CLOEXEC")
+        and hasattr(os, "MFD_ALLOW_SEALING")
         and all(
             hasattr(docker_remote.fcntl, name)
             for name in (
                 "F_ADD_SEALS",
+                "F_GET_SEALS",
                 "F_SEAL_WRITE",
                 "F_SEAL_GROW",
                 "F_SEAL_SHRINK",
