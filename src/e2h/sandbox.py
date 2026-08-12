@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -71,6 +73,13 @@ def _container_workdir(relative_cwd: str) -> str:
     return str(_CONTAINER_ROOT.joinpath(path))
 
 
+def _docker_mount_value(fields: list[str]) -> str:
+    """Encode one Docker --mount value with the CSV grammar used by the Docker CLI."""
+    stream = io.StringIO()
+    csv.writer(stream, lineterminator="").writerow(fields)
+    return stream.getvalue()
+
+
 def build_container_argv(
     capsule: TaskCapsule,
     check: CommandCheck,
@@ -90,9 +99,10 @@ def build_container_argv(
     cidfile_text = str(cidfile)
     if "\x00" in workspace_text or "\x00" in cidfile_text:
         raise SandboxError("container filesystem arguments must not contain NUL")
-    mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
+    mount_fields = ["type=bind", f"src={workspace_text}", f"dst={_CONTAINER_ROOT}"]
     if sandbox.workspace_access == "read_only":
-        mount += ",readonly"
+        mount_fields.append("readonly")
+    mount = _docker_mount_value(mount_fields)
     memory_limit = f"{sandbox.memory_mb}m"
     argv = [
         runtime,
