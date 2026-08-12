@@ -89,6 +89,8 @@ def test_builder_enforces_declared_boundaries(tmp_path: Path) -> None:
         "--log-driver",
         "none",
     ]
+    assert "--no-healthcheck" in argv
+    assert argv[argv.index("--entrypoint") + 1] == "python"
     assert argv[argv.index("--network") : argv.index("--network") + 2] == ["--network", "none"]
     assert "--read-only" in argv
     assert "type=bind" in argv[argv.index("--mount") + 1]
@@ -96,7 +98,23 @@ def test_builder_enforces_declared_boundaries(tmp_path: Path) -> None:
     assert argv[argv.index("--workdir") + 1] == "/workspace/nested"
     assert argv[argv.index("--user") + 1] == "65532:65532"
     assert "MODE=good" in argv
-    assert argv[-4:] == [IMAGE, "python", "-c", "print('ok')"]
+    assert argv[-3:] == [IMAGE, "-c", "print('ok')"]
+
+
+def test_builder_uses_single_argv_item_as_entrypoint(tmp_path: Path) -> None:
+    capsule = _capsule().model_copy(deep=True)
+    capsule.success.commands[0].argv = ["single-check"]
+    argv = build_container_argv(
+        capsule,
+        capsule.success.commands[0],
+        tmp_path.resolve(),
+        ".",
+        tmp_path / "cid",
+        runtime_binary="docker-test",
+    )
+
+    assert argv[argv.index("--entrypoint") + 1] == "single-check"
+    assert argv[-1] == IMAGE
 
 
 def test_builder_allows_explicit_network_and_workspace_write(tmp_path: Path) -> None:
@@ -131,6 +149,8 @@ def test_auto_backend_runs_declared_sandbox(
     assert args[0] == "run"
     assert "--network" in args
     assert "--log-driver" in args
+    assert "--no-healthcheck" in args
+    assert args[args.index("--entrypoint") + 1] == "python"
     assert IMAGE in args
 
 
@@ -191,6 +211,7 @@ def test_timeout_force_removes_container(tmp_path: Path, monkeypatch: pytest.Mon
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.TIMED_OUT
     assert observed_argv[0][1] == "run"
+    assert observed_argv[0][observed_argv[0].index("--entrypoint") + 1] == "timeout-check"
     records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     assert records == [["rm", "-f", "a" * 64]]
 
