@@ -203,7 +203,7 @@ def patched_docker_archive_supported(runtime_binary: str = "docker") -> bool:
 def require_patched_docker_archive(
     runtime_binary: str = "docker",
 ) -> tuple[DockerVersion, DockerVersion]:
-    """Require Docker archive and resource-limit support for remote replay."""
+    """Require Docker archive, runtime, and resource support for remote replay."""
     client, server = inspect_docker_versions(runtime_binary)
     minimum = DockerVersion(*_MIN_DOCKER_ARCHIVE_VERSION)
     if client < minimum or server < minimum:
@@ -213,8 +213,12 @@ def require_patched_docker_archive(
         )
     # Import locally because docker_capabilities intentionally reuses DockerRemoteError
     # from this module; the runtime call occurs only after docker_remote is initialized.
-    from e2h.docker_capabilities import require_docker_resource_limits
+    from e2h.docker_capabilities import (
+        require_docker_resource_limits,
+        require_patched_docker_runtime,
+    )
 
+    require_patched_docker_runtime(runtime_binary)
     require_docker_resource_limits(runtime_binary)
     return client, server
 
