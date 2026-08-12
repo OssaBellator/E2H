@@ -96,6 +96,13 @@ def _validate_remote_archive_resources(
         )
 
 
+def _require_utf8_archive_text(value: str, *, noun: str) -> None:
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise RunnerError(f"sealed workspace archive {noun} is not valid UTF-8") from exc
+
+
 def _validate_archive_member_ancestry(archive: WorkspaceArchive) -> None:
     """Reject archive shapes the descriptor-recursive producer cannot create."""
     member_names: list[str] = []
@@ -111,10 +118,12 @@ def _validate_archive_member_ancestry(archive: WorkspaceArchive) -> None:
         ) as handle:
             for position, member in enumerate(handle):
                 name = _member_path(member.name)
+                _require_utf8_archive_text(name, noun="member path")
                 member_names.append(name)
                 if member.isdir():
                     directory_positions[name] = position
                 elif member.issym():
+                    _require_utf8_archive_text(member.linkname, noun="symlink target")
                     symlink_names.add(name)
     except RunnerError:
         raise
