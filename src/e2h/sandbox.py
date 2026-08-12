@@ -13,6 +13,7 @@ _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 _CONTAINER_SHM_SIZE = "64m"
 _CONTAINER_NOFILE_LIMIT = "1024:1024"
+_CONTAINER_OCI_RUNTIME = "runc"
 
 
 class SandboxError(RuntimeError):
@@ -96,6 +97,8 @@ def build_container_argv(
     argv = [
         runtime,
         "run",
+        "--runtime",
+        _CONTAINER_OCI_RUNTIME,
         "--rm",
         "--init",
         "--log-driver",
