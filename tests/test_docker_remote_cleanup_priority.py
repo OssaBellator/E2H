@@ -31,7 +31,12 @@ args = sys.argv[1:]
 with Path(os.environ["DOCKER_TEST_LOG"]).open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\\n")
 if args and args[0] == "version":
-    print("29.7.2 29.7.2")
+    if args[-1] == "{{{{json .Server.Components}}}}":
+        print(json.dumps([{{"Name": "runc", "Version": "1.3.6"}}]))
+    else:
+        print("29.7.2 29.7.2")
+elif args and args[0] == "info":
+    print("linux true true true true true")
 elif args[:2] == ["image", "inspect"]:
     print("none")
 elif args[:2] == ["volume", "create"]:
