@@ -89,6 +89,7 @@ def test_volume_builder_uses_retained_read_only_named_volume_without_cidfile() -
     assert "--rm" not in argv
     assert "--name" in argv
     assert "--cidfile" not in argv
+    assert "--no-healthcheck" in argv
     assert argv[argv.index("--name") + 1] == "e2h-replay-check-def"
     mount = argv[argv.index("--mount") + 1]
     assert mount == (
