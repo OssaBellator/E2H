@@ -53,7 +53,7 @@ with log.open("a", encoding="utf-8") as handle:
 if args and args[0] == "version":
     print("29.7.2 29.7.2")
 elif args and args[0] == "info":
-    print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "true true"))
+    print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true"))
 elif args[:2] == ["image", "inspect"]:
     print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "none"))
 elif args[:2] == ["volume", "create"]:
@@ -214,9 +214,30 @@ def test_candidate_rejects_missing_swap_support_before_workspace_capture(
 ) -> None:
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
-    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", "true false")
+    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", "linux true false")
 
     with pytest.raises(RunnerError, match="memory and swap limit support"):
+        _run_capsule_isolated_container_candidate(
+            _capsule(),
+            tmp_path / "workspace-does-not-exist",
+            max_workspace_bytes=1024,
+            max_workspace_entries=20,
+            container_runtime=str(runtime),
+        )
+
+    commands = [record["args"] for record in _records(log)]
+    assert [args[0] for args in commands] == ["version", "info"]
+
+
+def test_candidate_rejects_non_linux_daemon_before_workspace_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", "windows true true")
+
+    with pytest.raises(RunnerError, match="requires a Linux daemon"):
         _run_capsule_isolated_container_candidate(
             _capsule(),
             tmp_path / "workspace-does-not-exist",
