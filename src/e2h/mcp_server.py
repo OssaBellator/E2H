@@ -394,6 +394,12 @@ class E2HMCPService:
             backend = ExecutionBackend(config.replay_backend)
         except ValueError as exc:
             raise MCPServiceError(f"unknown replay backend: {config.replay_backend}") from exc
+        if (
+            config.allow_replay
+            and backend is ExecutionBackend.CONTAINER
+            and not config.trusted_container_control_plane
+        ):
+            raise MCPServiceError(_MCP_CONTAINER_CONTROL_PLANE_UNTRUSTED)
         if config.allow_replay:
             local_supported = handle_bound_local_replay_supported()
             container_supported = isolated_container_replay_supported()
