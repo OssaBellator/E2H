@@ -211,6 +211,8 @@ def _run_capsule_isolated_container_candidate(
         raise RunnerError("isolated container replay requires capsule.sandbox")
     _validate_remote_expected_exit_codes(capsule)
     _validate_remote_host_limits(capsule)
+    # Validate caller-selected capture bounds before any Docker control-plane contact.
+    _max_remote_archive_bytes(max_workspace_bytes, max_workspace_entries)
     runtime = container_runtime or sandbox.engine
     try:
         # Reject cheap runtime/policy failures before walking or archiving the workspace.
