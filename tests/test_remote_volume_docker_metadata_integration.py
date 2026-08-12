@@ -17,6 +17,7 @@ from e2h.workspace_archive import sealed_workspace_archive_supported
 
 IMAGE_ENV = "E2H_DOCKER_TEST_PYTHON_IMAGE"
 RUNTIME_ENV = "E2H_DOCKER_TEST_RUNTIME"
+_MTIME_NS = 1_700_000_000 * 1_000_000_000
 
 
 def _runtime() -> str:
@@ -79,6 +80,7 @@ def metadata(path: Path):
         'uid': info.st_uid,
         'gid': info.st_gid,
         'mode': stat.S_IMODE(info.st_mode),
+        'mtime_ns': info.st_mtime_ns,
     }
 
 marker = Path('marker.txt')
@@ -100,10 +102,11 @@ def _expected_metadata(path: Path) -> dict[str, int]:
         "uid": info.st_uid,
         "gid": info.st_gid,
         "mode": stat.S_IMODE(info.st_mode),
+        "mtime_ns": info.st_mtime_ns,
     }
 
 
-def test_real_docker_import_preserves_workspace_ownership_and_mode(tmp_path: Path) -> None:
+def test_real_docker_import_preserves_workspace_metadata(tmp_path: Path) -> None:
     if not sealed_workspace_archive_supported():
         pytest.skip("real Docker metadata validation requires Linux memfd sealing")
     runtime = _runtime()
@@ -120,6 +123,8 @@ def test_real_docker_import_preserves_workspace_ownership_and_mode(tmp_path: Pat
     marker = workspace / "marker.txt"
     marker.write_text("trusted", encoding="utf-8")
     marker.chmod(0o4755)
+    for path in (marker, nested, workspace):
+        os.utime(path, ns=(_MTIME_NS, _MTIME_NS), follow_symlinks=False)
     expected = {
         "root": _expected_metadata(workspace),
         "nested": _expected_metadata(nested),
@@ -131,6 +136,9 @@ def test_real_docker_import_preserves_workspace_ownership_and_mode(tmp_path: Pat
     assert expected["root"]["mode"] == 0o1755
     assert expected["nested"]["mode"] == 0o2755
     assert expected["marker"]["mode"] == 0o4755
+    assert expected["root"]["mtime_ns"] == _MTIME_NS
+    assert expected["nested"]["mtime_ns"] == _MTIME_NS
+    assert expected["marker"]["mtime_ns"] == _MTIME_NS
 
     before = _resources(runtime)
     capsule = TaskCapsule(
