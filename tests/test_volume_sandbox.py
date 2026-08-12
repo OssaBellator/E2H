@@ -152,7 +152,7 @@ def test_named_container_cleanup_does_not_use_host_cidfile(
     assert _records(log) == [["rm", "-f", "e2h-replay-check-abc"]]
 
 
-def test_named_cleanup_accepts_verified_auto_remove_race(
+def test_named_cleanup_fails_closed_after_ambiguous_auto_remove_race(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -161,10 +161,12 @@ def test_named_cleanup_accepts_verified_auto_remove_race(
     monkeypatch.setenv("DOCKER_TEST_RM_FAIL", "1")
     monkeypatch.setenv("DOCKER_TEST_PS_RESULT", "e2h-replay-check-other")
 
-    assert force_remove_named_container(
+    error = force_remove_named_container(
         str(runtime),
         "e2h-replay-check-abc",
-    ) is None
+    )
+    assert error is not None
+    assert "cleanup cannot be proven" in error
     assert _records(log) == [
         ["rm", "-f", "e2h-replay-check-abc"],
         [
