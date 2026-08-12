@@ -249,6 +249,30 @@ def build_container_volume_argv(
     return argv
 
 
+def build_container_volume_create_argv(
+    capsule: TaskCapsule,
+    check: CommandCheck,
+    volume_name: str,
+    relative_cwd: str,
+    container_name: str,
+    *,
+    runtime_binary: str | None = None,
+) -> list[str]:
+    """Build the stopped-container phase of retained remote replay."""
+    argv = build_container_volume_argv(
+        capsule,
+        check,
+        volume_name,
+        relative_cwd,
+        container_name,
+        runtime_binary=runtime_binary,
+    )
+    if len(argv) < 2 or argv[1] != "run":
+        raise SandboxError("retained container builder produced an unexpected Docker command")
+    argv[1] = "create"
+    return argv
+
+
 def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
     """Best-effort force removal after the attached runtime process times out."""
     try:
