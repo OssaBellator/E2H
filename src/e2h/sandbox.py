@@ -16,6 +16,7 @@ _VOLUME_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 _CONTAINER_SHM_SIZE = "64m"
 _CONTAINER_NOFILE_LIMIT = "1024:1024"
+_CONTAINER_OCI_RUNTIME = "runc"
 
 
 class SandboxError(RuntimeError):
@@ -105,6 +106,8 @@ def build_container_argv(
     argv = [
         runtime,
         "run",
+        "--runtime",
+        _CONTAINER_OCI_RUNTIME,
         "--rm",
         "--init",
         "--log-driver",
@@ -199,6 +202,8 @@ def build_container_volume_argv(
     argv = [
         runtime,
         "run",
+        "--runtime",
+        _CONTAINER_OCI_RUNTIME,
         "--init",
         "--log-driver",
         "none",
