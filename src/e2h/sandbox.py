@@ -260,7 +260,7 @@ def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
         return "container runtime wrote an invalid container ID"
     try:
         completed = subprocess.run(
-            [runtime_binary, "rm", "-f", container_id],
+            [runtime_binary, "rm", "-f", "-v", container_id],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_CLEANUP_TIMEOUT_SECONDS,
