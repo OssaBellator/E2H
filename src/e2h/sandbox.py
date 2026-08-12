@@ -121,6 +121,8 @@ def build_container_argv(
         "ALL",
         "--security-opt",
         "no-new-privileges:true",
+        "--security-opt",
+        "seccomp=builtin",
         "--pids-limit",
         str(sandbox.pids_limit),
         "--memory",
