@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -72,3 +73,41 @@ def test_invalid_preparation_container_id_fails_before_archive_copy_and_cleans_n
     volume_name = calls[0][-1]
     assert calls[2] == ["rm", "-f", "-v", container_name]
     assert calls[3] == ["volume", "rm", "-f", volume_name]
+
+
+def test_confirmed_preparation_container_id_is_used_for_copy_and_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bypass_precreate_dependencies(monkeypatch)
+    calls: list[list[str]] = []
+    container_id = "b" * 64
+
+    def fake_run_docker(
+        runtime: str,
+        args: list[str],
+        **kwargs: Any,
+    ) -> str:
+        del runtime, kwargs
+        calls.append(list(args))
+        if args[:2] == ["volume", "create"]:
+            return args[-1]
+        if args and args[0] == "create":
+            return container_id
+        return ""
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+    archive = SimpleNamespace(file=object())
+
+    with prepared_workspace_volume(
+        ContainerSandbox(image=IMAGE),
+        archive,  # type: ignore[arg-type]
+    ) as volume_name:
+        assert volume_name.startswith("e2h-replay-workspace-")
+
+    assert [args[0] for args in calls] == ["volume", "create", "cp", "rm", "volume"]
+    create = calls[1]
+    generated_name = create[create.index("--name") + 1]
+    assert generated_name != container_id
+    assert calls[2] == ["cp", "--quiet", "-", f"{container_id}:/workspace"]
+    assert calls[3] == ["rm", "-f", "-v", container_id]
+    assert calls[4] == ["volume", "rm", "-f", volume_name]
