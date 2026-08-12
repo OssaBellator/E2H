@@ -26,7 +26,12 @@ args = sys.argv[1:]
 with Path(os.environ["DOCKER_TEST_LOG"]).open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\\n")
 if args and args[0] == "version":
-    print("29.5.2 29.5.2")
+    if args[-1] == "{{{{json .Server.Components}}}}":
+        print(json.dumps([{{"Name": "runc", "Version": "1.3.6"}}]))
+    else:
+        print("29.7.2 29.7.2")
+elif args and args[0] == "info":
+    print("linux true true true true true")
 elif args[:2] == ["image", "inspect"]:
     if os.environ.get("DOCKER_TEST_IMAGE_INSPECT_FAIL"):
         print("image inspect failed", file=sys.stderr)
@@ -74,7 +79,7 @@ def test_image_volume_probe_runtime_failure_stops_before_resource_creation(
                 raise AssertionError("failed image inspection must not yield")
 
     commands = _commands(log)
-    assert [args[0] for args in commands] == ["version", "image"]
+    assert [args[0] for args in commands] == ["version", "version", "info", "image"]
 
 
 def test_image_volume_probe_unexpected_response_stops_before_resource_creation(
@@ -95,4 +100,4 @@ def test_image_volume_probe_unexpected_response_stops_before_resource_creation(
                 raise AssertionError("unexpected image probe must not yield")
 
     commands = _commands(log)
-    assert [args[0] for args in commands] == ["version", "image"]
+    assert [args[0] for args in commands] == ["version", "version", "info", "image"]
