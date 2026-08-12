@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+_MAX_CONTAINER_NUMERIC_ID = (1 << 31) - 1
+
 
 def _validate_relative_path(value: str) -> str:
     """Reject unsafe relative paths while preserving POSIX notation."""
@@ -134,7 +136,12 @@ class ContainerSandbox(StrictModel):
         parts = value.split(":")
         if len(parts) not in {1, 2} or any(not part.isdigit() for part in parts):
             raise ValueError("container user must be a numeric uid or uid:gid")
-        if int(parts[0]) == 0:
+        ids = [int(part) for part in parts]
+        if any(identifier > _MAX_CONTAINER_NUMERIC_ID for identifier in ids):
+            raise ValueError(
+                f"container user ids must not exceed {_MAX_CONTAINER_NUMERIC_ID}"
+            )
+        if ids[0] == 0:
             raise ValueError("container user must be non-root")
         return value
 
