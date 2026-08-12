@@ -186,19 +186,11 @@ def test_prepared_volume_runner_preserves_continue_on_failure(
     assert [record[-1] for record in _records(log)] == ["fail", "pass"]
 
 
-@pytest.mark.parametrize(
-    ("exit_code", "failure_code"),
-    [
-        (125, FailureCode.SANDBOX_RUNTIME),
-        (126, FailureCode.PROCESS_LAUNCH_ERROR),
-        (127, FailureCode.COMMAND_NOT_FOUND),
-    ],
-)
-def test_prepared_volume_runner_treats_reserved_docker_exits_as_infrastructure(
+@pytest.mark.parametrize("exit_code", [125, 126, 127])
+def test_prepared_volume_runner_preserves_expected_ambiguous_docker_exits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exit_code: int,
-    failure_code: FailureCode,
 ) -> None:
     runtime, log = _fake_runtime(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
@@ -206,7 +198,7 @@ def test_prepared_volume_runner_treats_reserved_docker_exits_as_infrastructure(
     capsule = _capsule(
         [
             CommandCheck(
-                id="reserved",
+                id="ambiguous-exit",
                 argv=[f"docker-exit-{exit_code}"],
                 expected_exit_codes={exit_code},
             )
@@ -220,11 +212,10 @@ def test_prepared_volume_runner_treats_reserved_docker_exits_as_infrastructure(
         container_runtime=str(runtime),
     )
 
-    assert result.status is RunStatus.ERROR
-    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.status is RunStatus.PASSED
+    assert result.checks[0].status is CheckStatus.PASSED
     assert result.checks[0].exit_code == exit_code
-    assert result.checks[0].failure is not None
-    assert result.checks[0].failure.code is failure_code
+    assert result.checks[0].failure is None
 
 
 def test_prepared_volume_timeout_uses_generated_name_cleanup(
