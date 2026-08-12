@@ -166,3 +166,25 @@ def test_invalid_oom_killed_state_fails_closed_and_still_cleans_up(
     assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
     assert "invalid fields" in (result.checks[0].error or "")
     assert len(cleanup_names) == 1
+
+
+def test_missing_oom_killed_state_fails_closed_and_still_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(oom_killed=False)
+    del state["OOMKilled"]
+    cleanup_names = _install_state_runtime(monkeypatch, state)
+
+    result = run_capsule_prepared_volume(
+        _capsule(),
+        _archive(),
+        "e2h-replay-workspace-abc",
+        container_runtime="docker-test",
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "invalid fields" in (result.checks[0].error or "")
+    assert len(cleanup_names) == 1
