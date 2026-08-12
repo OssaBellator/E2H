@@ -21,7 +21,7 @@ if args[:2] != ["info", "--format"]:
 if os.environ.get("DOCKER_TEST_FAIL"):
     print("info failed", file=sys.stderr)
     raise SystemExit(17)
-print(os.environ.get("DOCKER_TEST_CAPABILITIES", "linux true true"))
+print(os.environ.get("DOCKER_TEST_CAPABILITIES", "linux true true true true true"))
 """,
         encoding="utf-8",
     )
@@ -29,7 +29,7 @@ print(os.environ.get("DOCKER_TEST_CAPABILITIES", "linux true true"))
     return runtime
 
 
-def test_resource_capability_probe_accepts_linux_memory_and_swap_support(
+def test_resource_capability_probe_accepts_all_remote_limits(
     tmp_path: Path,
 ) -> None:
     require_docker_resource_limits(str(_fake_docker(tmp_path)))
@@ -38,12 +38,12 @@ def test_resource_capability_probe_accepts_linux_memory_and_swap_support(
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("linux false true", "memory_limit=false, swap_limit=true"),
-        ("linux true false", "memory_limit=true, swap_limit=false"),
-        ("linux false false", "memory_limit=false, swap_limit=false"),
+        ("linux false true true true true", "memory_limit=false, swap_limit=true"),
+        ("linux true false true true true", "memory_limit=true, swap_limit=false"),
+        ("linux false false true true true", "memory_limit=false, swap_limit=false"),
     ],
 )
-def test_resource_capability_probe_rejects_missing_limits(
+def test_resource_capability_probe_rejects_missing_memory_or_swap_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     value: str,
@@ -56,12 +56,44 @@ def test_resource_capability_probe_rejects_missing_limits(
         require_docker_resource_limits(str(runtime))
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (
+            "linux true true false true true",
+            "cpu_cfs_period=false, cpu_cfs_quota=true, pids_limit=true",
+        ),
+        (
+            "linux true true true false true",
+            "cpu_cfs_period=true, cpu_cfs_quota=false, pids_limit=true",
+        ),
+        (
+            "linux true true true true false",
+            "cpu_cfs_period=true, cpu_cfs_quota=true, pids_limit=false",
+        ),
+    ],
+)
+def test_resource_capability_probe_rejects_missing_cpu_or_pid_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    expected: str,
+) -> None:
+    runtime = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_CAPABILITIES", value)
+
+    with pytest.raises(DockerRemoteError, match="CPU CFS period/quota and PID limit support") as raised:
+        require_docker_resource_limits(str(runtime))
+
+    assert expected in str(raised.value)
+
+
 def test_resource_capability_probe_rejects_non_linux_daemon(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _fake_docker(tmp_path)
-    monkeypatch.setenv("DOCKER_TEST_CAPABILITIES", "windows true true")
+    monkeypatch.setenv("DOCKER_TEST_CAPABILITIES", "windows true true true true true")
 
     with pytest.raises(DockerRemoteError, match="requires a Linux daemon") as raised:
         require_docker_resource_limits(str(runtime))
@@ -71,7 +103,12 @@ def test_resource_capability_probe_rejects_non_linux_daemon(
 
 @pytest.mark.parametrize(
     "value",
-    ["", "linux true", "linux yes true", "linux true false extra"],
+    [
+        "",
+        "linux true true true true",
+        "linux true true true yes true",
+        "linux true true true true true extra",
+    ],
 )
 def test_resource_capability_probe_rejects_unexpected_output(
     tmp_path: Path,
