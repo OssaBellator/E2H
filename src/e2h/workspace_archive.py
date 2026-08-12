@@ -325,6 +325,10 @@ def _add_symlink(
     expected: os.stat_result,
     state: _ArchiveState,
 ) -> None:
+    if expected.st_nlink > 1:
+        raise WorkspaceArchiveError(
+            f"replay workspace symlink {name!r} has multiple hard links"
+        )
     try:
         target = os.readlink(name, dir_fd=parent_descriptor)
     except OSError as exc:
