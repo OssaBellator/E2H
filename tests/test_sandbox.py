@@ -87,6 +87,7 @@ def test_builder_enforces_declared_boundaries(tmp_path: Path) -> None:
     assert argv[:2] == ["docker-test", "run"]
     assert "--rm" in argv
     assert argv[argv.index("--runtime") + 1] == "runc"
+    assert argv[argv.index("--hostname") + 1] == "e2h"
     assert argv[argv.index("--log-driver") : argv.index("--log-driver") + 2] == [
         "--log-driver",
         "none",
