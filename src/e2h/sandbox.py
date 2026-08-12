@@ -13,6 +13,7 @@ _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
 _CONTAINER_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _VOLUME_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
+_CONTAINER_SHM_SIZE = "64m"
 
 
 class SandboxError(RuntimeError):
@@ -132,6 +133,8 @@ def build_container_argv(
         sandbox.user,
         "--tmpfs",
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--shm-size",
+        _CONTAINER_SHM_SIZE,
         "--entrypoint",
         check.argv[0],
     ]
@@ -212,6 +215,8 @@ def build_container_volume_argv(
         sandbox.user,
         "--tmpfs",
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--shm-size",
+        _CONTAINER_SHM_SIZE,
         "--ulimit",
         "core=0:0",
         "--entrypoint",
