@@ -139,8 +139,8 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
         assert int(payload["swap_max"]) == 0
     else:
         assert payload["cgroup"] == "v1"
-        if payload["memsw_max"] is not None:
-            assert int(payload["memsw_max"]) == _MEMORY_BYTES
+        assert payload["memsw_max"] is not None
+        assert int(payload["memsw_max"]) == _MEMORY_BYTES
 
     after = _resources(runtime)
     assert not (after[0] - before[0])
