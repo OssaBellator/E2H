@@ -51,6 +51,8 @@ with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\\n")
 if args and args[0] == "version":
     print("29.5.2 29.5.2")
+elif args[:2] == ["image", "inspect"]:
+    print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "null"))
 elif args[:2] == ["volume", "create"]:
     print(args[-1])
 elif args and args[0] == "create":
@@ -148,6 +150,8 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     commands = [record["args"] for record in records]
     assert [args[0] for args in commands] == [
         "version",
+        "image",
+        "version",
         "volume",
         "create",
         "cp",
@@ -157,11 +161,11 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "rm",
         "volume",
     ]
-    volume_name = str(commands[1][-1])
-    prep_name = commands[2][commands[2].index("--name") + 1]
-    assert commands[4] == ["rm", "-f", prep_name]
+    volume_name = str(commands[3][-1])
+    prep_name = commands[4][commands[4].index("--name") + 1]
+    assert commands[6] == ["rm", "-f", prep_name]
 
-    run = commands[5]
+    run = commands[7]
     mount = run[run.index("--mount") + 1]
     assert mount == (
         f"type=volume,src={volume_name},dst=/workspace,volume-nocopy,readonly"
@@ -171,10 +175,31 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert "--cidfile" not in run
     assert run[run.index("--workdir") + 1] == "/workspace/shared/nested"
     check_name = run[run.index("--name") + 1]
-    assert commands[6][-1] == check_name
-    assert commands[7] == ["rm", "-f", check_name]
-    assert commands[8] == ["volume", "rm", "-f", volume_name]
-    assert int(records[3]["stdin_bytes"]) > 0
+    assert commands[8][-1] == check_name
+    assert commands[9] == ["rm", "-f", check_name]
+    assert commands[10] == ["volume", "rm", "-f", volume_name]
+    assert int(records[5]["stdin_bytes"]) > 0
+
+
+def test_candidate_rejects_image_declared_volumes_before_workspace_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_IMAGE_VOLUMES", '{"/data":{}}')
+
+    with pytest.raises(RunnerError, match="VOLUME declarations"):
+        _run_capsule_isolated_container_candidate(
+            _capsule(),
+            tmp_path / "workspace-does-not-exist",
+            max_workspace_bytes=1024,
+            max_workspace_entries=20,
+            container_runtime=str(runtime),
+        )
+
+    commands = [record["args"] for record in _records(log)]
+    assert [args[0] for args in commands] == ["version", "image"]
 
 
 def test_candidate_command_failure_still_removes_check_and_volume(
@@ -199,7 +224,8 @@ def test_candidate_command_failure_still_removes_check_and_volume(
     commands = [record["args"] for record in _records(log)]
     run = next(args for args in commands if args[0] == "run")
     check_name = run[run.index("--name") + 1]
-    volume_name = str(commands[1][-1])
+    volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
+    volume_name = str(volume_create[-1])
     assert ["rm", "-f", check_name] in commands
     assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
@@ -236,7 +262,8 @@ def test_candidate_timeout_removes_named_check_and_volume(
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.TIMED_OUT
     commands = [record["args"] for record in _records(log)]
-    volume_name = str(commands[1][-1])
+    volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
+    volume_name = str(volume_create[-1])
     check_cleanup = commands[-2]
     assert check_cleanup[:2] == ["rm", "-f"]
     assert str(check_cleanup[-1]).startswith("e2h-replay-check-")
