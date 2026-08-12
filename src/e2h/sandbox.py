@@ -12,6 +12,7 @@ _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 _CONTAINER_SHM_SIZE = "64m"
+_CONTAINER_NOFILE_LIMIT = "1024:1024"
 
 
 class SandboxError(RuntimeError):
@@ -134,6 +135,8 @@ def build_container_argv(
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
         "--shm-size",
         _CONTAINER_SHM_SIZE,
+        "--ulimit",
+        f"nofile={_CONTAINER_NOFILE_LIMIT}",
         "--entrypoint",
         check.argv[0],
     ]
