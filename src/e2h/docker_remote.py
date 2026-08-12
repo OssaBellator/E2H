@@ -116,6 +116,19 @@ def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
         raise DockerRemoteError("workspace archive is not sealed against mutation")
     if current_size != archive.archive_bytes:
         raise DockerRemoteError("workspace archive size does not match captured metadata")
+
+    # Keep the importer safe when it is called directly rather than only through
+    # isolated_runner. Lazy imports avoid a module-import cycle while reusing the
+    # exact same physical-header/member-tree validation as the candidate path.
+    from e2h.isolated_runner import _validate_archive_member_ancestry
+    from e2h.runner import RunnerError
+    from e2h.volume_runner import _workspace_tree
+
+    try:
+        _validate_archive_member_ancestry(archive)
+        _workspace_tree(archive)
+    except RunnerError as exc:
+        raise DockerRemoteError(f"workspace archive structure is invalid: {exc}") from exc
     return archive
 
 
