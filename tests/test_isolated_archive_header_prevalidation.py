@@ -46,6 +46,36 @@ def _archive(
     )
 
 
+def _pax_size_override_archive() -> WorkspaceArchive:
+    root = tarfile.TarInfo(".")
+    root.type = tarfile.DIRTYPE
+    root_header = root.tobuf(
+        format=tarfile.PAX_FORMAT,
+        encoding="utf-8",
+        errors="surrogateescape",
+    )
+
+    payload = tarfile.TarInfo("payload.txt")
+    payload.size = 0
+    payload.pax_headers["size"] = "1"
+    payload_headers = payload.tobuf(
+        format=tarfile.PAX_FORMAT,
+        encoding="utf-8",
+        errors="surrogateescape",
+    )
+
+    data_block = b"Z" + b"\0" * (tarfile.BLOCKSIZE - 1)
+    trailer = b"\0" * (2 * tarfile.BLOCKSIZE)
+    stream = io.BytesIO(root_header + payload_headers + data_block + trailer)
+    return WorkspaceArchive(
+        file=stream,
+        directories=frozenset({"."}),
+        source_bytes=1,
+        entries=1,
+        archive_bytes=len(stream.getbuffer()),
+    )
+
+
 def test_archive_prevalidation_rejects_gnu_long_name_extension() -> None:
     archive = _archive(format=tarfile.GNU_FORMAT, member_name="n" * 150)
 
@@ -66,5 +96,11 @@ def test_archive_prevalidation_rejects_gnu_long_link_extension() -> None:
 
 def test_archive_prevalidation_accepts_pax_long_name_extension() -> None:
     archive = _archive(format=tarfile.PAX_FORMAT, member_name="n" * 150)
+
+    _validate_archive_member_ancestry(archive)
+
+
+def test_archive_prevalidation_uses_pax_size_override_for_physical_scan() -> None:
+    archive = _pax_size_override_archive()
 
     _validate_archive_member_ancestry(archive)
