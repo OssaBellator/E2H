@@ -13,9 +13,11 @@ from pathlib import Path, PurePosixPath
 from time import monotonic
 
 from e2h.failures import (
+    FailureCategory,
     FailureCode,
     FailureImpact,
     FailureRecord,
+    Retryability,
     launch_failure,
     output_capture_failure,
     sandbox_failure,
@@ -218,6 +220,17 @@ def _validate_remote_policy(capsule: TaskCapsule) -> None:
         raise RunnerError("prepared-volume replay requires sandbox.pull_policy='never'")
 
 
+def _completed_cleanup_failure() -> FailureRecord:
+    return FailureRecord(
+        category=FailureCategory.SANDBOX,
+        code=FailureCode.SANDBOX_CLEANUP,
+        impact=FailureImpact.INFRASTRUCTURE_ERROR,
+        retryability=Retryability.AFTER_FIX,
+        summary="completed container could not be cleaned up safely",
+        details={"backend": ExecutionBackend.CONTAINER.value},
+    )
+
+
 def _inspect_named_container_state(
     runtime: str,
     container_name: str,
@@ -345,7 +358,11 @@ def _execute_volume_command(
         outcome = replace(
             outcome,
             error=combined,
-            failure_code=FailureCode.SANDBOX_RUNTIME,
+            failure_code=(
+                FailureCode.SANDBOX_CLEANUP
+                if cleanup_error is not None
+                else FailureCode.SANDBOX_RUNTIME
+            ),
         )
     return outcome
 
@@ -443,11 +460,12 @@ def run_capsule_prepared_volume(
                     infrastructure_error = True
             elif outcome.error is not None:
                 status = CheckStatus.ERROR
-                failure = (
-                    sandbox_failure()
-                    if outcome.failure_code is FailureCode.SANDBOX_RUNTIME
-                    else output_capture_failure(ExecutionBackend.CONTAINER.value)
-                )
+                if outcome.failure_code is FailureCode.SANDBOX_CLEANUP:
+                    failure = _completed_cleanup_failure()
+                elif outcome.failure_code is FailureCode.SANDBOX_RUNTIME:
+                    failure = sandbox_failure()
+                else:
+                    failure = output_capture_failure(ExecutionBackend.CONTAINER.value)
                 infrastructure_error = True
             elif outcome.exit_code is None:
                 raise RunnerError("completed command is missing an exit code")
