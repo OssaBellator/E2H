@@ -19,6 +19,7 @@ RUNTIME_ENV = "E2H_DOCKER_TEST_RUNTIME"
 _MEMORY_MB = 64
 _MEMORY_BYTES = _MEMORY_MB * 1024 * 1024
 _SHM_BYTES = 64 * 1024 * 1024
+_NOFILE_LIMIT = 1024
 
 
 def _runtime() -> str:
@@ -77,6 +78,7 @@ root = Path('/sys/fs/cgroup')
 shm = os.statvfs('/dev/shm')
 payload = {
     'core': list(resource.getrlimit(resource.RLIMIT_CORE)),
+    'nofile': list(resource.getrlimit(resource.RLIMIT_NOFILE)),
     'shm_bytes': shm.f_frsize * shm.f_blocks,
 }
 if (root / 'memory.max').exists():
@@ -93,7 +95,7 @@ print(json.dumps(payload, sort_keys=True))
 """.strip()
 
 
-def test_real_docker_enforces_remote_memory_swap_shm_and_core_limits(tmp_path: Path) -> None:
+def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path) -> None:
     if not sealed_workspace_archive_supported():
         pytest.skip("real Docker resource validation requires Linux memfd sealing")
     runtime = _runtime()
@@ -106,7 +108,7 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_core_limits(tmp_path: P
     before = _resources(runtime)
     capsule = TaskCapsule(
         id="real-docker-resource-limits",
-        goal="Verify remote replay memory, swap, shared-memory, and core limits.",
+        goal="Verify remote replay memory, swap, shared-memory, and process limits.",
         sandbox=ContainerSandbox(image=image, memory_mb=_MEMORY_MB),
         success=SuccessSpec(
             commands=[
@@ -130,6 +132,7 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_core_limits(tmp_path: P
     assert result.checks[0].status is CheckStatus.PASSED
     payload = json.loads(result.checks[0].stdout)
     assert payload["core"] == [0, 0]
+    assert payload["nofile"] == [_NOFILE_LIMIT, _NOFILE_LIMIT]
     assert int(payload["memory_max"]) == _MEMORY_BYTES
     assert int(payload["shm_bytes"]) == _SHM_BYTES
     if payload["cgroup"] == "v2":
