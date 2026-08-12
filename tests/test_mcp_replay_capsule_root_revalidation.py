@@ -52,6 +52,7 @@ def test_replay_rejects_capsule_parent_escape_between_resolution_and_load(
     def swapping_load(
         path: Path,
         *,
+        max_bytes: int | None = None,
         containment_root: Path | None = None,
     ) -> Any:
         if not state["swapped"]:
@@ -61,7 +62,11 @@ def test_replay_rejects_capsule_parent_escape_between_resolution_and_load(
                 parent.symlink_to(outside, target_is_directory=True)
             except (OSError, NotImplementedError) as exc:
                 pytest.skip(f"symlinks unavailable: {exc}")
-        return original_load(path, containment_root=containment_root)
+        return original_load(
+            path,
+            max_bytes=max_bytes,
+            containment_root=containment_root,
+        )
 
     def unexpected_run(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("outside capsule reached replay execution")
@@ -69,7 +74,6 @@ def test_replay_rejects_capsule_parent_escape_between_resolution_and_load(
     monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", lambda: True)
     monkeypatch.setattr(mcp_server, "load_capsule", swapping_load)
     monkeypatch.setattr(mcp_server, "run_capsule_bound_local", unexpected_run)
-    monkeypatch.setattr(mcp_server, "run_capsule", unexpected_run)
     service = E2HMCPService(MCPServerConfig(root=root, allow_replay=True))
 
     with pytest.raises(MCPServiceError, match="capsule parent escapes the configured root"):

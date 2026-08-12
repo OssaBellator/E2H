@@ -66,7 +66,7 @@ Malformed verification commands and expected verification failures are returned 
 
 The Agent Card always advertises status, artifact verification, and snapshot verification. It advertises memory queries only when the operator configured an existing E2H experiment store. It advertises replay only when replay was explicitly enabled and the selected server configuration has a supported replay path.
 
-Remote replay currently means the handle-bound local backend only. Container-backed MCP/A2A replay is fail-closed while issue #288 tracks the remaining runtime workspace-identity problem.
+Effective remote replay currently means the handle-bound local backend only. Docker-backed MCP/A2A replay remains fail-closed while the sealed-volume candidate is validated and the Docker control-plane deployment boundary is established.
 
 ## Replay is opt-in
 
@@ -90,13 +90,21 @@ A replay request is then:
 }
 ```
 
-The remote A2A caller cannot select the execution backend or container-runtime binary. Those remain operator-side server settings. Replay output is digest-only by default; bounded stdout/stderr is included only when the operator also starts the server with `--expose-replay-output`.
+The remote A2A caller cannot select the execution backend, container-runtime binary, or Docker control-plane trust declaration. Those remain operator-side server settings. Replay output is digest-only by default; bounded stdout/stderr is included only when the operator also starts the server with `--expose-replay-output`.
 
-A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist.
+A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist. Handle binding prevents workspace/check-directory pathname rebinding; it does not sandbox the command. The child runs with the A2A service account's ordinary host permissions and inherits the service process environment before capsule overrides. If local replay is enabled, use a dedicated low-privilege service context, minimize secrets in its environment, and treat every selectable capsule as code trusted with those permissions.
 
-Remote container replay fails closed. PR #304 added descriptor-bound capture into a bounded private temporary tree, but continued review found that the runtime still consumes that tree through a mutable host pathname. Another process running as the A2A service UID can enumerate and modify the temporary tree after capture but before the container daemon resolves the mount source. The copy therefore does not yet satisfy the stable runtime-consumption identity required for a remote security boundary.
+Before either local workspace binding or future Docker work, the shared replay boundary rejects capsules with more than 50 checks, more than 2,000,000 aggregate retained stdout/stderr characters at the capsule output ceiling, or more than 1,800 seconds of aggregate declared check timeout.
 
-Re-enablement requires either transferring the captured workspace into runtime-managed state without a mutable host source pathname or a validated runtime/kernel primitive that consumes a stable filesystem identity. The existing descriptor-bound snapshot code remains useful for the input-capture half of such a design.
+### Container replay candidate remains disabled
+
+The current remote Docker candidate replaces the superseded mutable-host-path workspace design. It descriptor-captures the caller workspace into a bounded sealed Linux memfd tar, validates the tar before Docker import, copies it into a fresh Docker-managed volume, and mounts that volume read-only for retained-container replay. The candidate also applies the branch's Docker/runc/resource capability gates, immutable-image `VOLUME` rejection, explicit non-root identity policy, exact argv behavior, bounded writable-memory resources, inspected container state transitions, and fail-closed cleanup semantics.
+
+Public A2A container replay is still disabled: the underlying isolated-container capability remains false. `--allow-replay --backend container` therefore does not become usable merely because the candidate code exists, and `auto` cannot launch a sandbox capsule through that path.
+
+Before re-enablement, the committed real-Docker integration targets must pass on an actual supported Linux Docker daemon, and the deployment must independently establish the Docker API/socket as a trusted operator boundary or mediate it through a suitably narrow helper. A principal with unrestricted Docker control-plane authority can interfere with daemon-managed containers and volumes and is not an untrusted peer that this candidate claims to isolate from.
+
+`--trusted-container-control-plane` is an operator **attestation** wired into the shared MCP service. It declares that the deployment has already established that control-plane boundary; E2H does not verify socket ACLs, daemon access, peer privileges, or surrounding workload isolation. The option remains default-off, is required before a future container replay can advance past backend selection, and does not override the current fail-closed capability gate.
 
 Replay results explicitly report `execution_backend`, `workspace_mode`, and `workspace_mutations_persisted`. Effective A2A replay currently reports the persistent handle-bound local mode.
 
@@ -111,8 +119,9 @@ The A2A layer reuses the same root-bounded verification service as the MCP integ
 - artifact hashing has an operator hard byte limit independent of caller assertions;
 - snapshot checks verify manifest structure, archive members, sizes, and content digests;
 - replay is absent unless operator-enabled;
-- supported local replay binds the workspace/check directory identities before process launch;
-- remote container replay fails closed until runtime workspace consumption is identity-stable;
+- supported local replay binds the workspace/check directory identities before process launch but does not confine the command's host permissions;
+- all replay backends enforce the shared host command/output/timeout budget before execution-specific work;
+- remote container replay remains disabled pending real-daemon evidence and an operator-attested Docker control-plane boundary;
 - the A2A response size is bounded to prevent large verification results from being copied automatically into another agent's context;
 - local absolute root paths are scrubbed from expected verification errors before they are returned to a remote agent.
 

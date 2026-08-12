@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 
@@ -91,6 +91,7 @@ def test_container_replay_reports_discarded_isolated_workspace(
             root=tmp_path,
             allow_replay=True,
             replay_backend=ExecutionBackend.CONTAINER,
+            trusted_container_control_plane=True,
         )
     )
 
@@ -141,6 +142,7 @@ def test_replay_digest_binds_workspace_semantics(
             root=tmp_path,
             allow_replay=True,
             replay_backend=ExecutionBackend.CONTAINER,
+            trusted_container_control_plane=True,
         )
     )
 

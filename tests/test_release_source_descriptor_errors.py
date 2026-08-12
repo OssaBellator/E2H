@@ -31,7 +31,7 @@ def test_source_root_path_stability_normalizes_missing_root(tmp_path: Path) -> N
     root.rmdir()
 
     with pytest.raises(ReleaseSourceError, match="unable to restat release source root"):
-        release_source._source_root_path_must_be_stable(root, expected)
+        release_source._source_root_path_must_be_stable(root, expected, root)
 
 
 def test_source_root_path_stability_rejects_replacement(tmp_path: Path) -> None:
@@ -42,7 +42,7 @@ def test_source_root_path_stability_rejects_replacement(tmp_path: Path) -> None:
     root.mkdir()
 
     with pytest.raises(ReleaseSourceError, match="release source root changed during traversal"):
-        release_source._source_root_path_must_be_stable(root, expected)
+        release_source._source_root_path_must_be_stable(root, expected, root)
 
 
 def test_source_root_descriptor_stability_normalizes_missing_path(tmp_path: Path) -> None:
@@ -53,7 +53,12 @@ def test_source_root_descriptor_stability_normalizes_missing_path(tmp_path: Path
     root.rename(tmp_path / "moved")
     try:
         with pytest.raises(ReleaseSourceError, match="unable to restat release source root"):
-            release_source._source_root_descriptor_must_be_stable(root, descriptor, opened)
+            release_source._source_root_descriptor_must_be_stable(
+                root,
+                descriptor,
+                opened,
+                root,
+            )
     finally:
         os.close(descriptor)
 
@@ -70,7 +75,12 @@ def test_source_root_descriptor_stability_rejects_replacement(tmp_path: Path) ->
             ReleaseSourceError,
             match="release source root changed during traversal",
         ):
-            release_source._source_root_descriptor_must_be_stable(root, descriptor, opened)
+            release_source._source_root_descriptor_must_be_stable(
+                root,
+                descriptor,
+                opened,
+                root,
+            )
     finally:
         os.close(descriptor)
 

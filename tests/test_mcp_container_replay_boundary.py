@@ -40,6 +40,7 @@ def test_mcp_rejects_explicit_container_replay(
                 root=tmp_path,
                 allow_replay=True,
                 replay_backend=ExecutionBackend.CONTAINER,
+                trusted_container_control_plane=True,
             )
         )
 
@@ -59,6 +60,7 @@ def test_mcp_auto_rejects_sandbox_capsule_before_container_launch(
             root=tmp_path,
             allow_replay=True,
             replay_backend=ExecutionBackend.AUTO,
+            trusted_container_control_plane=True,
         )
     )
 

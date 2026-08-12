@@ -199,7 +199,7 @@ def test_duplicate_run_identity_rolls_back_before_insert(tmp_path: Path) -> None
     payload["runs"][1]["run_id"] = payload["runs"][0]["run_id"]
     artifact.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(StoreError, match="duplicate run identity"):
+    with pytest.raises(StoreError, match="experiment run ids must be unique"):
         ingest_artifact(database, artifact)
     assert initialize_store(database).sources == 0
     assert store_info(database).runs == 0

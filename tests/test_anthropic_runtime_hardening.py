@@ -102,7 +102,7 @@ def test_runtime_cli_writes_all_optional_outputs_and_json(
     monkeypatch.setattr(runtime_cli, "ingest_anthropic_messages_file", fake_ingest)
     monkeypatch.setattr(
         runtime_cli,
-        "write_traces_jsonl",
+        "_write_runtime_traces",
         lambda path, traces: path.write_text("trace\n", encoding="utf-8"),
     )
 

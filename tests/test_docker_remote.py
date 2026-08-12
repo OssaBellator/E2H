@@ -21,6 +21,7 @@ from e2h.models import ContainerSandbox
 from e2h.workspace_archive import WorkspaceArchive, stable_workspace_archive
 
 IMAGE = "python@sha256:" + "0" * 64
+CONTAINER_ID = "a" * 64
 
 
 def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
@@ -57,7 +58,19 @@ elif args[:2] == ["image", "inspect"]:
     if os.environ.get("DOCKER_TEST_IMAGE_INSPECT_FAIL"):
         print("image inspect failed", file=sys.stderr)
         raise SystemExit(14)
-    print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "none"))
+    image_format = args[args.index("--format") + 1]
+    if image_format == "{{{{json .Descriptor}}}}":
+        print(
+            json.dumps(
+                {{
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": "sha256:" + "0" * 64,
+                    "size": 123,
+                }}
+            )
+        )
+    else:
+        print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "none"))
 elif args[:2] == ["volume", "create"]:
     if os.environ.get("DOCKER_TEST_VOLUME_CREATE_FAIL"):
         print("volume create failed", file=sys.stderr)
@@ -221,6 +234,7 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
         "version",
         "info",
         "image",
+        "image",
         "volume",
         "create",
         "cp",
@@ -229,16 +243,21 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     ]
     assert records[1]["args"][-1] == "{{json .Server.Components}}"
 
-    image_inspect = records[3]["args"]
-    assert image_inspect[:2] == ["image", "inspect"]
-    assert image_inspect[-1] == IMAGE
+    descriptor_inspect = records[3]["args"]
+    assert descriptor_inspect[:2] == ["image", "inspect"]
+    assert descriptor_inspect[descriptor_inspect.index("--format") + 1] == "{{json .Descriptor}}"
+    assert descriptor_inspect[-1] == IMAGE
 
-    volume_create = records[4]["args"]
+    volume_inspect = records[4]["args"]
+    assert volume_inspect[:2] == ["image", "inspect"]
+    assert volume_inspect[-1] == IMAGE
+
+    volume_create = records[5]["args"]
     assert volume_create[:2] == ["volume", "create"]
     assert "e2h.remote-replay=workspace" in volume_create
     volume_name = str(volume_create[-1])
 
-    create = records[5]["args"]
+    create = records[6]["args"]
     assert create[0] == "create"
     assert create[create.index("--pull") + 1] == "never"
     assert create[create.index("--network") + 1] == "none"
@@ -246,22 +265,21 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     mount = create[create.index("--mount") + 1]
     assert mount == f"type=volume,src={volume_name},dst=/workspace,volume-nocopy"
     assert "type=bind" not in mount
-    container_name = create[create.index("--name") + 1]
 
-    copy = records[6]
+    copy = records[7]
     copy_args = copy["args"]
     assert copy_args == [
         "cp",
         "--quiet",
         "-",
-        f"{container_name}:/workspace",
+        f"{CONTAINER_ID}:/workspace",
     ]
     assert "--archive" not in copy_args
     assert copy["stdin_bytes"] == len(expected)
     assert copy["stdin_sha256"] == expected_digest
 
-    assert records[7]["args"] == ["rm", "-f", "-v", container_name]
-    assert records[8]["args"] == ["volume", "rm", "-f", volume_name]
+    assert records[8]["args"] == ["rm", "-f", "-v", CONTAINER_ID]
+    assert records[9]["args"] == ["volume", "rm", "-f", volume_name]
 
 
 def test_prepared_workspace_volume_rejects_image_declared_volumes_before_create(
@@ -282,7 +300,7 @@ def test_prepared_workspace_volume_rejects_image_declared_volumes_before_create(
                 raise AssertionError("image-declared volume should fail before create")
 
     commands = [record["args"] for record in _records(log)]
-    assert [args[0] for args in commands] == ["version", "version", "info", "image"]
+    assert [args[0] for args in commands] == ["version", "version", "info", "image", "image"]
 
 
 def test_prepared_workspace_volume_cleans_up_after_copy_failure(
@@ -308,13 +326,14 @@ def test_prepared_workspace_volume_cleans_up_after_copy_failure(
         "version",
         "info",
         "image",
+        "image",
         "volume",
         "create",
         "cp",
         "rm",
         "volume",
     ]
-    assert commands[-2][0:4] == ["rm", "-f", "-v", commands[-2][-1]]
+    assert commands[-2] == ["rm", "-f", "-v", CONTAINER_ID]
 
 
 def test_prepared_workspace_volume_cleanup_failure_takes_precedence_over_body_failure(

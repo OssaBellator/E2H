@@ -17,7 +17,7 @@ def test_public_error_does_not_mangle_filesystem_root() -> None:
 
 
 def test_a2a_help_describes_local_and_isolated_container_replay() -> None:
-    help_text = _parser().format_help()
+    help_text = " ".join(_parser().format_help().split())
 
     assert "read-only isolated workspace copy" in help_text
     assert "command-executing replay" in help_text
@@ -28,7 +28,7 @@ def test_a2a_help_describes_local_and_isolated_container_replay() -> None:
     not handle_bound_local_replay_supported(),
     reason="local replay skill check requires supported handle-bound local host",
 )
-def test_replay_skill_advertises_local_and_isolated_execution(tmp_path: Path) -> None:
+def test_replay_skill_describes_operator_selected_execution(tmp_path: Path) -> None:
     service = E2HMCPService(
         MCPServerConfig(
             root=tmp_path,
@@ -40,5 +40,5 @@ def test_replay_skill_advertises_local_and_isolated_execution(tmp_path: Path) ->
     card = build_agent_card(service, public_url="https://verify.example")
     replay = next(skill for skill in card.skills if skill.id == "e2h_replay")
 
-    assert "handle-bound local replay" in replay.description
-    assert "read-only isolated container workspace" in replay.description
+    assert "operator-selected replay backend" in replay.description
+    assert "isolated container workspace" not in replay.description

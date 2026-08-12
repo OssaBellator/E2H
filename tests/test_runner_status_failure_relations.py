@@ -99,7 +99,7 @@ def test_command_result_accepts_generated_status_failure_pairs() -> None:
 def test_run_result_rejects_skipped_check_without_earlier_blocker() -> None:
     skipped = _command("skipped", CheckStatus.SKIPPED, skipped_failure("missing"))
 
-    with pytest.raises(ValidationError, match="earlier failed check"):
+    with pytest.raises(ValidationError, match="immediately follow the halting failed check"):
         _run([skipped])
 
 
@@ -114,7 +114,7 @@ def test_run_result_rejects_skipped_check_pointing_to_passed_check() -> None:
     )
     skipped = _command("skipped", CheckStatus.SKIPPED, skipped_failure("passed"))
 
-    with pytest.raises(ValidationError, match="earlier failed check"):
+    with pytest.raises(ValidationError, match="immediately follow the halting failed check"):
         _run([passed, skipped])
 
 

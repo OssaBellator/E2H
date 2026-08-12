@@ -299,6 +299,10 @@ def _add_regular_file(
         member.size = expected.st_size
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             archive.addfile(member, source)
+            if source.read(1):
+                raise WorkspaceArchiveError(
+                    f"replay workspace file {name!r} returned data beyond reported size"
+                )
         after = os.fstat(descriptor)
         current = _stat_entry(parent_descriptor, name)
         if (
@@ -336,8 +340,13 @@ def _add_symlink(
             f"unable to read replay workspace symlink {name!r}: {exc}"
         ) from exc
     _safe_symlink_target(relative.parent, target)
+    target_bytes = target.encode("utf-8", errors="surrogateescape")
+    if len(target_bytes) != expected.st_size:
+        raise WorkspaceArchiveError(
+            f"replay workspace symlink {name!r} target size changed while reading"
+        )
     _reject_symlink_xattrs(parent_descriptor, name)
-    state.add_bytes(len(target.encode("utf-8", errors="surrogateescape")))
+    state.add_bytes(len(target_bytes))
     member = _tar_info(relative, expected, entry_type=tarfile.SYMTYPE)
     member.linkname = target
     member.size = 0

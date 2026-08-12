@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from e2h.docker_remote import require_patched_docker_archive
+from e2h.isolated_runner import _run_capsule_isolated_container_candidate
+from e2h.models import CommandCheck, ContainerSandbox, SuccessSpec, TaskCapsule
+from e2h.runner import CheckStatus, RunStatus
+from e2h.workspace_archive import sealed_workspace_archive_supported
+
+IMAGE_ENV = "E2H_DOCKER_TEST_PYTHON_IMAGE"
+RUNTIME_ENV = "E2H_DOCKER_TEST_RUNTIME"
+_MEMORY_MB = 64
+_MEMORY_BYTES = _MEMORY_MB * 1024 * 1024
+_TMPFS_MB = 16
+_TMPFS_BYTES = _TMPFS_MB * 1024 * 1024
+_SHM_BYTES = 64 * 1024 * 1024
+_NOFILE_LIMIT = 1024
+_SANDBOX_UID = 65532
+_SANDBOX_GID = 65532
+_CPUS = 0.5
+_CPU_PERIOD_US = 100_000
+_CPU_QUOTA_US = 50_000
+_PIDS_LIMIT = 32
+
+
+def _runtime() -> str:
+    runtime = os.environ.get(RUNTIME_ENV, "docker")
+    if shutil.which(runtime) is None:
+        pytest.skip(f"{runtime!r} is not available")
+    return runtime
+
+
+def _image() -> str:
+    image = os.environ.get(IMAGE_ENV)
+    if image is None:
+        pytest.skip(
+            f"set {IMAGE_ENV} to a pre-pulled immutable Python image digest for real Docker tests"
+        )
+    return image
+
+
+def _docker_lines(runtime: str, args: list[str]) -> frozenset[str]:
+    completed = subprocess.run(
+        [runtime, *args],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10.0,
+        check=False,
+    )
+    if completed.returncode != 0:
+        pytest.fail(
+            f"Docker {' '.join(args)} failed with exit {completed.returncode}: "
+            f"{completed.stderr.strip()}"
+        )
+    return frozenset(line.strip() for line in completed.stdout.splitlines() if line.strip())
+
+
+def _resources(runtime: str) -> tuple[frozenset[str], frozenset[str]]:
+    volumes = _docker_lines(
+        runtime,
+        ["volume", "ls", "-q", "--filter", "label=e2h.remote-replay=workspace"],
+    )
+    names = _docker_lines(
+        runtime,
+        ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=e2h-replay-"],
+    )
+    return volumes, frozenset(name for name in names if name.startswith("e2h-replay-"))
+
+
+def _resource_probe_script() -> str:
+    return """
+import json
+import os
+import resource
+from pathlib import Path
+
+root = Path('/sys/fs/cgroup')
+shm = os.statvfs('/dev/shm')
+tmp = os.statvfs('/tmp')
+tmp_probe = Path('/tmp/e2h-write-probe')
+tmp_probe.write_text('ok', encoding='utf-8')
+tmp_writable = tmp_probe.read_text(encoding='utf-8') == 'ok'
+tmp_probe.unlink()
+status = {}
+for line in Path('/proc/self/status').read_text().splitlines():
+    if ':' in line:
+        key, value = line.split(':', 1)
+        status[key] = value.strip()
+mount_targets = {
+    '/',
+    '/tmp',
+    '/workspace',
+    '/etc/hosts',
+    '/etc/hostname',
+    '/etc/resolv.conf',
+}
+mount_options = {}
+for line in Path('/proc/self/mountinfo').read_text().splitlines():
+    fields = line.split()
+    if len(fields) > 5 and fields[4] in mount_targets:
+        mount_options[fields[4]] = fields[5].split(',')
+payload = {
+    'core': list(resource.getrlimit(resource.RLIMIT_CORE)),
+    'nofile': list(resource.getrlimit(resource.RLIMIT_NOFILE)),
+    'shm_bytes': shm.f_frsize * shm.f_blocks,
+    'tmp_bytes': tmp.f_frsize * tmp.f_blocks,
+    'tmp_mode': os.stat('/tmp').st_mode & 0o7777,
+    'tmp_writable': tmp_writable,
+    'uid': os.getuid(),
+    'gid': os.getgid(),
+    'cap_eff': int(status['CapEff'], 16),
+    'cap_prm': int(status['CapPrm'], 16),
+    'cap_bnd': int(status['CapBnd'], 16),
+    'no_new_privs': int(status['NoNewPrivs']),
+    'seccomp': int(status['Seccomp']),
+    'network_interfaces': sorted(path.name for path in Path('/sys/class/net').iterdir()),
+    'root_mount_options': mount_options.get('/'),
+    'tmp_mount_options': mount_options.get('/tmp'),
+    'workspace_mount_options': mount_options.get('/workspace'),
+    'hosts_mount_options': mount_options.get('/etc/hosts'),
+    'hostname_mount_options': mount_options.get('/etc/hostname'),
+    'resolv_conf_mount_options': mount_options.get('/etc/resolv.conf'),
+}
+if (root / 'memory.max').exists():
+    payload['cgroup'] = 'v2'
+    payload['memory_max'] = (root / 'memory.max').read_text().strip()
+    payload['swap_max'] = (root / 'memory.swap.max').read_text().strip()
+    payload['cpu_max'] = (root / 'cpu.max').read_text().strip()
+    payload['pids_max'] = (root / 'pids.max').read_text().strip()
+else:
+    memory_root = root / 'memory'
+    payload['cgroup'] = 'v1'
+    payload['memory_max'] = (memory_root / 'memory.limit_in_bytes').read_text().strip()
+    memsw = memory_root / 'memory.memsw.limit_in_bytes'
+    payload['memsw_max'] = memsw.read_text().strip() if memsw.exists() else None
+    cpu_root = next(path for path in root.iterdir() if (path / 'cpu.cfs_quota_us').exists())
+    pids_root = next(path for path in root.iterdir() if (path / 'pids.max').exists())
+    payload['cpu_quota_us'] = (cpu_root / 'cpu.cfs_quota_us').read_text().strip()
+    payload['cpu_period_us'] = (cpu_root / 'cpu.cfs_period_us').read_text().strip()
+    payload['pids_max'] = (pids_root / 'pids.max').read_text().strip()
+print(json.dumps(payload, sort_keys=True))
+""".strip()
+
+
+def test_real_docker_enforces_remote_resource_and_security_controls(tmp_path: Path) -> None:
+    if not sealed_workspace_archive_supported():
+        pytest.skip("real Docker resource validation requires Linux memfd sealing")
+    runtime = _runtime()
+    image = _image()
+    require_patched_docker_archive(runtime)
+    _docker_lines(runtime, ["image", "inspect", "--format", "{{.Id}}", image])
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    before = _resources(runtime)
+    capsule = TaskCapsule(
+        id="real-docker-resource-limits",
+        goal="Verify remote replay resource and security controls.",
+        sandbox=ContainerSandbox(
+            image=image,
+            memory_mb=_MEMORY_MB,
+            tmpfs_mb=_TMPFS_MB,
+            cpus=_CPUS,
+            pids_limit=_PIDS_LIMIT,
+        ),
+        success=SuccessSpec(
+            commands=[
+                CommandCheck(
+                    id="limits",
+                    argv=["python", "-c", _resource_probe_script()],
+                )
+            ]
+        ),
+    )
+
+    result = _run_capsule_isolated_container_candidate(
+        capsule,
+        workspace.resolve(),
+        max_workspace_bytes=1024 * 1024,
+        max_workspace_entries=100,
+        container_runtime=runtime,
+    )
+
+    assert result.status is RunStatus.PASSED
+    assert result.checks[0].status is CheckStatus.PASSED
+    payload = json.loads(result.checks[0].stdout)
+    assert payload["core"] == [0, 0]
+    assert payload["nofile"] == [_NOFILE_LIMIT, _NOFILE_LIMIT]
+    assert int(payload["memory_max"]) == _MEMORY_BYTES
+    assert int(payload["tmp_bytes"]) == _TMPFS_BYTES
+    assert payload["tmp_mode"] == 0o1777
+    assert payload["tmp_writable"] is True
+    assert int(payload["shm_bytes"]) == _SHM_BYTES
+    assert int(payload["pids_max"]) == _PIDS_LIMIT
+    assert payload["uid"] == _SANDBOX_UID
+    assert payload["gid"] == _SANDBOX_GID
+    assert payload["cap_eff"] == 0
+    assert payload["cap_prm"] == 0
+    assert payload["cap_bnd"] == 0
+    assert payload["no_new_privs"] == 1
+    assert payload["seccomp"] == 2
+    assert payload["network_interfaces"] == ["lo"]
+    assert payload["root_mount_options"] is not None
+    assert "ro" in payload["root_mount_options"]
+    assert payload["tmp_mount_options"] is not None
+    assert "rw" in payload["tmp_mount_options"]
+    assert "nosuid" in payload["tmp_mount_options"]
+    assert payload["workspace_mount_options"] is not None
+    assert "ro" in payload["workspace_mount_options"]
+    for key in (
+        "hosts_mount_options",
+        "hostname_mount_options",
+        "resolv_conf_mount_options",
+    ):
+        assert payload[key] is not None
+        assert "ro" in payload[key]
+    if payload["cgroup"] == "v2":
+        assert int(payload["swap_max"]) == 0
+        quota, period = payload["cpu_max"].split()
+        assert int(quota) == _CPU_QUOTA_US
+        assert int(period) == _CPU_PERIOD_US
+    else:
+        assert payload["cgroup"] == "v1"
+        assert payload["memsw_max"] is not None
+        assert int(payload["memsw_max"]) == _MEMORY_BYTES
+        assert int(payload["cpu_quota_us"]) == _CPU_QUOTA_US
+        assert int(payload["cpu_period_us"]) == _CPU_PERIOD_US
+
+    after = _resources(runtime)
+    assert not (after[0] - before[0])
+    assert not (after[1] - before[1])

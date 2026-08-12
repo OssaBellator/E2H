@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import re
 import secrets
 import subprocess
+import tarfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator
@@ -22,11 +25,26 @@ _MIN_DOCKER_ARCHIVE_VERSION = (29, 7, 2)
 _VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)([-+].*)?$")
 _STABLE_HYPHEN_SUFFIXES = frozenset({"-ce", "-ee"})
 _RESOURCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+_FULL_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_IMAGE_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 _VERSION_TIMEOUT_SECONDS = 10.0
 _CONTROL_TIMEOUT_SECONDS = 30.0
 _MAX_ERROR_CHARS = 4096
 _WORKSPACE_ROOT = "/workspace"
+_IMAGE_DESCRIPTOR_FORMAT = "{{json .Descriptor}}"
 _IMAGE_VOLUMES_FORMAT = "{{if .Config.Volumes}}declared{{else}}none{{end}}"
+_IMAGE_MANIFEST_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    }
+)
+_IMAGE_INDEX_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
 
 
 class DockerRemoteError(RuntimeError):
@@ -78,7 +96,11 @@ def _validated_remote_sandbox(sandbox: ContainerSandbox) -> ContainerSandbox:
     if validated.pull_policy != "never":
         raise DockerRemoteError("remote Docker replay requires pull_policy='never'")
     user_parts = validated.user.split(":")
-    if len(user_parts) != 2 or int(user_parts[1]) == 0:
+    if (
+        len(user_parts) != 2
+        or any(not part or not part.isascii() or not part.isdecimal() for part in user_parts)
+        or int(user_parts[1]) == 0
+    ):
         raise DockerRemoteError(
             "remote Docker replay requires an explicit non-root numeric uid:gid"
         )
@@ -95,11 +117,111 @@ def _required_archive_seals() -> int:
     return sum(int(value) for value in values if value is not None)
 
 
+def _validate_producer_archive_encoding(archive: WorkspaceArchive) -> None:
+    """Require logical tar encoding details that stable_workspace_archive always emits."""
+    try:
+        archive.file.seek(0)
+        with tarfile.open(
+            fileobj=archive.file,
+            mode="r:",
+            encoding="utf-8",
+            errors="surrogateescape",
+        ) as handle:
+            for member in handle:
+                if "mtime" not in member.pax_headers:
+                    raise DockerRemoteError(
+                        f"workspace archive member {member.name!r} is missing producer PAX mtime"
+                    )
+                if member.isfile() and member.type != tarfile.REGTYPE:
+                    raise DockerRemoteError(
+                        f"workspace archive member {member.name!r} does not use "
+                        "producer regular file type"
+                    )
+    except DockerRemoteError:
+        raise
+    except (AttributeError, OSError, tarfile.TarError, UnicodeError, ValueError) as exc:
+        raise DockerRemoteError(f"unable to verify workspace archive encoding: {exc}") from exc
+    finally:
+        try:
+            archive.file.seek(0)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def _archive_stat_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mode)
+
+
+def _private_workspace_archive_reader(
+    archive: WorkspaceArchive,
+    descriptor: int,
+    expected: os.stat_result,
+    required_seals: int,
+) -> WorkspaceArchive:
+    """Reopen the sealed memfd with an independent read offset and verify its identity."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    try:
+        private_descriptor = os.open(f"/proc/self/fd/{descriptor}", flags)
+    except OSError as exc:
+        raise DockerRemoteError(
+            f"unable to open private sealed workspace archive reader: {exc}"
+        ) from exc
+
+    private_file: io.FileIO | None = None
+    try:
+        private_info = os.fstat(private_descriptor)
+        if fcntl is None:
+            raise DockerRemoteError("sealed workspace archives require Linux file seals")
+        private_seals = fcntl.fcntl(private_descriptor, fcntl.F_GET_SEALS)
+        if (
+            _archive_stat_identity(private_info) != _archive_stat_identity(expected)
+            or private_seals & required_seals != required_seals
+        ):
+            raise DockerRemoteError(
+                "private workspace archive reader identity verification failed"
+            )
+        opened = os.fdopen(private_descriptor, "rb", buffering=0)
+        if type(opened) is not io.FileIO:
+            opened.close()
+            raise DockerRemoteError("private workspace archive reader is not unbuffered FileIO")
+        private_file = opened
+        private_descriptor = -1
+        return WorkspaceArchive(
+            file=private_file,
+            directories=archive.directories,
+            source_bytes=archive.source_bytes,
+            entries=archive.entries,
+            archive_bytes=archive.archive_bytes,
+        )
+    except DockerRemoteError:
+        if private_file is not None:
+            private_file.close()
+        elif private_descriptor >= 0:
+            try:
+                os.close(private_descriptor)
+            except OSError:
+                pass
+        raise
+    except (OSError, ValueError) as exc:
+        if private_file is not None:
+            private_file.close()
+        elif private_descriptor >= 0:
+            try:
+                os.close(private_descriptor)
+            except OSError:
+                pass
+        raise DockerRemoteError(
+            f"unable to verify private sealed workspace archive reader: {exc}"
+        ) from exc
+
+
 def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
     if type(archive) is not WorkspaceArchive:
         raise DockerRemoteError(
             f"invalid workspace archive: expected WorkspaceArchive, got {type(archive).__name__}"
         )
+    if type(archive.file) is not io.FileIO:
+        raise DockerRemoteError("workspace archive file must be the producer's unbuffered FileIO")
     if archive.source_bytes < 0 or archive.entries < 0 or archive.archive_bytes < 1:
         raise DockerRemoteError("workspace archive metadata is invalid")
     required = _required_archive_seals()
@@ -108,14 +230,39 @@ def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
     try:
         descriptor = archive.file.fileno()
         observed = fcntl.fcntl(descriptor, fcntl.F_GET_SEALS)
-        current_size = os.fstat(descriptor).st_size
+        original_info = os.fstat(descriptor)
     except (OSError, ValueError) as exc:
         raise DockerRemoteError(f"unable to verify sealed workspace archive: {exc}") from exc
     if observed & required != required:
         raise DockerRemoteError("workspace archive is not sealed against mutation")
-    if current_size != archive.archive_bytes:
+    if original_info.st_size != archive.archive_bytes:
         raise DockerRemoteError("workspace archive size does not match captured metadata")
-    return archive
+
+    private_archive = _private_workspace_archive_reader(
+        archive,
+        descriptor,
+        original_info,
+        required,
+    )
+
+    # Keep the importer safe when it is called directly rather than only through
+    # isolated_runner. Lazy imports avoid a module-import cycle while reusing the
+    # exact same physical-header/member-tree validation as the candidate path.
+    from e2h.isolated_runner import _validate_archive_member_ancestry
+    from e2h.runner import RunnerError
+    from e2h.volume_runner import _workspace_tree
+
+    try:
+        _validate_archive_member_ancestry(private_archive)
+        _validate_producer_archive_encoding(private_archive)
+        _workspace_tree(private_archive)
+    except RunnerError as exc:
+        private_archive.file.close()
+        raise DockerRemoteError(f"workspace archive structure is invalid: {exc}") from exc
+    except BaseException:
+        private_archive.file.close()
+        raise
+    return private_archive
 
 
 def _render_error(value: bytes) -> str:
@@ -160,6 +307,39 @@ def _best_effort_docker(runtime: str, args: list[str]) -> str | None:
     except DockerRemoteError as exc:
         return str(exc)
     return None
+
+
+def _remove_confirmed_preparation_container(runtime: str, container_id: str) -> str | None:
+    """Remove one confirmed preparation container and verify exact-ID absence on failure."""
+    if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_id) is None:
+        return "invalid confirmed Docker preparation container ID"
+    try:
+        _run_docker(runtime, ["rm", "-f", "-v", container_id])
+    except DockerRemoteError as exc:
+        removal_error = str(exc)
+    else:
+        return None
+
+    try:
+        observed = _run_docker(
+            runtime,
+            [
+                "ps",
+                "-a",
+                "--no-trunc",
+                "--format",
+                "{{.ID}}",
+                "--filter",
+                f"id={container_id}",
+            ],
+        )
+    except DockerRemoteError as exc:
+        return f"{removal_error}; unable to verify exact preparation container cleanup: {exc}"
+
+    ids = {line.strip() for line in observed.splitlines() if line.strip()}
+    if container_id not in ids:
+        return None
+    return f"{removal_error}; exact preparation container still exists after failed removal"
 
 
 def inspect_docker_versions(runtime_binary: str = "docker") -> tuple[DockerVersion, DockerVersion]:
@@ -228,8 +408,51 @@ def require_patched_docker_archive(
     return client, server
 
 
+def _requested_image_digest(image: str) -> str:
+    reference, separator, digest = image.rpartition("@")
+    if not reference or separator != "@" or _IMAGE_DIGEST_PATTERN.fullmatch(digest) is None:
+        raise DockerRemoteError("remote Docker replay image must use a pinned SHA-256 digest")
+    return digest
+
+
+def _require_concrete_image_descriptor(runtime: str, image: str) -> None:
+    """Require one exact local image manifest instead of a host-selected image index."""
+    raw_descriptor = _run_docker(
+        runtime,
+        ["image", "inspect", "--format", _IMAGE_DESCRIPTOR_FORMAT, image],
+    )
+    try:
+        descriptor = json.loads(raw_descriptor)
+    except (TypeError, ValueError) as exc:
+        raise DockerRemoteError("Docker image descriptor probe returned invalid JSON") from exc
+    if type(descriptor) is not dict:
+        raise DockerRemoteError(
+            "remote Docker replay requires image descriptor proof from Docker's "
+            "multi-platform image store"
+        )
+    media_type = descriptor.get("mediaType")
+    observed_digest = descriptor.get("digest")
+    if type(media_type) is not str or type(observed_digest) is not str:
+        raise DockerRemoteError("Docker image descriptor probe returned invalid fields")
+
+    requested_digest = _requested_image_digest(image)
+    if observed_digest != requested_digest:
+        raise DockerRemoteError(
+            "Docker image descriptor digest does not match pinned image reference"
+        )
+    if media_type in _IMAGE_INDEX_MEDIA_TYPES:
+        raise DockerRemoteError(
+            "remote Docker replay requires a single-platform image manifest digest"
+        )
+    if media_type not in _IMAGE_MANIFEST_MEDIA_TYPES:
+        raise DockerRemoteError(
+            "Docker image descriptor has unsupported image descriptor media type"
+        )
+
+
 def _require_volume_free_image(runtime: str, image: str) -> None:
-    """Reject images whose Dockerfile VOLUME directives would create extra mounts."""
+    """Require one concrete image manifest without Dockerfile VOLUME declarations."""
+    _require_concrete_image_descriptor(runtime, image)
     result = _run_docker(
         runtime,
         ["image", "inspect", "--format", _IMAGE_VOLUMES_FORMAT, image],
@@ -261,16 +484,21 @@ def prepared_workspace_volume(
     runtime = _validated_runtime_binary(runtime_binary)
     policy = _validated_remote_sandbox(sandbox)
     verified_archive = _validated_workspace_archive(archive)
-    require_patched_docker_archive(runtime)
-    _require_volume_free_image(runtime, policy.image)
-
-    volume_name = _resource_name("workspace")
-    container_name = _resource_name("prepare")
+    owns_verified_archive = verified_archive is not archive
+    volume_name: str | None = None
+    container_name: str | None = None
+    container_identity: str | None = None
     volume_may_exist = False
     container_may_exist = False
     primary_error: BaseException | None = None
 
     try:
+        require_patched_docker_archive(runtime)
+        _require_volume_free_image(runtime, policy.image)
+        volume_name = _resource_name("workspace")
+        container_name = _resource_name("prepare")
+        container_identity = container_name
+
         # A create command can time out or lose its response after the daemon has
         # already created the named resource. Arm cleanup before each create so
         # an ambiguous client-side failure cannot leak daemon-side state.
@@ -317,8 +545,11 @@ def prepared_workspace_volume(
                 "__e2h_workspace_preparation_container_is_never_started__",
             ],
         )
-        if not created_container:
-            raise DockerRemoteError("Docker did not return a preparation container ID")
+        if _FULL_CONTAINER_ID_PATTERN.fullmatch(created_container) is None:
+            raise DockerRemoteError("Docker returned an invalid preparation container ID")
+        # After successful create, use the confirmed immutable identity rather than
+        # resolving the generated name again for archive import and cleanup.
+        container_identity = created_container
 
         _run_docker(
             runtime,
@@ -326,12 +557,14 @@ def prepared_workspace_volume(
                 "cp",
                 "--quiet",
                 "-",
-                f"{container_name}:{_WORKSPACE_ROOT}",
+                f"{container_identity}:{_WORKSPACE_ROOT}",
             ],
             stdin=verified_archive.file,
         )
 
-        _run_docker(runtime, ["rm", "-f", "-v", container_name])
+        cleanup_error = _remove_confirmed_preparation_container(runtime, container_identity)
+        if cleanup_error is not None:
+            raise DockerRemoteError(cleanup_error)
         container_may_exist = False
         yield volume_name
     except BaseException as exc:
@@ -339,14 +572,22 @@ def prepared_workspace_volume(
         raise
     finally:
         cleanup_errors: list[str] = []
-        if container_may_exist:
-            error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_name])
+        if container_may_exist and container_identity is not None:
+            if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_identity) is not None:
+                error = _remove_confirmed_preparation_container(runtime, container_identity)
+            else:
+                error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_identity])
             if error is not None:
                 cleanup_errors.append(error)
-        if volume_may_exist:
+        if volume_may_exist and volume_name is not None:
             error = _best_effort_docker(runtime, ["volume", "rm", "-f", volume_name])
             if error is not None:
                 cleanup_errors.append(error)
+        if owns_verified_archive:
+            try:
+                verified_archive.file.close()
+            except (OSError, ValueError):
+                pass
         if cleanup_errors:
             cleanup_message = "Docker workspace cleanup failed: " + "; ".join(cleanup_errors)
             if primary_error is None:

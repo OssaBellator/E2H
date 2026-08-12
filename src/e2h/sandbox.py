@@ -12,6 +12,9 @@ from e2h.models import AllowedActions, CommandCheck, ContainerSandbox, TaskCapsu
 
 _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
+_FULL_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_CONTAINER_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+_VOLUME_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
 _CONTAINER_SHM_SIZE = "64m"
 _CONTAINER_NOFILE_LIMIT = "1024:1024"
@@ -60,6 +63,12 @@ def _validated_runtime_binary(runtime_binary: str) -> str:
     if not runtime_binary or "\x00" in runtime_binary:
         raise SandboxError("container runtime binary must be non-empty and contain no NUL")
     return runtime_binary
+
+
+def _validated_resource_name(value: str, *, noun: str, pattern: re.Pattern[str]) -> str:
+    if pattern.fullmatch(value) is None:
+        raise SandboxError(f"invalid Docker {noun} name")
+    return value
 
 
 def _container_workdir(relative_cwd: str) -> str:
@@ -164,6 +173,126 @@ def build_container_argv(
     return argv
 
 
+def build_container_volume_argv(
+    capsule: TaskCapsule,
+    check: CommandCheck,
+    volume_name: str,
+    relative_cwd: str,
+    container_name: str,
+    *,
+    runtime_binary: str | None = None,
+) -> list[str]:
+    """Build one retained remote replay invocation against a read-only named volume."""
+    sandbox, allowed_actions = _validated_capsule_policy(capsule)
+    check = _validated_check(check)
+    runtime = _validated_runtime_binary(
+        sandbox.engine if runtime_binary is None else runtime_binary
+    )
+    volume_name = _validated_resource_name(
+        volume_name,
+        noun="volume",
+        pattern=_VOLUME_NAME_PATTERN,
+    )
+    container_name = _validated_resource_name(
+        container_name,
+        noun="container",
+        pattern=_CONTAINER_NAME_PATTERN,
+    )
+    if sandbox.workspace_access != "read_only":
+        raise SandboxError("remote container replay requires workspace_access='read_only'")
+    if not sandbox.read_only_root:
+        raise SandboxError("remote container replay requires read_only_root=true")
+    if sandbox.pull_policy != "never":
+        raise SandboxError("remote container replay requires pull_policy='never'")
+    mount = (
+        f"type=volume,src={volume_name},dst={_CONTAINER_ROOT},"
+        "volume-nocopy,readonly"
+    )
+    memory_limit = f"{sandbox.memory_mb}m"
+    argv = [
+        runtime,
+        "run",
+        "--runtime",
+        _CONTAINER_OCI_RUNTIME,
+        "--init",
+        "--log-driver",
+        "none",
+        "--no-healthcheck",
+        "--name",
+        container_name,
+        "--pull",
+        sandbox.pull_policy,
+        "--hostname",
+        "e2h",
+        "--workdir",
+        _container_workdir(relative_cwd),
+        "--mount",
+        mount,
+        "--network",
+        "none" if allowed_actions.network == "deny" else "bridge",
+        "--cgroupns",
+        "private",
+        "--ipc",
+        "private",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--security-opt",
+        "seccomp=builtin",
+        "--pids-limit",
+        str(sandbox.pids_limit),
+        "--memory",
+        memory_limit,
+        "--memory-swap",
+        memory_limit,
+        "--cpus",
+        f"{sandbox.cpus:g}",
+        "--user",
+        sandbox.user,
+        "--tmpfs",
+        f"/tmp:rw,nosuid,mode=1777,size={sandbox.tmpfs_mb}m",
+        "--shm-size",
+        _CONTAINER_SHM_SIZE,
+        "--ulimit",
+        f"nofile={_CONTAINER_NOFILE_LIMIT}",
+        "--ulimit",
+        "core=0:0",
+        "--entrypoint",
+        check.argv[0],
+        "--read-only",
+    ]
+    for key, value in sorted(check.env.items()):
+        argv.extend(["--env", f"{key}={value}"])
+    argv.append(sandbox.image)
+    argv.extend(check.argv[1:])
+    return argv
+
+
+def build_container_volume_create_argv(
+    capsule: TaskCapsule,
+    check: CommandCheck,
+    volume_name: str,
+    relative_cwd: str,
+    container_name: str,
+    *,
+    runtime_binary: str | None = None,
+) -> list[str]:
+    """Build the stopped-container phase of retained remote replay."""
+    argv = build_container_volume_argv(
+        capsule,
+        check,
+        volume_name,
+        relative_cwd,
+        container_name,
+        runtime_binary=runtime_binary,
+    )
+    if len(argv) < 2 or argv[1] != "run":
+        raise SandboxError("retained container builder produced an unexpected Docker command")
+    argv[1] = "create"
+    return argv
+
+
 def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
     """Best-effort force removal after the attached runtime process times out."""
     try:
@@ -192,3 +321,137 @@ def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
         stderr = completed.stderr.decode("utf-8", errors="replace").strip()
         return f"container force-removal failed with exit {completed.returncode}: {stderr}"
     return None
+
+
+def force_remove_named_container(runtime_binary: str, container_name: str) -> str | None:
+    """Force-remove a generated replay name or a confirmed full container ID."""
+    try:
+        runtime_binary = _validated_runtime_binary(runtime_binary)
+        container_name = _validated_resource_name(
+            container_name,
+            noun="container",
+            pattern=_CONTAINER_NAME_PATTERN,
+        )
+    except SandboxError as exc:
+        return str(exc)
+    if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_name) is not None:
+        return force_remove_confirmed_container(runtime_binary, container_name)
+    try:
+        completed = subprocess.run(
+            [runtime_binary, "rm", "-f", "-v", container_name],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return f"unable to force-remove timed-out container: {exc}"
+    if completed.returncode == 0:
+        return None
+    removal_error = completed.stderr.decode("utf-8", errors="replace").strip()
+    try:
+        probe = subprocess.run(
+            [
+                runtime_binary,
+                "ps",
+                "-a",
+                "--format",
+                "{{.Names}}",
+                "--filter",
+                f"name={container_name}",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return (
+            f"container force-removal failed with exit {completed.returncode}: "
+            f"{removal_error}; unable to verify cleanup: {exc}"
+        )
+    if probe.returncode == 0:
+        names = {
+            line.strip()
+            for line in probe.stdout.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
+        }
+        if container_name in names:
+            detail = "container still exists after failed removal"
+        else:
+            detail = (
+                "container is absent from the immediate probe, but cleanup cannot be proven "
+                "after a failed removal"
+            )
+    else:
+        probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
+        detail = probe_error or f"Docker ps failed with exit {probe.returncode}"
+    return (
+        f"container force-removal failed with exit {completed.returncode}: "
+        f"{removal_error}; cleanup verification failed: {detail}"
+    )
+
+
+def force_remove_confirmed_container(runtime_binary: str, container_id: str) -> str | None:
+    """Force-remove one exact full container identity returned by successful create."""
+    try:
+        runtime_binary = _validated_runtime_binary(runtime_binary)
+    except SandboxError as exc:
+        return str(exc)
+    if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_id) is None:
+        return "invalid confirmed Docker container ID"
+
+    removal_error: str
+    try:
+        completed = subprocess.run(
+            [runtime_binary, "rm", "-f", "-v", container_id],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        removal_error = f"unable to force-remove confirmed container: {exc}"
+    else:
+        if completed.returncode == 0:
+            return None
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        removal_error = (
+            f"confirmed container force-removal failed with exit {completed.returncode}: "
+            f"{stderr or 'unknown Docker error'}"
+        )
+
+    try:
+        probe = subprocess.run(
+            [
+                runtime_binary,
+                "ps",
+                "-a",
+                "--no-trunc",
+                "--format",
+                "{{.ID}}",
+                "--filter",
+                f"id={container_id}",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return f"{removal_error}; unable to verify exact container cleanup: {exc}"
+    if probe.returncode != 0:
+        probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
+        detail = probe_error or f"Docker ps failed with exit {probe.returncode}"
+        return f"{removal_error}; exact container cleanup verification failed: {detail}"
+
+    ids = {
+        line.strip()
+        for line in probe.stdout.decode("utf-8", errors="replace").splitlines()
+        if line.strip()
+    }
+    if container_id not in ids:
+        # This identity came from a completed `docker create`; unlike a generated
+        # name after an ambiguous create, the exact object cannot appear later.
+        return None
+    return f"{removal_error}; exact container still exists after failed removal"

@@ -46,6 +46,10 @@ _MCP_CONTAINER_REPLAY_WRITABLE_UNAVAILABLE = (
     "MCP isolated container replay requires sandbox.workspace_access='read_only' because "
     "writable private workspace growth is not bounded"
 )
+_MCP_CONTAINER_CONTROL_PLANE_UNTRUSTED = (
+    "MCP container replay requires an explicit operator attestation that the container "
+    "runtime control plane is trusted and isolated from untrusted workloads"
+)
 _MCP_LOCAL_REPLAY_UNAVAILABLE = (
     "MCP local replay is unavailable because this host does not support the required "
     "handle-bound Linux procfs execution path"
@@ -283,6 +287,7 @@ class MCPServerConfig:
     allow_replay: bool = False
     replay_backend: ExecutionBackend = ExecutionBackend.AUTO
     container_runtime: str | None = None
+    trusted_container_control_plane: bool = False
     expose_replay_output: bool = False
     max_artifact_bytes: int = _DEFAULT_MAX_ARTIFACT_BYTES
     max_memory_rows: int = 1000
@@ -297,6 +302,7 @@ class MCPStatus(StrictModel):
     memory_enabled: bool
     replay_enabled: bool
     replay_backend: str
+    container_control_plane_attested: bool
     replay_output_exposed: bool
     max_artifact_bytes: int = Field(ge=1)
     max_memory_rows: int = Field(ge=1, le=MAX_QUERY_ROWS)
@@ -388,6 +394,12 @@ class E2HMCPService:
             backend = ExecutionBackend(config.replay_backend)
         except ValueError as exc:
             raise MCPServiceError(f"unknown replay backend: {config.replay_backend}") from exc
+        if (
+            config.allow_replay
+            and backend is ExecutionBackend.CONTAINER
+            and not config.trusted_container_control_plane
+        ):
+            raise MCPServiceError(_MCP_CONTAINER_CONTROL_PLANE_UNTRUSTED)
         if config.allow_replay:
             local_supported = handle_bound_local_replay_supported()
             container_supported = isolated_container_replay_supported()
@@ -421,6 +433,7 @@ class E2HMCPService:
             memory_enabled=self.config.store is not None,
             replay_enabled=self.config.allow_replay,
             replay_backend=self.config.replay_backend.value,
+            container_control_plane_attested=self.config.trusted_container_control_plane,
             replay_output_exposed=self.config.expose_replay_output,
             max_artifact_bytes=self.config.max_artifact_bytes,
             max_memory_rows=self.config.max_memory_rows,
@@ -553,6 +566,7 @@ class E2HMCPService:
         try:
             loaded = load_capsule(
                 capsule_path,
+                max_bytes=self.config.max_artifact_bytes,
                 containment_root=self.config.root,
             )
             selected_backend = self.config.replay_backend
@@ -563,6 +577,8 @@ class E2HMCPService:
                     else ExecutionBackend.LOCAL
                 )
             if selected_backend is ExecutionBackend.CONTAINER:
+                if not self.config.trusted_container_control_plane:
+                    raise MCPServiceError(_MCP_CONTAINER_CONTROL_PLANE_UNTRUSTED)
                 if not isolated_container_replay_supported():
                     raise MCPServiceError(_MCP_CONTAINER_REPLAY_UNAVAILABLE)
                 if loaded.sandbox is None:
@@ -729,6 +745,15 @@ def _parser() -> argparse.ArgumentParser:
         help="Container runtime override for isolated container replay.",
     )
     parser.add_argument(
+        "--trusted-container-control-plane",
+        action="store_true",
+        help=(
+            "Operator attestation that the selected container runtime control plane is trusted "
+            "and isolated from untrusted workloads. Required for container replay; E2H does not "
+            "verify this deployment property."
+        ),
+    )
+    parser.add_argument(
         "--expose-replay-output",
         action="store_true",
         help="Include bounded stdout/stderr in replay results instead of digest-only output.",
@@ -771,6 +796,7 @@ def main() -> None:
                 allow_replay=args.allow_replay,
                 replay_backend=ExecutionBackend(args.backend),
                 container_runtime=args.container_runtime,
+                trusted_container_control_plane=args.trusted_container_control_plane,
                 expose_replay_output=args.expose_replay_output,
                 max_artifact_bytes=args.max_artifact_bytes,
                 max_memory_rows=args.max_memory_rows,

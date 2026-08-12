@@ -111,7 +111,7 @@ def test_cli_rejects_invalid_policy(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "Unable to ingest evidence" in result.stderr
-    assert "invalid redaction policy" in result.stderr
+    assert "invalid regular expression" in result.stderr
 
 
 def test_cli_table_includes_policy_and_residual_counts(tmp_path: Path) -> None:

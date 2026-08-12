@@ -233,7 +233,7 @@ def test_workspace_archive_rejects_file_replacement_during_open(
     assert swapped is True
 
 
-def test_workspace_archive_stays_on_bound_root_after_path_rebinding(
+def test_workspace_archive_rejects_bound_root_path_rebinding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -260,18 +260,16 @@ def test_workspace_archive_stays_on_bound_root_after_path_rebinding(
 
     monkeypatch.setattr(workspace_archive, "_add_directory", rebinding_archive)
 
-    with stable_workspace_archive(
-        workspace.resolve(),
-        max_bytes=1024,
-        max_entries=10,
-    ) as capture:
-        capture.file.seek(0)
-        with tarfile.open(fileobj=capture.file, mode="r:*") as archive:
-            marker = archive.extractfile("marker.txt")
-            assert marker is not None
-            assert marker.read() == b"inside"
+    with pytest.raises(WorkspaceArchiveError, match="root changed while archiving"):
+        with stable_workspace_archive(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=10,
+        ):
+            raise AssertionError("rebound workspace root should not be yielded")
 
     assert swapped is True
+    assert (moved / "marker.txt").read_text(encoding="utf-8") == "inside"
     assert (workspace / "marker.txt").read_text(encoding="utf-8") == "outside"
 
 

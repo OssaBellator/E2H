@@ -408,8 +408,8 @@ def build_agent_card(
                 id="e2h_replay",
                 name="Replay E2H capsule",
                 description=(
-                    "Run a root-bounded E2H capsule using handle-bound local replay or a "
-                    "bounded read-only isolated container workspace, and return replay evidence."
+                    "Run a root-bounded E2H capsule using the operator-selected replay backend "
+                    "and return replay evidence."
                 ),
                 tags=["verification", "replay", "capsule"],
                 examples=['{"schema_version":"0.1","operation":"replay","capsule":"capsule.yaml"}'],
@@ -497,6 +497,15 @@ def _parser() -> argparse.ArgumentParser:
         help="Container runtime override for isolated container replay.",
     )
     parser.add_argument(
+        "--trusted-container-control-plane",
+        action="store_true",
+        help=(
+            "Operator attestation that the selected container runtime control plane is trusted "
+            "and isolated from untrusted workloads. Required for container replay; E2H does not "
+            "verify this deployment property."
+        ),
+    )
+    parser.add_argument(
         "--expose-replay-output",
         action="store_true",
         help="Include bounded stdout/stderr in replay results instead of digest-only output.",
@@ -552,6 +561,7 @@ def main() -> None:
                 allow_replay=args.allow_replay,
                 replay_backend=ExecutionBackend(args.backend),
                 container_runtime=args.container_runtime,
+                trusted_container_control_plane=args.trusted_container_control_plane,
                 expose_replay_output=args.expose_replay_output,
                 max_artifact_bytes=args.max_artifact_bytes,
                 max_memory_rows=args.max_memory_rows,
