@@ -10,6 +10,8 @@ from e2h.runner import RunnerError
 from e2h.volume_runner import _workspace_tree
 from e2h.workspace_archive import WorkspaceArchive
 
+_MAX_LINUX_FILE_ID = (1 << 32) - 2
+
 
 def _archive(
     configure: Callable[[tarfile.TarInfo], None],
@@ -58,6 +60,27 @@ def test_workspace_tree_rejects_archive_owner_names(field: str) -> None:
 
     with pytest.raises(RunnerError, match="producer-incompatible metadata"):
         _workspace_tree(_archive(configure))
+
+
+@pytest.mark.parametrize("field", ["uid", "gid"])
+@pytest.mark.parametrize("value", [(1 << 32) - 1, 1 << 32, 10**19])
+def test_workspace_tree_rejects_ids_outside_linux_file_identity_range(
+    field: str,
+    value: int,
+) -> None:
+    def configure(member: tarfile.TarInfo) -> None:
+        setattr(member, field, value)
+
+    with pytest.raises(RunnerError, match="producer-incompatible metadata"):
+        _workspace_tree(_archive(configure))
+
+
+def test_workspace_tree_accepts_maximum_linux_file_identity() -> None:
+    def configure(member: tarfile.TarInfo) -> None:
+        member.uid = _MAX_LINUX_FILE_ID
+        member.gid = _MAX_LINUX_FILE_ID
+
+    _workspace_tree(_archive(configure))
 
 
 @pytest.mark.parametrize("member_type", [tarfile.DIRTYPE, tarfile.SYMTYPE])
