@@ -49,34 +49,28 @@ def test_container_control_plane_attestation_is_default_deny_and_visible_in_stat
     assert "container_control_plane_trusted" not in payload
 
 
-def test_explicit_container_replay_requires_trust_before_replay_probe_or_launch(
+def test_explicit_container_replay_requires_trust_before_capability_probe_or_launch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mcp_server, "isolated_container_replay_supported", lambda: True)
-    service = E2HMCPService(
-        MCPServerConfig(
-            root=tmp_path,
-            allow_replay=True,
-            replay_backend=ExecutionBackend.CONTAINER,
-        )
-    )
-    capsule = tmp_path / "capsule.json"
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    _write_capsule(capsule, sandbox=True)
-
     def unexpected_probe() -> bool:
-        raise AssertionError("container capability probe ran before trust gate")
+        raise AssertionError("replay capability probe ran before trust gate")
 
     def unexpected_launch(*args: object, **kwargs: object) -> object:
         raise AssertionError("container replay launched before trust gate")
 
+    monkeypatch.setattr(mcp_server, "handle_bound_local_replay_supported", unexpected_probe)
     monkeypatch.setattr(mcp_server, "isolated_container_replay_supported", unexpected_probe)
     monkeypatch.setattr(mcp_server, "run_capsule_isolated_container", unexpected_launch)
 
     with pytest.raises(MCPServiceError, match="explicit operator attestation"):
-        service.replay(capsule.name, workspace=workspace.name)
+        E2HMCPService(
+            MCPServerConfig(
+                root=tmp_path,
+                allow_replay=True,
+                replay_backend=ExecutionBackend.CONTAINER,
+            )
+        )
 
 
 def test_auto_container_selection_requires_trust_after_capsule_resolution(
