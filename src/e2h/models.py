@@ -122,6 +122,8 @@ class ContainerSandbox(StrictModel):
     def image_must_be_immutable(cls, value: str) -> str:
         if "\x00" in value:
             raise ValueError("container image must not contain NUL")
+        if value.startswith("-"):
+            raise ValueError("container image must not begin with '-' or resemble a Docker option")
         if re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", value) is None:
             raise ValueError("container image must use an immutable digest reference")
         return value
