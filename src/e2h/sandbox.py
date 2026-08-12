@@ -305,7 +305,7 @@ def force_remove_container(runtime_binary: str, cidfile: Path) -> str | None:
 
 
 def force_remove_named_container(runtime_binary: str, container_name: str) -> str | None:
-    """Best-effort force removal of a remote replay container by generated name."""
+    """Force-remove a generated replay name or a confirmed full container ID."""
     try:
         runtime_binary = _validated_runtime_binary(runtime_binary)
         container_name = _validated_resource_name(
@@ -315,6 +315,8 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
         )
     except SandboxError as exc:
         return str(exc)
+    if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_name) is not None:
+        return force_remove_confirmed_container(runtime_binary, container_name)
     try:
         completed = subprocess.run(
             [runtime_binary, "rm", "-f", "-v", container_name],
