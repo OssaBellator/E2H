@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 from e2h.directory_binding import directory_binding_supported
 from e2h.docker_remote import (
     DockerRemoteError,
+    _run_docker,
     _validated_remote_sandbox,
     prepared_workspace_volume,
+    require_patched_docker_archive,
 )
 from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult, _validated_capsule
@@ -72,6 +75,26 @@ def _validate_remote_archive_resources(
         )
 
 
+def _require_remote_image_without_declared_volumes(runtime: str, image: str) -> None:
+    """Reject image-declared writable volumes before remote workspace capture."""
+    rendered = _run_docker(
+        runtime,
+        ["image", "inspect", "--format", "{{json .Config.Volumes}}", image],
+    )
+    try:
+        volumes = json.loads(rendered)
+    except (TypeError, ValueError) as exc:
+        raise DockerRemoteError("Docker image volume inspection returned invalid JSON") from exc
+    if volumes is None:
+        return
+    if type(volumes) is not dict:
+        raise DockerRemoteError("Docker image volume inspection returned an invalid object")
+    if volumes:
+        raise DockerRemoteError(
+            "remote Docker replay rejects images with Dockerfile VOLUME declarations"
+        )
+
+
 def _run_capsule_isolated_container_candidate(
     capsule: TaskCapsule,
     workspace: Path,
@@ -87,10 +110,11 @@ def _run_capsule_isolated_container_candidate(
         raise RunnerError("isolated container replay requires capsule.sandbox")
     runtime = container_runtime or sandbox.engine
     try:
-        # Reject attacker-controlled unsafe sandbox policy before walking or archiving
-        # the workspace. The importer revalidates this policy again at the Docker
-        # boundary, but doing the cheap check here avoids unnecessary capture work.
+        # Reject cheap runtime/policy failures before walking or archiving the workspace.
+        # The importer revalidates these boundaries again immediately before Docker import.
         sandbox = _validated_remote_sandbox(sandbox)
+        require_patched_docker_archive(runtime)
+        _require_remote_image_without_declared_volumes(runtime, sandbox.image)
         with stable_workspace_archive(
             workspace,
             max_bytes=max_workspace_bytes,
