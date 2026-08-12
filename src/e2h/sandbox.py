@@ -150,7 +150,7 @@ def build_container_volume_argv(
     *,
     runtime_binary: str | None = None,
 ) -> list[str]:
-    """Build one remote replay invocation against a read-only named volume."""
+    """Build one retained remote replay invocation against a read-only named volume."""
     sandbox, allowed_actions = _validated_capsule_policy(capsule)
     check = _validated_check(check)
     runtime = _validated_runtime_binary(
@@ -179,7 +179,6 @@ def build_container_volume_argv(
     argv = [
         runtime,
         "run",
-        "--rm",
         "--init",
         "--log-driver",
         "none",
