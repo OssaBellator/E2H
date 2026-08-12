@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import signal
-from pathlib import Path
+import tarfile
+from pathlib import Path, PurePosixPath
 
 from e2h.docker_remote import (
     DockerRemoteError,
@@ -14,7 +15,7 @@ from e2h.docker_remote import (
 )
 from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult, _validated_capsule
-from e2h.volume_runner import _workspace_tree, run_capsule_prepared_volume
+from e2h.volume_runner import _member_path, _workspace_tree, run_capsule_prepared_volume
 from e2h.workspace_archive import (
     _MAX_ARCHIVE_MEMBER_PATH_BYTES,
     WorkspaceArchive,
@@ -82,6 +83,44 @@ def _validate_remote_archive_resources(
         )
 
 
+def _validate_no_symlink_ancestor_members(archive: WorkspaceArchive) -> None:
+    """Reject archive shapes the descriptor-bound producer cannot create."""
+    member_names: list[str] = []
+    symlink_names: set[str] = set()
+    try:
+        archive.file.seek(0)
+        with tarfile.open(
+            fileobj=archive.file,
+            mode="r:",
+            encoding="utf-8",
+            errors="surrogateescape",
+        ) as handle:
+            for member in handle:
+                name = _member_path(member.name)
+                member_names.append(name)
+                if member.issym():
+                    symlink_names.add(name)
+    except RunnerError:
+        raise
+    except (AttributeError, OSError, tarfile.TarError, UnicodeError, ValueError) as exc:
+        raise RunnerError(f"unable to inspect sealed workspace archive shape: {exc}") from exc
+    finally:
+        try:
+            archive.file.seek(0)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    for name in member_names:
+        parts = PurePosixPath(name).parts
+        for depth in range(1, len(parts)):
+            ancestor = PurePosixPath(*parts[:depth]).as_posix()
+            if ancestor in symlink_names:
+                raise RunnerError(
+                    f"sealed workspace archive member {name!r} is nested under "
+                    f"symlink {ancestor!r}"
+                )
+
+
 def _run_capsule_isolated_container_candidate(
     capsule: TaskCapsule,
     workspace: Path,
@@ -117,6 +156,7 @@ def _run_capsule_isolated_container_candidate(
             # Parse and revalidate the sealed tar before any archive bytes reach Docker.
             # The prepared-volume runner repeats this validation when deriving cwd semantics.
             _workspace_tree(archive)
+            _validate_no_symlink_ancestor_members(archive)
             with prepared_workspace_volume(
                 sandbox,
                 archive,
