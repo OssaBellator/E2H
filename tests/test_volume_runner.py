@@ -80,15 +80,47 @@ import os
 from pathlib import Path
 import sys
 args = sys.argv[1:]
-with Path(os.environ["DOCKER_TEST_LOG"]).open("a", encoding="utf-8") as handle:
+log = Path(os.environ["DOCKER_TEST_LOG"])
+state_file = Path(str(log) + ".state")
+with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\\n")
+if args and args[0] == "inspect":
+    if os.environ.get("DOCKER_TEST_INSPECT_FAIL"):
+        print("inspect failed", file=sys.stderr)
+        raise SystemExit(8)
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    if value := os.environ.get("DOCKER_TEST_INSPECT_STATUS"):
+        state["Status"] = value
+        state["Running"] = value == "running"
+    if value := os.environ.get("DOCKER_TEST_INSPECT_EXIT"):
+        state["ExitCode"] = int(value)
+    if value := os.environ.get("DOCKER_TEST_INSPECT_ERROR"):
+        state["Error"] = value
+    print(json.dumps(state, sort_keys=True))
+    raise SystemExit(0)
 if args and args[0] == "rm":
+    state_file.unlink(missing_ok=True)
     raise SystemExit(0)
 command = args[-1] if args else ""
-print(f"executed:{{command}}")
+exit_code = 0
 if command.startswith("docker-exit-"):
-    raise SystemExit(int(command.removeprefix("docker-exit-")))
-raise SystemExit(7 if command == "fail" else 0)
+    exit_code = int(command.removeprefix("docker-exit-"))
+elif command == "fail":
+    exit_code = 7
+state_file.write_text(
+    json.dumps(
+        {{
+            "Status": "exited",
+            "Running": False,
+            "ExitCode": exit_code,
+            "Error": "",
+        }},
+        sort_keys=True,
+    ),
+    encoding="utf-8",
+)
+print(f"executed:{{command}}")
+raise SystemExit(exit_code)
 """,
         encoding="utf-8",
     )
@@ -98,6 +130,10 @@ raise SystemExit(7 if command == "fail" else 0)
 
 def _records(log: Path) -> list[list[str]]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def _run_records(log: Path) -> list[list[str]]:
+    return [record for record in _records(log) if record and record[0] == "run"]
 
 
 def test_prepared_volume_runner_resolves_symlinked_workdir(
@@ -126,8 +162,10 @@ def test_prepared_volume_runner_resolves_symlinked_workdir(
     assert result.checks[0].status is CheckStatus.PASSED
     assert result.checks[0].cwd == "shared/nested"
     assert result.checks[0].stdout == "executed:ok\n"
-    args = _records(log)[0]
-    assert args[0] == "run"
+    records = _records(log)
+    assert [record[0] for record in records] == ["run", "inspect", "rm"]
+    args = records[0]
+    assert "--rm" not in args
     assert "--cidfile" not in args
     assert "--name" in args
     assert args[args.index("--workdir") + 1] == "/workspace/shared/nested"
@@ -135,6 +173,9 @@ def test_prepared_volume_runner_resolves_symlinked_workdir(
         "type=volume,src=e2h-replay-workspace-abc,dst=/workspace,"
         "volume-nocopy,readonly"
     )
+    name = args[args.index("--name") + 1]
+    assert records[1][-1] == name
+    assert records[2] == ["rm", "-f", name]
 
 
 def test_prepared_volume_runner_missing_cwd_fails_before_runtime(tmp_path: Path) -> None:
@@ -183,7 +224,7 @@ def test_prepared_volume_runner_preserves_continue_on_failure(
         CheckStatus.FAILED,
         CheckStatus.PASSED,
     ]
-    assert [record[-1] for record in _records(log)] == ["fail", "pass"]
+    assert [record[-1] for record in _run_records(log)] == ["fail", "pass"]
 
 
 @pytest.mark.parametrize("exit_code", [125, 126, 127])
@@ -216,6 +257,74 @@ def test_prepared_volume_runner_preserves_expected_ambiguous_docker_exits(
     assert result.checks[0].status is CheckStatus.PASSED
     assert result.checks[0].exit_code == exit_code
     assert result.checks[0].failure is None
+
+
+def test_prepared_volume_runner_rejects_nonexited_container_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _fake_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_INSPECT_STATUS", "created")
+    archive = _archive(directories=["."])
+
+    result = run_capsule_prepared_volume(
+        _capsule([CommandCheck(id="check", argv=["ok"])]),
+        archive,
+        "e2h-replay-workspace-abc",
+        container_runtime=str(runtime),
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "stable exited state" in (result.checks[0].error or "")
+    assert _records(log)[-1][0] == "rm"
+
+
+def test_prepared_volume_runner_rejects_inspected_exit_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _fake_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_INSPECT_EXIT", "9")
+    archive = _archive(directories=["."])
+
+    result = run_capsule_prepared_volume(
+        _capsule([CommandCheck(id="check", argv=["ok"])]),
+        archive,
+        "e2h-replay-workspace-abc",
+        container_runtime=str(runtime),
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "does not match inspected" in (result.checks[0].error or "")
+
+
+def test_prepared_volume_runner_rejects_runtime_state_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, log = _fake_runtime(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    monkeypatch.setenv("DOCKER_TEST_INSPECT_ERROR", "start failed")
+    archive = _archive(directories=["."])
+
+    result = run_capsule_prepared_volume(
+        _capsule([CommandCheck(id="check", argv=["ok"])]),
+        archive,
+        "e2h-replay-workspace-abc",
+        container_runtime=str(runtime),
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "start failed" in (result.checks[0].error or "")
 
 
 def test_prepared_volume_timeout_uses_generated_name_cleanup(
@@ -262,6 +371,7 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
     assert result.checks[0].status is CheckStatus.TIMED_OUT
     argv = observed["argv"]
     assert isinstance(argv, list)
+    assert "--rm" not in argv
     assert "--cidfile" not in argv
     name = argv[argv.index("--name") + 1]
     assert observed["cleanup_name"] == name
@@ -304,6 +414,54 @@ def test_prepared_volume_timeout_cleanup_failure_is_infrastructure_error(
     assert result.checks[0].failure is not None
     assert result.checks[0].failure.code is FailureCode.SANDBOX_CLEANUP
     assert result.checks[0].error == "cleanup failed"
+
+
+def test_completed_container_cleanup_failure_is_infrastructure_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _archive(directories=["."])
+    capsule = _capsule([CommandCheck(id="check", argv=["ok"])])
+
+    monkeypatch.setattr(
+        volume_runner,
+        "_execute_process",
+        lambda *args, **kwargs: _ProcessOutcome(
+            exit_code=0,
+            timed_out=False,
+            stdout="ok\n",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+        ),
+    )
+    monkeypatch.setattr(
+        volume_runner,
+        "_inspect_named_container_state",
+        lambda *args, **kwargs: volume_runner._DockerContainerState(
+            status="exited",
+            running=False,
+            exit_code=0,
+            error="",
+        ),
+    )
+    monkeypatch.setattr(
+        volume_runner,
+        "force_remove_named_container",
+        lambda *args, **kwargs: "cleanup failed",
+    )
+
+    result = run_capsule_prepared_volume(
+        capsule,
+        archive,
+        "e2h-replay-workspace-abc",
+        container_runtime="docker-test",
+    )
+
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "cleanup failed" in (result.checks[0].error or "")
 
 
 def test_workspace_tree_rejects_archive_directory_metadata_mismatch() -> None:
