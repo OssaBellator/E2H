@@ -51,7 +51,10 @@ if args and args[0] == "cp":
 with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\\n")
 if args and args[0] == "version":
-    print("29.7.2 29.7.2")
+    if args[-1] == "{{{{json .Server.Components}}}}":
+        print(json.dumps([{{"Name": "runc", "Version": "1.3.6", "Details": {{}}}}]))
+    else:
+        print("29.7.2 29.7.2")
 elif args and args[0] == "info":
     print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true true true true"))
 elif args[:2] == ["image", "inspect"]:
@@ -170,8 +173,10 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     commands = [record["args"] for record in records]
     assert [args[0] for args in commands] == [
         "version",
+        "version",
         "info",
         "image",
+        "version",
         "version",
         "info",
         "image",
@@ -186,11 +191,13 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "rm",
         "volume",
     ]
-    volume_name = str(commands[6][-1])
-    prep_name = commands[7][commands[7].index("--name") + 1]
-    assert commands[9] == ["rm", "-f", "-v", prep_name]
+    assert commands[1][-1] == "{{json .Server.Components}}"
+    assert commands[5][-1] == "{{json .Server.Components}}"
+    volume_name = str(commands[8][-1])
+    prep_name = commands[9][commands[9].index("--name") + 1]
+    assert commands[11] == ["rm", "-f", "-v", prep_name]
 
-    create = commands[10]
+    create = commands[12]
     mount = create[create.index("--mount") + 1]
     assert mount == (
         f"type=volume,src={volume_name},dst=/workspace,volume-nocopy,readonly"
@@ -198,14 +205,15 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert "type=bind" not in mount
     assert "--rm" not in create
     assert "--cidfile" not in create
+    assert create[create.index("--runtime") + 1] == "runc"
     assert create[create.index("--workdir") + 1] == "/workspace/shared/nested"
     assert create[create.index("--name") + 1].startswith("e2h-replay-check-")
-    assert commands[11][-1] == CONTAINER_ID
-    assert commands[12] == ["start", "--attach", CONTAINER_ID]
     assert commands[13][-1] == CONTAINER_ID
-    assert commands[14] == ["rm", "-f", "-v", CONTAINER_ID]
-    assert commands[15] == ["volume", "rm", "-f", volume_name]
-    assert int(records[8]["stdin_bytes"]) > 0
+    assert commands[14] == ["start", "--attach", CONTAINER_ID]
+    assert commands[15][-1] == CONTAINER_ID
+    assert commands[16] == ["rm", "-f", "-v", CONTAINER_ID]
+    assert commands[17] == ["volume", "rm", "-f", volume_name]
+    assert int(records[10]["stdin_bytes"]) > 0
 
 
 def test_candidate_rejects_missing_swap_support_before_workspace_capture(
@@ -229,7 +237,7 @@ def test_candidate_rejects_missing_swap_support_before_workspace_capture(
         )
 
     commands = [record["args"] for record in _records(log)]
-    assert [args[0] for args in commands] == ["version", "info"]
+    assert [args[0] for args in commands] == ["version", "version", "info"]
 
 
 def test_candidate_rejects_missing_pid_limit_before_workspace_capture(
@@ -253,7 +261,7 @@ def test_candidate_rejects_missing_pid_limit_before_workspace_capture(
         )
 
     commands = [record["args"] for record in _records(log)]
-    assert [args[0] for args in commands] == ["version", "info"]
+    assert [args[0] for args in commands] == ["version", "version", "info"]
 
 
 def test_candidate_rejects_non_linux_daemon_before_workspace_capture(
@@ -277,7 +285,7 @@ def test_candidate_rejects_non_linux_daemon_before_workspace_capture(
         )
 
     commands = [record["args"] for record in _records(log)]
-    assert [args[0] for args in commands] == ["version", "info"]
+    assert [args[0] for args in commands] == ["version", "version", "info"]
 
 
 def test_candidate_rejects_image_declared_volumes_before_workspace_capture(
@@ -298,7 +306,7 @@ def test_candidate_rejects_image_declared_volumes_before_workspace_capture(
         )
 
     commands = [record["args"] for record in _records(log)]
-    assert [args[0] for args in commands] == ["version", "info", "image"]
+    assert [args[0] for args in commands] == ["version", "version", "info", "image"]
 
 
 def test_candidate_command_failure_still_removes_check_and_volume(
@@ -328,6 +336,7 @@ def test_candidate_command_failure_still_removes_check_and_volume(
         and args[args.index("--name") + 1].startswith("e2h-replay-check-")
     )
     assert create[create.index("--name") + 1].startswith("e2h-replay-check-")
+    assert create[create.index("--runtime") + 1] == "runc"
     volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
     volume_name = str(volume_create[-1])
     assert ["rm", "-f", "-v", CONTAINER_ID] in commands
