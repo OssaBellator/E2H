@@ -220,3 +220,22 @@ def test_importer_rejects_nonproducer_file_object_even_with_sealed_descriptor(
         monkeypatch,
         message="unbuffered FileIO",
     )
+
+
+def test_validated_archive_uses_independent_private_file_offset() -> None:
+    archive = _sealed_producer_encoding_archive()
+    verified: WorkspaceArchive | None = None
+    try:
+        verified = docker_remote._validated_workspace_archive(archive)
+        assert verified is not archive
+        assert type(verified.file) is io.FileIO
+        assert verified.file.fileno() != archive.file.fileno()
+        verified.file.seek(0)
+        archive.file.seek(archive.archive_bytes)
+        assert verified.file.tell() == 0
+        assert verified.file.read(1)
+        assert archive.file.tell() == archive.archive_bytes
+    finally:
+        if verified is not None:
+            verified.file.close()
+        archive.file.close()
