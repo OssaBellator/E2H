@@ -21,7 +21,7 @@ if sys.argv[1:3] != ["info", "--format"]:
 if os.environ.get("DOCKER_TEST_INFO_FAIL"):
     print("info failed", file=sys.stderr)
     raise SystemExit(7)
-print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "true true"))
+print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true"))
 """,
         encoding="utf-8",
     )
@@ -29,7 +29,7 @@ print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "true true"))
     return runtime
 
 
-def test_resource_capability_probe_accepts_memory_and_swap_support(
+def test_resource_capability_probe_accepts_linux_memory_and_swap_support(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -39,7 +39,10 @@ def test_resource_capability_probe_accepts_memory_and_swap_support(
     require_docker_resource_limits(str(runtime))
 
 
-@pytest.mark.parametrize("caps", ["false true", "true false", "false false"])
+@pytest.mark.parametrize(
+    "caps",
+    ["linux false true", "linux true false", "linux false false"],
+)
 def test_resource_capability_probe_rejects_missing_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -52,7 +55,23 @@ def test_resource_capability_probe_rejects_missing_limits(
         require_docker_resource_limits(str(runtime))
 
 
-@pytest.mark.parametrize("caps", ["", "true", "true true extra", "TRUE true", "yes no"])
+def test_resource_capability_probe_rejects_non_linux_daemon(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", "windows true true")
+
+    with pytest.raises(DockerRemoteError, match="requires a Linux daemon") as raised:
+        require_docker_resource_limits(str(runtime))
+
+    assert "os_type=windows" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "caps",
+    ["", "linux true", "linux true true extra", "linux TRUE true", "linux yes no"],
+)
 def test_resource_capability_probe_rejects_unexpected_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
