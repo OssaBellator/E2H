@@ -156,6 +156,7 @@ def test_prepared_workspace_volume_pins_local_driver_and_read_only_root(
 ) -> None:
     _bypass_precreate_dependencies(monkeypatch)
     calls: list[list[str]] = []
+    container_id = "a" * 64
 
     def fake_run_docker(
         runtime: str,
@@ -167,7 +168,7 @@ def test_prepared_workspace_volume_pins_local_driver_and_read_only_root(
         if args[:2] == ["volume", "create"]:
             return args[-1]
         if args and args[0] == "create":
-            return "a" * 64
+            return container_id
         return ""
 
     monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
@@ -183,4 +184,5 @@ def test_prepared_workspace_volume_pins_local_driver_and_read_only_root(
     create = calls[1]
     assert "--read-only" in create
     container_name = create[create.index("--name") + 1]
-    assert calls[3] == ["rm", "-f", "-v", container_name]
+    assert container_name != container_id
+    assert calls[3] == ["rm", "-f", "-v", container_id]
