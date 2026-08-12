@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import subprocess
+import tarfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator
@@ -111,6 +112,37 @@ def _required_archive_seals() -> int:
     return sum(int(value) for value in values if value is not None)
 
 
+def _validate_producer_archive_encoding(archive: WorkspaceArchive) -> None:
+    """Require logical tar encoding details that stable_workspace_archive always emits."""
+    try:
+        archive.file.seek(0)
+        with tarfile.open(
+            fileobj=archive.file,
+            mode="r:",
+            encoding="utf-8",
+            errors="surrogateescape",
+        ) as handle:
+            for member in handle:
+                if "mtime" not in member.pax_headers:
+                    raise DockerRemoteError(
+                        f"workspace archive member {member.name!r} is missing producer PAX mtime"
+                    )
+                if member.isfile() and member.type != tarfile.REGTYPE:
+                    raise DockerRemoteError(
+                        f"workspace archive member {member.name!r} does not use "
+                        "producer regular file type"
+                    )
+    except DockerRemoteError:
+        raise
+    except (AttributeError, OSError, tarfile.TarError, UnicodeError, ValueError) as exc:
+        raise DockerRemoteError(f"unable to verify workspace archive encoding: {exc}") from exc
+    finally:
+        try:
+            archive.file.seek(0)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
     if type(archive) is not WorkspaceArchive:
         raise DockerRemoteError(
@@ -141,6 +173,7 @@ def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
 
     try:
         _validate_archive_member_ancestry(archive)
+        _validate_producer_archive_encoding(archive)
         _workspace_tree(archive)
     except RunnerError as exc:
         raise DockerRemoteError(f"workspace archive structure is invalid: {exc}") from exc
