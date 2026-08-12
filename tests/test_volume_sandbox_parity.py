@@ -26,12 +26,14 @@ def _capsule() -> TaskCapsule:
     )
 
 
-def _without_identity_and_mount(argv: list[str]) -> list[str]:
+def _without_identity_mount_and_lifecycle(argv: list[str]) -> list[str]:
     result = list(argv)
     for flag in ("--cidfile", "--name", "--mount"):
         if flag in result:
             index = result.index(flag)
             del result[index : index + 2]
+    if "--rm" in result:
+        result.remove("--rm")
     return result
 
 
@@ -55,4 +57,6 @@ def test_named_volume_runner_preserves_direct_container_policy(tmp_path: Path) -
         runtime_binary="docker-test",
     )
 
-    assert _without_identity_and_mount(remote) == _without_identity_and_mount(direct)
+    assert _without_identity_mount_and_lifecycle(remote) == (
+        _without_identity_mount_and_lifecycle(direct)
+    )
