@@ -21,7 +21,7 @@ if sys.argv[1:3] != ["info", "--format"]:
 if os.environ.get("DOCKER_TEST_INFO_FAIL"):
     print("info failed", file=sys.stderr)
     raise SystemExit(7)
-print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true"))
+print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true true true true"))
 """,
         encoding="utf-8",
     )
@@ -29,7 +29,7 @@ print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true"))
     return runtime
 
 
-def test_resource_capability_probe_accepts_linux_memory_and_swap_support(
+def test_resource_capability_probe_accepts_all_remote_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -41,9 +41,13 @@ def test_resource_capability_probe_accepts_linux_memory_and_swap_support(
 
 @pytest.mark.parametrize(
     "caps",
-    ["linux false true", "linux true false", "linux false false"],
+    [
+        "linux false true true true true",
+        "linux true false true true true",
+        "linux false false true true true",
+    ],
 )
-def test_resource_capability_probe_rejects_missing_limits(
+def test_resource_capability_probe_rejects_missing_memory_or_swap_limits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caps: str,
@@ -55,12 +59,32 @@ def test_resource_capability_probe_rejects_missing_limits(
         require_docker_resource_limits(str(runtime))
 
 
+@pytest.mark.parametrize(
+    "caps",
+    [
+        "linux true true false true true",
+        "linux true true true false true",
+        "linux true true true true false",
+    ],
+)
+def test_resource_capability_probe_rejects_missing_cpu_or_pid_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caps: str,
+) -> None:
+    runtime = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", caps)
+
+    with pytest.raises(DockerRemoteError, match="CPU CFS period/quota and PID limit support"):
+        require_docker_resource_limits(str(runtime))
+
+
 def test_resource_capability_probe_rejects_non_linux_daemon(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _fake_docker(tmp_path)
-    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", "windows true true")
+    monkeypatch.setenv("DOCKER_TEST_RESOURCE_CAPS", "windows true true true true true")
 
     with pytest.raises(DockerRemoteError, match="requires a Linux daemon") as raised:
         require_docker_resource_limits(str(runtime))
@@ -70,7 +94,13 @@ def test_resource_capability_probe_rejects_non_linux_daemon(
 
 @pytest.mark.parametrize(
     "caps",
-    ["", "linux true", "linux true true extra", "linux TRUE true", "linux yes no"],
+    [
+        "",
+        "linux true true true true",
+        "linux true true true true true extra",
+        "linux true true TRUE true true",
+        "linux true true yes no true",
+    ],
 )
 def test_resource_capability_probe_rejects_unexpected_output(
     tmp_path: Path,
