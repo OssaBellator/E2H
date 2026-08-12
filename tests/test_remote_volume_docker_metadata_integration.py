@@ -31,6 +31,11 @@ def _runtime() -> str:
 def _image(env_name: str) -> str:
     image = os.environ.get(env_name)
     if image is None:
+        if env_name == NONROOT_IMAGE_ENV and os.environ.get(IMAGE_ENV) is not None:
+            pytest.fail(
+                f"set {NONROOT_IMAGE_ENV} to a pre-pulled immutable Python image digest "
+                "whose Config.User is an explicit numeric non-root uid:gid"
+            )
         pytest.skip(
             f"set {env_name} to a pre-pulled immutable Python image digest for real Docker tests"
         )
