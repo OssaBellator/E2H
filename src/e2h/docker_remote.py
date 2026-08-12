@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -23,11 +24,25 @@ _VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)([-+].*)?$")
 _STABLE_HYPHEN_SUFFIXES = frozenset({"-ce", "-ee"})
 _RESOURCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _FULL_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_IMAGE_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 _VERSION_TIMEOUT_SECONDS = 10.0
 _CONTROL_TIMEOUT_SECONDS = 30.0
 _MAX_ERROR_CHARS = 4096
 _WORKSPACE_ROOT = "/workspace"
+_IMAGE_DESCRIPTOR_FORMAT = "{{json .Descriptor}}"
 _IMAGE_VOLUMES_FORMAT = "{{if .Config.Volumes}}declared{{else}}none{{end}}"
+_IMAGE_MANIFEST_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    }
+)
+_IMAGE_INDEX_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
 
 
 class DockerRemoteError(RuntimeError):
@@ -242,8 +257,51 @@ def require_patched_docker_archive(
     return client, server
 
 
+def _requested_image_digest(image: str) -> str:
+    reference, separator, digest = image.rpartition("@")
+    if not reference or separator != "@" or _IMAGE_DIGEST_PATTERN.fullmatch(digest) is None:
+        raise DockerRemoteError("remote Docker replay image must use a pinned SHA-256 digest")
+    return digest
+
+
+def _require_concrete_image_descriptor(runtime: str, image: str) -> None:
+    """Require one exact local image manifest instead of a host-selected image index."""
+    raw_descriptor = _run_docker(
+        runtime,
+        ["image", "inspect", "--format", _IMAGE_DESCRIPTOR_FORMAT, image],
+    )
+    try:
+        descriptor = json.loads(raw_descriptor)
+    except (TypeError, ValueError) as exc:
+        raise DockerRemoteError("Docker image descriptor probe returned invalid JSON") from exc
+    if type(descriptor) is not dict:
+        raise DockerRemoteError(
+            "remote Docker replay requires image descriptor proof from Docker's "
+            "multi-platform image store"
+        )
+    media_type = descriptor.get("mediaType")
+    observed_digest = descriptor.get("digest")
+    if type(media_type) is not str or type(observed_digest) is not str:
+        raise DockerRemoteError("Docker image descriptor probe returned invalid fields")
+
+    requested_digest = _requested_image_digest(image)
+    if observed_digest != requested_digest:
+        raise DockerRemoteError(
+            "Docker image descriptor digest does not match pinned image reference"
+        )
+    if media_type in _IMAGE_INDEX_MEDIA_TYPES:
+        raise DockerRemoteError(
+            "remote Docker replay requires a single-platform image manifest digest"
+        )
+    if media_type not in _IMAGE_MANIFEST_MEDIA_TYPES:
+        raise DockerRemoteError(
+            "Docker image descriptor has unsupported image descriptor media type"
+        )
+
+
 def _require_volume_free_image(runtime: str, image: str) -> None:
-    """Reject images whose Dockerfile VOLUME directives would create extra mounts."""
+    """Require one concrete image manifest without Dockerfile VOLUME declarations."""
+    _require_concrete_image_descriptor(runtime, image)
     result = _run_docker(
         runtime,
         ["image", "inspect", "--format", _IMAGE_VOLUMES_FORMAT, image],
