@@ -566,6 +566,7 @@ class E2HMCPService:
         try:
             loaded = load_capsule(
                 capsule_path,
+                max_bytes=self.config.max_artifact_bytes,
                 containment_root=self.config.root,
             )
             selected_backend = self.config.replay_backend
