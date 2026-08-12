@@ -6,7 +6,6 @@ import json
 import os
 import re
 import secrets
-import signal
 import tarfile
 from collections import deque
 from dataclasses import dataclass, replace
@@ -58,9 +57,10 @@ _CONTROL_OUTPUT_CHARS = 8192
 _CONTROL_TIMEOUT_SECONDS = 10.0
 _MAX_TAR_TRAILER_BYTES = tarfile.RECORDSIZE + tarfile.BLOCKSIZE
 _CREATED_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_REMOTE_SIGNAL_EXIT_CODES = frozenset(
-    128 + int(value) for value in signal.valid_signals() if int(value) > 0
-)
+# Docker encodes Linux signal termination as 128 + signal number. Use the Linux
+# kernel signal-number envelope instead of libc/Python's signal.valid_signals(),
+# which omits reserved-but-kernel-valid numbers such as 32 and 33.
+_REMOTE_SIGNAL_EXIT_CODES = frozenset(128 + value for value in range(1, 65))
 
 
 @dataclass(frozen=True)
