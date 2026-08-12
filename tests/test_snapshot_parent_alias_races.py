@@ -242,6 +242,7 @@ def test_fallback_archive_read_rejects_parent_alias_retarget(
     state = {"swapped": False}
     monkeypatch.setattr(snapshot, "_OPEN_SUPPORTS_DIR_FD", False)
     monkeypatch.setattr(snapshot, "_STAT_SUPPORTS_DIR_FD", False)
+    monkeypatch.setattr(snapshot, "_WRITE_DIR_FD_SUPPORTED", False)
 
     def swapping_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
         if not state["swapped"]:
