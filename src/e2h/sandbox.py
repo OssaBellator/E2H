@@ -287,7 +287,7 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
         return str(exc)
     try:
         completed = subprocess.run(
-            [runtime_binary, "rm", "-f", container_name],
+            [runtime_binary, "rm", "-f", "-v", container_name],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=_CLEANUP_TIMEOUT_SECONDS,
