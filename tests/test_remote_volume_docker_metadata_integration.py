@@ -16,6 +16,7 @@ from e2h.runner import CheckStatus, RunStatus
 from e2h.workspace_archive import sealed_workspace_archive_supported
 
 IMAGE_ENV = "E2H_DOCKER_TEST_PYTHON_IMAGE"
+NONROOT_IMAGE_ENV = "E2H_DOCKER_TEST_NONROOT_PYTHON_IMAGE"
 RUNTIME_ENV = "E2H_DOCKER_TEST_RUNTIME"
 _MTIME_NS = 1_700_000_000_123_456_789
 
@@ -27,11 +28,11 @@ def _runtime() -> str:
     return runtime
 
 
-def _image() -> str:
-    image = os.environ.get(IMAGE_ENV)
+def _image(env_name: str) -> str:
+    image = os.environ.get(env_name)
     if image is None:
         pytest.skip(
-            f"set {IMAGE_ENV} to a pre-pulled immutable Python image digest for real Docker tests"
+            f"set {env_name} to a pre-pulled immutable Python image digest for real Docker tests"
         )
     return image
 
@@ -106,13 +107,40 @@ def _expected_metadata(path: Path) -> dict[str, int]:
     }
 
 
-def test_real_docker_import_preserves_workspace_metadata(tmp_path: Path) -> None:
+@pytest.mark.parametrize("image_env", [IMAGE_ENV, NONROOT_IMAGE_ENV])
+def test_real_docker_import_preserves_workspace_metadata(
+    tmp_path: Path,
+    image_env: str,
+) -> None:
     if not sealed_workspace_archive_supported():
         pytest.skip("real Docker metadata validation requires Linux memfd sealing")
     runtime = _runtime()
-    image = _image()
+    image = _image(image_env)
     require_patched_docker_archive(runtime)
     _docker_lines(runtime, ["image", "inspect", "--format", "{{.Id}}", image])
+
+    configured_identity: tuple[int, int] | None = None
+    if image_env == NONROOT_IMAGE_ENV:
+        configured_users = _docker_lines(
+            runtime,
+            ["image", "inspect", "--format", "{{.Config.User}}", image],
+        )
+        if len(configured_users) != 1:
+            pytest.fail(
+                f"{NONROOT_IMAGE_ENV} must declare an explicit numeric non-root USER uid:gid"
+            )
+        configured_user = next(iter(configured_users))
+        parts = configured_user.split(":")
+        if (
+            len(parts) != 2
+            or any(not part.isdigit() for part in parts)
+            or int(parts[0]) == 0
+            or int(parts[1]) == 0
+        ):
+            pytest.fail(
+                f"{NONROOT_IMAGE_ENV} must declare an explicit numeric non-root USER uid:gid"
+            )
+        configured_identity = (int(parts[0]), int(parts[1]))
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -139,6 +167,12 @@ def test_real_docker_import_preserves_workspace_metadata(tmp_path: Path) -> None
     assert expected["root"]["mode"] == 0o1755
     assert expected["nested"]["mode"] == 0o2755
     assert expected["marker"]["mode"] == 0o4755
+    if configured_identity is not None:
+        source_identity = (expected["marker"]["uid"], expected["marker"]["gid"])
+        if configured_identity == source_identity:
+            pytest.fail(
+                f"{NONROOT_IMAGE_ENV} USER must differ from the source workspace uid:gid"
+            )
 
     before = _resources(runtime)
     capsule = TaskCapsule(
