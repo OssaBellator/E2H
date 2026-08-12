@@ -15,6 +15,7 @@ def test_container_builder_pins_shared_memory_size(tmp_path: Path) -> None:
         sandbox=ContainerSandbox(image=IMAGE),
         success=SuccessSpec(commands=[CommandCheck(id="check", argv=["check"])]),
     )
+    assert capsule.sandbox is not None
 
     argv = build_container_argv(
         capsule,
@@ -27,5 +28,7 @@ def test_container_builder_pins_shared_memory_size(tmp_path: Path) -> None:
 
     assert argv.count("--shm-size") == 1
     assert argv[argv.index("--shm-size") + 1] == "64m"
-    assert argv[argv.index("--memory") + 1] == "512m"
-    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,size=64m"
+    assert argv[argv.index("--memory") + 1] == f"{capsule.sandbox.memory_mb}m"
+    assert argv[argv.index("--tmpfs") + 1] == (
+        f"/tmp:rw,nosuid,size={capsule.sandbox.tmpfs_mb}m"
+    )
