@@ -14,6 +14,7 @@ from e2h.docker_remote import (
     require_patched_docker_archive,
 )
 from e2h.models import TaskCapsule
+from e2h.replay_budget import validate_replay_host_limits
 from e2h.runner import CheckStatus, RunnerError, RunResult, _validated_capsule
 from e2h.volume_runner import _member_path, _workspace_tree, run_capsule_prepared_volume
 from e2h.workspace_archive import (
@@ -33,9 +34,6 @@ _REMOTE_SIGNAL_EXIT_CODES = frozenset(
     128 + int(value) for value in signal.valid_signals() if int(value) > 0
 )
 _REMOTE_ALLOWED_PAX_HEADERS = frozenset({"path", "linkpath", "mtime", "uid", "gid", "size"})
-_REMOTE_MAX_COMMANDS = 50
-_REMOTE_MAX_RETAINED_OUTPUT_CHARS = 2_000_000
-_REMOTE_MAX_TOTAL_CHECK_TIMEOUT_SECONDS = 1_800.0
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -57,31 +55,6 @@ def _validate_remote_expected_exit_codes(capsule: TaskCapsule) -> None:
                 "remote container replay cannot safely distinguish signal-encoded "
                 f"expected exit codes for check {check.id!r}: {ambiguous}"
             )
-
-
-def _validate_remote_host_limits(capsule: TaskCapsule) -> None:
-    """Bound host memory retention and sequential wall-clock exposure before Docker work."""
-    command_count = len(capsule.success.commands)
-    if command_count > _REMOTE_MAX_COMMANDS:
-        raise RunnerError(
-            "remote container replay exceeds the host command budget "
-            f"({_REMOTE_MAX_COMMANDS})"
-        )
-    retained_chars = command_count * capsule.limits.max_output_chars * 2
-    if retained_chars > _REMOTE_MAX_RETAINED_OUTPUT_CHARS:
-        raise RunnerError(
-            "remote container replay exceeds the aggregate retained-output budget "
-            f"({_REMOTE_MAX_RETAINED_OUTPUT_CHARS} characters)"
-        )
-    total_timeout = sum(
-        check.timeout_seconds or capsule.limits.default_timeout_seconds
-        for check in capsule.success.commands
-    )
-    if total_timeout > _REMOTE_MAX_TOTAL_CHECK_TIMEOUT_SECONDS:
-        raise RunnerError(
-            "remote container replay exceeds the aggregate check-timeout budget "
-            f"({_REMOTE_MAX_TOTAL_CHECK_TIMEOUT_SECONDS:g} seconds)"
-        )
 
 
 def _validate_remote_result_exit_codes(result: RunResult) -> None:
@@ -210,7 +183,7 @@ def _run_capsule_isolated_container_candidate(
     if sandbox is None:
         raise RunnerError("isolated container replay requires capsule.sandbox")
     _validate_remote_expected_exit_codes(capsule)
-    _validate_remote_host_limits(capsule)
+    validate_replay_host_limits(capsule)
     # Validate caller-selected capture bounds before any Docker control-plane contact.
     _max_remote_archive_bytes(max_workspace_bytes, max_workspace_entries)
     runtime = container_runtime or sandbox.engine
