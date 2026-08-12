@@ -8,9 +8,14 @@ import pytest
 
 from e2h.docker_remote import DockerRemoteError, prepared_workspace_volume
 from e2h.models import ContainerSandbox
-from e2h.workspace_archive import stable_workspace_archive
+from e2h.workspace_archive import sealed_workspace_archive_supported, stable_workspace_archive
 
 IMAGE = "python@sha256:" + "0" * 64
+
+pytestmark = pytest.mark.skipif(
+    not sealed_workspace_archive_supported(),
+    reason="Docker cleanup priority tests require Linux memfd sealing",
+)
 
 
 def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
