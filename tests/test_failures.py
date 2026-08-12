@@ -175,7 +175,7 @@ def test_failure_summary_rejects_inconsistent_primary_and_negative_counts() -> N
             by_category={"task": 1},
             by_code={"unexpected_exit": 1},
         )
-    with pytest.raises(ValidationError, match="non-negative"):
+    with pytest.raises(ValidationError, match="counts must be positive"):
         FailureSummary(
             total=0,
             by_category={"task": -1, "resource": 1},
