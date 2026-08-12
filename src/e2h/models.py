@@ -173,6 +173,13 @@ class CommandCheck(StrictModel):
                 raise ValueError("environment values must not contain NUL")
         return value
 
+    @field_validator("expected_exit_codes")
+    @classmethod
+    def expected_exit_codes_must_be_non_negative(cls, value: set[int]) -> set[int]:
+        if any(code < 0 for code in value):
+            raise ValueError("expected exit codes must be non-negative")
+        return value
+
 
 class SuccessSpec(StrictModel):
     """Executable success criteria."""
