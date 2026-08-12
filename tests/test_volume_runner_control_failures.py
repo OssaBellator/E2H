@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import tarfile
+from typing import Any
 
 import pytest
 
@@ -42,16 +43,31 @@ def _capsule() -> TaskCapsule:
     )
 
 
-def _run_outcome(*, error: str | None = None) -> _ProcessOutcome:
+def _outcome(
+    *,
+    exit_code: int = 0,
+    timed_out: bool = False,
+    error: str | None = None,
+    stdout: str = "task output\n",
+) -> _ProcessOutcome:
     return _ProcessOutcome(
-        exit_code=0,
-        timed_out=False,
-        stdout="task output\n",
+        exit_code=exit_code,
+        timed_out=timed_out,
+        stdout=stdout,
         stderr="",
         stdout_truncated=False,
         stderr_truncated=False,
         error=error,
         failure_code=FailureCode.OUTPUT_CAPTURE if error is not None else None,
+    )
+
+
+def _created_state() -> volume_runner._DockerContainerState:
+    return volume_runner._DockerContainerState(
+        status="created",
+        running=False,
+        exit_code=0,
+        error="",
     )
 
 
@@ -64,10 +80,73 @@ def _exited_state() -> volume_runner._DockerContainerState:
     )
 
 
+def test_create_timeout_never_starts_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
+        commands.append(argv)
+        assert argv[1] == "create"
+        return _outcome(exit_code=None, timed_out=True, stdout="")
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
+    monkeypatch.setattr(volume_runner, "force_remove_named_container", lambda *args: None)
+
+    result = run_capsule_prepared_volume(
+        _capsule(),
+        _archive(),
+        "e2h-replay-workspace-abc",
+        container_runtime="docker-test",
+    )
+
+    assert [argv[1] for argv in commands] == ["create"]
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].status is CheckStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "creation timed out" in (result.checks[0].error or "")
+
+
+def test_noncreated_prestart_state_never_starts_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
+        commands.append(argv)
+        assert argv[1] == "create"
+        return _outcome(stdout="a" * 64 + "\n")
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
+    monkeypatch.setattr(
+        volume_runner,
+        "_inspect_named_container_state",
+        lambda *args: volume_runner._DockerContainerState(
+            status="running",
+            running=True,
+            exit_code=0,
+            error="",
+        ),
+    )
+    monkeypatch.setattr(volume_runner, "force_remove_named_container", lambda *args: None)
+
+    result = run_capsule_prepared_volume(
+        _capsule(),
+        _archive(),
+        "e2h-replay-workspace-abc",
+        container_runtime="docker-test",
+    )
+
+    assert [argv[1] for argv in commands] == ["create"]
+    assert result.status is RunStatus.ERROR
+    assert result.checks[0].failure is not None
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert "stopped created state" in (result.checks[0].error or "")
+
+
 def test_inspect_failure_with_successful_cleanup_is_sandbox_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(volume_runner, "_execute_process", lambda *args, **kwargs: _run_outcome())
+    monkeypatch.setattr(volume_runner, "_execute_process", lambda *args, **kwargs: _outcome())
     monkeypatch.setattr(
         volume_runner,
         "_inspect_named_container_state",
@@ -92,7 +171,7 @@ def test_inspect_failure_with_successful_cleanup_is_sandbox_runtime(
 def test_inspect_and_cleanup_failure_prioritizes_sandbox_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(volume_runner, "_execute_process", lambda *args, **kwargs: _run_outcome())
+    monkeypatch.setattr(volume_runner, "_execute_process", lambda *args, **kwargs: _outcome())
     monkeypatch.setattr(
         volume_runner,
         "_inspect_named_container_state",
@@ -122,15 +201,19 @@ def test_inspect_and_cleanup_failure_prioritizes_sandbox_cleanup(
 def test_output_capture_failure_survives_healthy_inspect_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        volume_runner,
-        "_execute_process",
-        lambda *args, **kwargs: _run_outcome(error="capture failed"),
-    )
+    states = iter([_created_state(), _exited_state()])
+
+    def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
+        if argv[1] == "create":
+            return _outcome(stdout="a" * 64 + "\n")
+        assert argv[1] == "start"
+        return _outcome(error="capture failed")
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
     monkeypatch.setattr(
         volume_runner,
         "_inspect_named_container_state",
-        lambda *args, **kwargs: _exited_state(),
+        lambda *args, **kwargs: next(states),
     )
     monkeypatch.setattr(volume_runner, "force_remove_named_container", lambda *args: None)
 
