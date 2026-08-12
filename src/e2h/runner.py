@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import signal
 import subprocess
@@ -39,7 +38,6 @@ _OUTPUT_MARKER = "\n... <output truncated> ...\n"
 _READ_CHUNK_BYTES = 64 * 1024
 _TERMINATION_GRACE_SECONDS = 0.1
 _READER_JOIN_SECONDS = 1.0
-_DOCKER_RUN_RESERVED_EXIT_CODES = frozenset({125, 126, 127})
 
 
 class CheckStatus(StrEnum):
@@ -446,22 +444,6 @@ def _execute_container_command(
         return outcome
 
 
-def _docker_run_reserved_exit_failure(exit_code: int) -> FailureRecord | None:
-    if exit_code == 125:
-        return sandbox_failure()
-    if exit_code == 126:
-        return launch_failure(
-            OSError(errno.ENOEXEC, "container command could not be invoked"),
-            ExecutionBackend.CONTAINER.value,
-        )
-    if exit_code == 127:
-        return launch_failure(
-            FileNotFoundError(errno.ENOENT, "container command was not found"),
-            ExecutionBackend.CONTAINER.value,
-        )
-    return None
-
-
 def _skipped(check: CommandCheck, cwd: str, blocked_by_check_id: str) -> CommandResult:
     return CommandResult(
         id=check.id,
@@ -606,17 +588,6 @@ def run_capsule(
             elif outcome.error is not None:
                 status = CheckStatus.ERROR
                 failure = output_capture_failure(selected_backend.value)
-                infrastructure_error = True
-            elif (
-                selected_backend is ExecutionBackend.CONTAINER
-                and outcome.exit_code in _DOCKER_RUN_RESERVED_EXIT_CODES
-            ):
-                status = CheckStatus.ERROR
-                if outcome.exit_code is None:
-                    raise RunnerError("reserved Docker exit status is missing")
-                failure = _docker_run_reserved_exit_failure(outcome.exit_code)
-                if failure is None:
-                    raise RunnerError("reserved Docker exit status lacks a failure mapping")
                 infrastructure_error = True
             elif outcome.exit_code in check.expected_exit_codes:
                 status = CheckStatus.PASSED
