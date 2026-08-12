@@ -149,11 +149,7 @@ def test_verification_revalidates_capsule_before_digest_binding() -> None:
     base = capsule()
     variant = variant_document(base)
     adapter = adapter_document(base, variant)
-
     base.goal = ""
-    rebound = capsule_sha256(base)
-    variant.base_capsule_sha256 = rebound
-    adapter.base_capsule_sha256 = rebound
 
     with pytest.raises(OptimizerAdapterError, match="invalid task capsule"):
         verify_optimizer_adapter(adapter, base, variant)
@@ -165,7 +161,6 @@ def test_verification_revalidates_variant_cross_fields_before_hashing() -> None:
     adapter = adapter_document(base, variant)
     assert variant.variant.prompt is not None
     variant.variant.prompt.variables = []
-    adapter.base_variant_sha256 = variant_sha256(variant.variant)
 
     with pytest.raises(OptimizerAdapterError, match="invalid variant document"):
         verify_optimizer_adapter(adapter, base, variant)

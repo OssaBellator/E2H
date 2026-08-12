@@ -8,6 +8,7 @@ import duckdb
 import pytest
 
 from e2h.experiment import ExperimentResult, ExperimentRun, VariantSummary
+from e2h.failures import summarize_failures, unexpected_exit_failure
 from e2h.runner import CheckStatus, CommandResult, RunResult, RunStatus
 from e2h.store import (
     StoreError,
@@ -30,6 +31,11 @@ def command_result(
     stdout: str = "ok\n",
     error: str | None = None,
 ) -> CommandResult:
+    failure = (
+        unexpected_exit_failure(exit_code, [0])
+        if status is CheckStatus.FAILED and exit_code is not None
+        else None
+    )
     return CommandResult(
         id=check_id,
         argv=["python", "-c", "pass"],
@@ -40,6 +46,7 @@ def command_result(
         stdout=stdout,
         stderr="",
         error=error,
+        failure=failure,
     )
 
 
@@ -51,13 +58,17 @@ def run_result(
     offset: int = 0,
 ) -> RunResult:
     started = NOW + timedelta(seconds=offset)
+    resolved_checks = checks or [command_result("contract")]
     return RunResult(
         capsule_id=capsule_id,
         status=status,
         started_at=started,
         finished_at=started + timedelta(seconds=1),
         duration_seconds=1,
-        checks=checks or [command_result("contract")],
+        checks=resolved_checks,
+        failure_summary=summarize_failures(
+            (check.id, check.failure) for check in resolved_checks
+        ),
     )
 
 
@@ -156,7 +167,7 @@ def test_experiment_views_and_output_privacy(tmp_path: Path) -> None:
     artifact.write_text(experiment_result().model_dump_json(indent=2), encoding="utf-8")
 
     result = ingest_artifact(database, artifact, kind=ArtifactKind.EXPERIMENT)
-    assert (result.runs, result.checks, result.summaries, result.failures) == (2, 2, 2, 0)
+    assert (result.runs, result.checks, result.summaries, result.failures) == (2, 2, 2, 1)
 
     variants = query_store(database, QueryView.VARIANTS)
     assert [(row["variant_id"], row["pass_rate"]) for row in variants] == [
