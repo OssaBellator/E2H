@@ -53,6 +53,7 @@ from e2h.workspace_archive import (
 _MAX_CWD_SYMLINK_RESOLUTIONS = 40
 _CONTROL_OUTPUT_CHARS = 8192
 _CONTROL_TIMEOUT_SECONDS = 10.0
+_MAX_TAR_TRAILER_BYTES = tarfile.RECORDSIZE + tarfile.BLOCKSIZE
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,17 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
                     raise RunnerError(
                         "sealed workspace archive capture metadata does not match archive bytes"
                     )
+            logical_end = handle.offset
+        trailer_bytes = archive.archive_bytes - logical_end
+        if (
+            trailer_bytes < 2 * tarfile.BLOCKSIZE
+            or trailer_bytes > _MAX_TAR_TRAILER_BYTES
+        ):
+            raise RunnerError("sealed workspace archive has invalid trailer padding")
+        archive.file.seek(logical_end)
+        trailer = archive.file.read(trailer_bytes)
+        if len(trailer) != trailer_bytes or any(trailer):
+            raise RunnerError("sealed workspace archive contains non-zero trailing data")
     except RunnerError:
         raise
     except (AttributeError, OSError, tarfile.TarError, UnicodeError, ValueError) as exc:
