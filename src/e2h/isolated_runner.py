@@ -14,7 +14,7 @@ from e2h.docker_remote import (
     require_patched_docker_archive,
 )
 from e2h.models import TaskCapsule
-from e2h.runner import RunnerError, RunResult, _validated_capsule
+from e2h.runner import CheckStatus, RunnerError, RunResult, _validated_capsule
 from e2h.volume_runner import _member_path, _workspace_tree, run_capsule_prepared_volume
 from e2h.workspace_archive import (
     _MAX_ARCHIVE_MEMBER_PATH_BYTES,
@@ -52,6 +52,19 @@ def _validate_remote_expected_exit_codes(capsule: TaskCapsule) -> None:
             raise RunnerError(
                 "remote container replay cannot safely distinguish signal-encoded "
                 f"expected exit codes for check {check.id!r}: {ambiguous}"
+            )
+
+
+def _validate_remote_result_exit_codes(result: RunResult) -> None:
+    """Reject completed task verdicts with signal-ambiguous Docker exit statuses."""
+    for check in result.checks:
+        if (
+            check.status in {CheckStatus.PASSED, CheckStatus.FAILED}
+            and check.exit_code in _REMOTE_SIGNAL_EXIT_CODES
+        ):
+            raise RunnerError(
+                "remote container replay observed a signal-ambiguous Docker exit status "
+                f"for check {check.id!r}: {check.exit_code}"
             )
 
 
@@ -162,12 +175,14 @@ def _run_capsule_isolated_container_candidate(
                 archive,
                 runtime_binary=runtime,
             ) as volume_name:
-                return run_capsule_prepared_volume(
+                result = run_capsule_prepared_volume(
                     capsule,
                     archive,
                     volume_name,
                     container_runtime=runtime,
                 )
+                _validate_remote_result_exit_codes(result)
+                return result
     except (WorkspaceArchiveError, DockerRemoteError) as exc:
         raise RunnerError(str(exc)) from exc
 
