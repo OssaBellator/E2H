@@ -41,6 +41,20 @@ import os
 from pathlib import Path
 import sys
 args = sys.argv[1:]
+if (
+    args[:2] == ["image", "inspect"]
+    and args[args.index("--format") + 1] == "{{{{json .Descriptor}}}}"
+):
+    print(
+        json.dumps(
+            {{
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": "sha256:" + "0" * 64,
+                "size": 123,
+            }}
+        )
+    )
+    raise SystemExit(0)
 log = Path(os.environ["DOCKER_TEST_LOG"])
 state_file = Path(str(log) + ".check-state")
 record = {{"args": args}}
