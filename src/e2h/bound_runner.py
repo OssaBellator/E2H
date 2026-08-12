@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from threading import Thread
 from time import monotonic
 
 from e2h.directory_binding import (
@@ -16,6 +18,7 @@ from e2h.directory_binding import (
     open_relative_directory,
 )
 from e2h.failures import (
+    FailureCode,
     FailureImpact,
     FailureRecord,
     launch_failure,
@@ -33,9 +36,12 @@ from e2h.runner import (
     RunnerError,
     RunResult,
     RunStatus,
+    _BoundedCapture,
     _ProcessOutcome,
-    _execute_local_command,
+    _READER_JOIN_SECONDS,
+    _drain_stream,
     _skipped,
+    _terminate_process_tree,
     _validated_capsule,
 )
 
@@ -81,6 +87,80 @@ def _missing_check_result(check: CommandCheck, relative_cwd: str) -> CommandResu
         duration_seconds=0,
         error=f"check directory does not exist: {relative_cwd}",
         failure=working_directory_failure(),
+    )
+
+
+def _execute_bound_local_command(
+    check: CommandCheck,
+    cwd: Path,
+    timeout: float,
+    max_output_chars: int,
+) -> _ProcessOutcome:
+    """Execute one host command without exposing the server transport on stdin."""
+    process = subprocess.Popen(
+        check.argv,
+        cwd=cwd,
+        env={**os.environ, **check.env},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name == "posix",
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    stdout_capture = _BoundedCapture(max_output_chars)
+    stderr_capture = _BoundedCapture(max_output_chars)
+    readers = [
+        Thread(target=_drain_stream, args=(process.stdout, stdout_capture), daemon=True),
+        Thread(target=_drain_stream, args=(process.stderr, stderr_capture), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    deadline = monotonic() + timeout
+    timed_out = False
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+
+    if not timed_out:
+        for reader in readers:
+            reader.join(timeout=max(0.0, deadline - monotonic()))
+        timed_out = any(reader.is_alive() for reader in readers)
+
+    if timed_out:
+        _terminate_process_tree(process)
+
+    for reader in readers:
+        reader.join(timeout=_READER_JOIN_SECONDS)
+
+    lingering_readers = any(reader.is_alive() for reader in readers)
+    if lingering_readers:
+        with suppress(OSError):
+            process.stdout.close()
+        with suppress(OSError):
+            process.stderr.close()
+        for reader in readers:
+            reader.join(timeout=_READER_JOIN_SECONDS)
+
+    stdout, stdout_truncated = stdout_capture.render()
+    stderr, stderr_truncated = stderr_capture.render()
+    capture_errors = [error for error in (stdout_capture.error, stderr_capture.error) if error]
+    if any(reader.is_alive() for reader in readers):
+        capture_errors.append("output reader did not terminate")
+    capture_error = "; ".join(capture_errors) or None
+
+    return _ProcessOutcome(
+        exit_code=None if timed_out else process.returncode,
+        timed_out=timed_out,
+        stdout=stdout,
+        stderr=stderr,
+        stdout_truncated=stdout_truncated,
+        stderr_truncated=stderr_truncated,
+        error=capture_error,
+        failure_code=FailureCode.OUTPUT_CAPTURE if capture_error is not None else None,
     )
 
 
@@ -176,7 +256,7 @@ def run_capsule_bound_local(
             failure: FailureRecord | None = None
             try:
                 relative_cwd = _bound_relative_cwd(workspace_descriptor, check_descriptor)
-                outcome = _execute_local_command(
+                outcome = _execute_bound_local_command(
                     check,
                     _proc_fd_directory(check_descriptor),
                     timeout,
