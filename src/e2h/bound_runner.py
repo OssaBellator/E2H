@@ -26,6 +26,7 @@ from e2h.failures import (
     working_directory_failure,
 )
 from e2h.models import CommandCheck, TaskCapsule
+from e2h.replay_budget import validate_replay_host_limits
 from e2h.runner import (
     CheckStatus,
     CommandResult,
@@ -92,6 +93,7 @@ def run_capsule_bound_local(
 ) -> RunResult:
     """Run a capsule locally with every command cwd bound to a verified directory handle."""
     capsule = _validated_capsule(capsule)
+    validate_replay_host_limits(capsule)
     started_at = datetime.now(UTC)
     started_clock = monotonic()
     try:
