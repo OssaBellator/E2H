@@ -114,6 +114,25 @@ def _validate_symlink_containment(member_name: str, target: str) -> None:
         stack.append(part)
 
 
+def _validate_workspace_member_metadata(member: tarfile.TarInfo, name: str) -> None:
+    """Reject logical tar metadata the descriptor-bound producer cannot emit."""
+    incompatible = (
+        member.uid < 0
+        or member.gid < 0
+        or bool(member.uname)
+        or bool(member.gname)
+        or member.devmajor != 0
+        or member.devminor != 0
+        or not 0 <= member.mode <= 0o7777
+        or (not member.issym() and bool(member.linkname))
+        or ((member.isdir() or member.issym()) and member.size != 0)
+    )
+    if incompatible:
+        raise RunnerError(
+            f"sealed workspace archive contains producer-incompatible metadata for member {name!r}"
+        )
+
+
 def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
     if type(archive) is not WorkspaceArchive:
         raise RunnerError(
@@ -148,6 +167,7 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
                         f"sealed workspace archive contains duplicate member {name!r}"
                     )
                 seen.add(name)
+                _validate_workspace_member_metadata(member, name)
                 if member.isdir():
                     directories.add(name)
                 elif member.issym():
