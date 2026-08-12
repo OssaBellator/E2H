@@ -331,8 +331,8 @@ def promote_snapshot_file(
                 backup,
                 temporary_identity if promoted else None,
             )
-        elif promoted:
-            _remove_regular_file_at(parent_descriptor, output.name, temporary_identity)
+        if promoted:
+            _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
         raise
     except OSError as exc:
         if backup is not None:
@@ -342,8 +342,8 @@ def promote_snapshot_file(
                 backup,
                 temporary_identity if promoted else None,
             )
-        elif promoted:
-            _remove_regular_file_at(parent_descriptor, output.name, temporary_identity)
+        if promoted:
+            _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
         raise SnapshotError(f"unable to publish snapshot output: {exc}") from exc
     finally:
         if success and backup is not None:
