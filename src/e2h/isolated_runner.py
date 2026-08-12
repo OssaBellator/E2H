@@ -129,6 +129,8 @@ def _validate_archive_header_types(archive: WorkspaceArchive) -> None:
                 member = tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
             except (tarfile.TarError, UnicodeError, ValueError) as exc:
                 raise RunnerError(f"sealed workspace archive has an invalid tar header: {exc}") from exc
+            if member.type == tarfile.XGLTYPE:
+                raise RunnerError("sealed workspace archive contains unsupported global PAX metadata")
             if member.type not in _REMOTE_ALLOWED_TAR_HEADER_TYPES:
                 raise RunnerError(
                     "sealed workspace archive contains unsupported tar header type "
