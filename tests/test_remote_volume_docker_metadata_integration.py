@@ -31,13 +31,17 @@ def _runtime() -> str:
 def _image(env_name: str) -> str:
     image = os.environ.get(env_name)
     if image is None:
-        if env_name == NONROOT_IMAGE_ENV and os.environ.get(IMAGE_ENV) is not None:
+        pair_configured = any(
+            os.environ.get(candidate) is not None
+            for candidate in (IMAGE_ENV, NONROOT_IMAGE_ENV)
+        )
+        if pair_configured:
             pytest.fail(
-                f"set {NONROOT_IMAGE_ENV} to a pre-pulled immutable Python image digest "
-                "whose Config.User is an explicit numeric non-root uid:gid"
+                f"real Docker metadata proof requires both {IMAGE_ENV} and {NONROOT_IMAGE_ENV}"
             )
         pytest.skip(
-            f"set {env_name} to a pre-pulled immutable Python image digest for real Docker tests"
+            f"set {IMAGE_ENV} and {NONROOT_IMAGE_ENV} to pre-pulled immutable Python "
+            "image digests for real Docker metadata tests"
         )
     return image
 
@@ -87,6 +91,7 @@ def metadata(path: Path):
         'gid': info.st_gid,
         'mode': stat.S_IMODE(info.st_mode),
         'mtime_ns': info.st_mtime_ns,
+        'xattrs': sorted(os.listxattr(path, follow_symlinks=False)),
     }
 
 marker = Path('marker.txt')
@@ -102,13 +107,14 @@ print(json.dumps(payload, sort_keys=True))
 """.strip()
 
 
-def _expected_metadata(path: Path) -> dict[str, int]:
+def _expected_metadata(path: Path) -> dict[str, int | list[str]]:
     info = path.stat(follow_symlinks=False)
     return {
         "uid": info.st_uid,
         "gid": info.st_gid,
         "mode": stat.S_IMODE(info.st_mode),
         "mtime_ns": info.st_mtime_ns,
+        "xattrs": sorted(os.listxattr(path, follow_symlinks=False)),
     }
 
 
@@ -172,6 +178,7 @@ def test_real_docker_import_preserves_workspace_metadata(
     assert expected["root"]["mode"] == 0o1755
     assert expected["nested"]["mode"] == 0o2755
     assert expected["marker"]["mode"] == 0o4755
+    assert all(expected[key]["xattrs"] == [] for key in ("root", "nested", "marker"))
     if configured_identity is not None:
         source_identity = (expected["marker"]["uid"], expected["marker"]["gid"])
         if configured_identity == source_identity:
