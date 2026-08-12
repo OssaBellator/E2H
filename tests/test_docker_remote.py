@@ -252,11 +252,11 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     copy_args = copy["args"]
     assert copy_args == [
         "cp",
-        "--archive",
         "--quiet",
         "-",
         f"{container_name}:/workspace",
     ]
+    assert "--archive" not in copy_args
     assert copy["stdin_bytes"] == len(expected)
     assert copy["stdin_sha256"] == expected_digest
 
