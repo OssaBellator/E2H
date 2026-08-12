@@ -202,17 +202,16 @@ def test_real_docker_command_failure_still_cleans_volume(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize(
-    ("argv", "exit_code", "failure_code"),
+    ("argv", "docker_exit_code"),
     [
-        (["/etc"], 126, FailureCode.PROCESS_LAUNCH_ERROR),
-        (["e2h-command-that-does-not-exist"], 127, FailureCode.COMMAND_NOT_FOUND),
+        (["/etc"], 126),
+        (["e2h-command-that-does-not-exist"], 127),
     ],
 )
-def test_real_docker_reserved_command_exit_is_error_and_cleans_resources(
+def test_real_docker_startup_failure_is_sandbox_error_and_cleans_resources(
     tmp_path: Path,
     argv: list[str],
-    exit_code: int,
-    failure_code: FailureCode,
+    docker_exit_code: int,
 ) -> None:
     runtime, image = _preflight()
     workspace = _workspace(tmp_path)
@@ -221,10 +220,10 @@ def test_real_docker_reserved_command_exit_is_error_and_cleans_resources(
         image,
         [
             CommandCheck(
-                id="reserved",
+                id="startup-failure",
                 cwd="link/nested",
                 argv=argv,
-                expected_exit_codes={exit_code},
+                expected_exit_codes={docker_exit_code},
             )
         ],
     )
@@ -239,9 +238,43 @@ def test_real_docker_reserved_command_exit_is_error_and_cleans_resources(
 
     assert result.status is RunStatus.ERROR
     assert result.checks[0].status is CheckStatus.ERROR
-    assert result.checks[0].exit_code == exit_code
+    assert result.checks[0].exit_code == docker_exit_code
     assert result.checks[0].failure is not None
-    assert result.checks[0].failure.code is failure_code
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    _assert_no_new_resources(before, _resources(runtime))
+
+
+@pytest.mark.parametrize("exit_code", [125, 126, 127])
+def test_real_docker_process_may_legitimately_exit_ambiguous_status(
+    tmp_path: Path,
+    exit_code: int,
+) -> None:
+    runtime, image = _preflight()
+    workspace = _workspace(tmp_path)
+    before = _resources(runtime)
+    capsule = _capsule(
+        image,
+        [
+            CommandCheck(
+                id="ambiguous-task-exit",
+                cwd="link/nested",
+                argv=["python", "-c", f"raise SystemExit({exit_code})"],
+                expected_exit_codes={exit_code},
+            )
+        ],
+    )
+
+    result = _run_capsule_isolated_container_candidate(
+        capsule,
+        workspace.resolve(),
+        max_workspace_bytes=1024 * 1024,
+        max_workspace_entries=100,
+        container_runtime=runtime,
+    )
+
+    assert result.status is RunStatus.PASSED
+    assert result.checks[0].status is CheckStatus.PASSED
+    assert result.checks[0].exit_code == exit_code
     _assert_no_new_resources(before, _resources(runtime))
 
 
