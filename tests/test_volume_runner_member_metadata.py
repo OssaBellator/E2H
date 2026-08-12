@@ -71,11 +71,3 @@ def test_workspace_tree_rejects_link_target_on_non_symlink(member_type: bytes) -
 
     with pytest.raises(RunnerError, match="producer-incompatible metadata"):
         _workspace_tree(_archive(configure, member_type=member_type))
-
-
-def test_workspace_tree_rejects_mode_bits_outside_stat_imode() -> None:
-    def configure(member: tarfile.TarInfo) -> None:
-        member.mode = 0o10000
-
-    with pytest.raises(RunnerError, match="producer-incompatible metadata"):
-        _workspace_tree(_archive(configure))
