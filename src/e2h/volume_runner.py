@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import tarfile
 from collections import deque
 from dataclasses import dataclass, replace
@@ -57,6 +58,9 @@ _CONTROL_OUTPUT_CHARS = 8192
 _CONTROL_TIMEOUT_SECONDS = 10.0
 _MAX_TAR_TRAILER_BYTES = tarfile.RECORDSIZE + tarfile.BLOCKSIZE
 _CREATED_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_REMOTE_SIGNAL_EXIT_CODES = frozenset(
+    128 + int(value) for value in signal.valid_signals() if int(value) > 0
+)
 
 
 @dataclass(frozen=True)
@@ -645,6 +649,11 @@ def run_capsule_prepared_volume(
                 infrastructure_error = True
             elif outcome.exit_code is None:
                 raise RunnerError("completed command is missing an exit code")
+            elif outcome.exit_code in _REMOTE_SIGNAL_EXIT_CODES:
+                raise RunnerError(
+                    "remote container replay observed a signal-ambiguous Docker exit status "
+                    f"for check {check.id!r}: {outcome.exit_code}"
+                )
             elif outcome.exit_code in check.expected_exit_codes:
                 status = CheckStatus.PASSED
             else:
