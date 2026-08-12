@@ -47,7 +47,12 @@ if args and args[0] == "version":
     if os.environ.get("DOCKER_TEST_FAIL"):
         print("version probe failed", file=sys.stderr)
         raise SystemExit(7)
-    print(os.environ.get("DOCKER_TEST_VERSIONS", "29.7.2 29.7.2"))
+    if args[-1] == "{{{{json .Server.Components}}}}":
+        print(json.dumps([{{"Name": "runc", "Version": "1.3.6", "Details": {{}}}}]))
+    else:
+        print(os.environ.get("DOCKER_TEST_VERSIONS", "29.7.2 29.7.2"))
+elif args and args[0] == "info":
+    print(os.environ.get("DOCKER_TEST_RESOURCE_CAPS", "linux true true true true true"))
 elif args[:2] == ["image", "inspect"]:
     if os.environ.get("DOCKER_TEST_IMAGE_INSPECT_FAIL"):
         print("image inspect failed", file=sys.stderr)
@@ -213,6 +218,8 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     records = _records(log)
     assert [record["args"][0] for record in records] == [
         "version",
+        "version",
+        "info",
         "image",
         "volume",
         "create",
@@ -220,17 +227,18 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
         "rm",
         "volume",
     ]
+    assert records[1]["args"][-1] == "{{json .Server.Components}}"
 
-    image_inspect = records[1]["args"]
+    image_inspect = records[3]["args"]
     assert image_inspect[:2] == ["image", "inspect"]
     assert image_inspect[-1] == IMAGE
 
-    volume_create = records[2]["args"]
+    volume_create = records[4]["args"]
     assert volume_create[:2] == ["volume", "create"]
     assert "e2h.remote-replay=workspace" in volume_create
     volume_name = str(volume_create[-1])
 
-    create = records[3]["args"]
+    create = records[5]["args"]
     assert create[0] == "create"
     assert create[create.index("--pull") + 1] == "never"
     assert create[create.index("--network") + 1] == "none"
@@ -240,7 +248,7 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     assert "type=bind" not in mount
     container_name = create[create.index("--name") + 1]
 
-    copy = records[4]
+    copy = records[6]
     copy_args = copy["args"]
     assert copy_args == [
         "cp",
@@ -252,8 +260,8 @@ def test_prepared_workspace_volume_streams_sealed_archive_and_cleans_up(
     assert copy["stdin_bytes"] == len(expected)
     assert copy["stdin_sha256"] == expected_digest
 
-    assert records[5]["args"] == ["rm", "-f", "-v", container_name]
-    assert records[6]["args"] == ["volume", "rm", "-f", volume_name]
+    assert records[7]["args"] == ["rm", "-f", "-v", container_name]
+    assert records[8]["args"] == ["volume", "rm", "-f", volume_name]
 
 
 def test_prepared_workspace_volume_rejects_image_declared_volumes_before_create(
@@ -274,7 +282,7 @@ def test_prepared_workspace_volume_rejects_image_declared_volumes_before_create(
                 raise AssertionError("image-declared volume should fail before create")
 
     commands = [record["args"] for record in _records(log)]
-    assert [args[0] for args in commands] == ["version", "image"]
+    assert [args[0] for args in commands] == ["version", "version", "info", "image"]
 
 
 def test_prepared_workspace_volume_cleans_up_after_copy_failure(
@@ -297,6 +305,8 @@ def test_prepared_workspace_volume_cleans_up_after_copy_failure(
     commands = [record["args"] for record in _records(log)]
     assert [args[0] for args in commands] == [
         "version",
+        "version",
+        "info",
         "image",
         "volume",
         "create",
@@ -307,7 +317,7 @@ def test_prepared_workspace_volume_cleans_up_after_copy_failure(
     assert commands[-2][0:4] == ["rm", "-f", "-v", commands[-2][-1]]
 
 
-def test_prepared_workspace_volume_preserves_body_failure_over_cleanup_failure(
+def test_prepared_workspace_volume_cleanup_failure_takes_precedence_over_body_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,7 +326,7 @@ def test_prepared_workspace_volume_preserves_body_failure_over_cleanup_failure(
     monkeypatch.setenv("DOCKER_TEST_VOLUME_RM_FAIL", "1")
 
     with _sealed_archive(tmp_path) as archive:
-        with pytest.raises(ValueError, match="body failed"):
+        with pytest.raises(DockerRemoteError, match="workspace cleanup failed") as raised:
             with prepared_workspace_volume(
                 ContainerSandbox(image=IMAGE),
                 archive,
@@ -324,6 +334,8 @@ def test_prepared_workspace_volume_preserves_body_failure_over_cleanup_failure(
             ):
                 raise ValueError("body failed")
 
+    assert isinstance(raised.value.__cause__, ValueError)
+    assert str(raised.value.__cause__) == "body failed"
     assert _records(log)[-1]["args"][:2] == ["volume", "rm"]
 
 
