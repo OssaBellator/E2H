@@ -173,6 +173,7 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "info",
         "image",
         "version",
+        "info",
         "image",
         "volume",
         "create",
@@ -185,11 +186,11 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "rm",
         "volume",
     ]
-    volume_name = str(commands[5][-1])
-    prep_name = commands[6][commands[6].index("--name") + 1]
-    assert commands[8] == ["rm", "-f", "-v", prep_name]
+    volume_name = str(commands[6][-1])
+    prep_name = commands[7][commands[7].index("--name") + 1]
+    assert commands[9] == ["rm", "-f", "-v", prep_name]
 
-    create = commands[9]
+    create = commands[10]
     mount = create[create.index("--mount") + 1]
     assert mount == (
         f"type=volume,src={volume_name},dst=/workspace,volume-nocopy,readonly"
@@ -199,12 +200,12 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert "--cidfile" not in create
     assert create[create.index("--workdir") + 1] == "/workspace/shared/nested"
     check_name = create[create.index("--name") + 1]
-    assert commands[10][-1] == check_name
-    assert commands[11] == ["start", "--attach", check_name]
-    assert commands[12][-1] == check_name
-    assert commands[13] == ["rm", "-f", "-v", check_name]
-    assert commands[14] == ["volume", "rm", "-f", volume_name]
-    assert int(records[7]["stdin_bytes"]) > 0
+    assert commands[11][-1] == check_name
+    assert commands[12] == ["start", "--attach", check_name]
+    assert commands[13][-1] == check_name
+    assert commands[14] == ["rm", "-f", "-v", check_name]
+    assert commands[15] == ["volume", "rm", "-f", volume_name]
+    assert int(records[8]["stdin_bytes"]) > 0
 
 
 def test_candidate_rejects_missing_swap_support_before_workspace_capture(
