@@ -22,8 +22,9 @@ from e2h.compiler import (
     review_proposal,
     verify_proposal,
 )
+from e2h.failures import summarize_failures, unexpected_exit_failure
 from e2h.ingest import EvidenceFormat, IngestionBundle, SourceProvenance
-from e2h.runner import RunResult, RunStatus
+from e2h.runner import CheckStatus, CommandResult, RunResult, RunStatus
 from e2h.trace import Trace, TraceContext, TraceEvent, TraceEventType
 
 pytestmark = pytest.mark.filterwarnings("error::UserWarning")
@@ -129,13 +130,27 @@ def approved_proposal(source: CapsuleProposal | None = None) -> CapsuleProposal:
 
 def passing_result(capsule_id: str, *, passed: bool) -> RunResult:
     now = datetime.now(UTC)
+    checks: list[CommandResult] = []
+    if not passed:
+        checks.append(
+            CommandResult(
+                id="check",
+                argv=["check"],
+                cwd=".",
+                status=CheckStatus.FAILED,
+                exit_code=1,
+                duration_seconds=0,
+                failure=unexpected_exit_failure(1, [0]),
+            )
+        )
     return RunResult(
         capsule_id=capsule_id,
         status=RunStatus.PASSED if passed else RunStatus.FAILED,
         started_at=now,
         finished_at=now,
         duration_seconds=0,
-        checks=[],
+        checks=checks,
+        failure_summary=summarize_failures((check.id, check.failure) for check in checks),
     )
 
 
