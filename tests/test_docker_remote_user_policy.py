@@ -24,8 +24,13 @@ def test_remote_sandbox_requires_explicit_non_root_uid_gid(user: str) -> None:
     ],
 )
 def test_remote_sandbox_rejects_non_ascii_numeric_uid_gid(user: str) -> None:
-    with pytest.raises(DockerRemoteError, match="explicit non-root numeric uid:gid"):
-        _validated_remote_sandbox(ContainerSandbox(image=IMAGE, user=user))
+    # The base model now rejects these spellings before Docker sees them. Mutate a
+    # previously valid instance so the remote boundary still proves it revalidates
+    # independently instead of relying only on construction-time validation.
+    sandbox = ContainerSandbox(image=IMAGE, user="1:1")
+    sandbox.user = user
+    with pytest.raises(DockerRemoteError, match="invalid container sandbox"):
+        _validated_remote_sandbox(sandbox)
 
 
 def test_remote_sandbox_accepts_explicit_non_root_uid_gid() -> None:
