@@ -238,6 +238,15 @@ def _archive_name(relative: PurePosixPath) -> str:
     return value
 
 
+def _pax_timestamp_ns(value_ns: int) -> str:
+    sign = "-" if value_ns < 0 else ""
+    seconds, nanoseconds = divmod(abs(value_ns), 1_000_000_000)
+    if nanoseconds == 0:
+        return f"{sign}{seconds}"
+    fraction = f"{nanoseconds:09d}".rstrip("0")
+    return f"{sign}{seconds}.{fraction}"
+
+
 def _tar_info(
     relative: PurePosixPath,
     info: os.stat_result,
@@ -251,6 +260,7 @@ def _tar_info(
     member.uname = ""
     member.gname = ""
     member.mtime = info.st_mtime
+    member.pax_headers["mtime"] = _pax_timestamp_ns(info.st_mtime_ns)
     member.type = entry_type
     return member
 
