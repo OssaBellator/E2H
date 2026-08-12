@@ -48,11 +48,11 @@ def test_candidate_rejects_unsafe_policy_before_workspace_capture(
         )
 
 
-def test_candidate_uses_shared_resource_gate_once_before_workspace_capture(
+def test_candidate_uses_shared_runtime_and_resource_gates_before_workspace_capture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resource_calls: list[str] = []
+    calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         docker_remote,
         "inspect_docker_versions",
@@ -60,8 +60,13 @@ def test_candidate_uses_shared_resource_gate_once_before_workspace_capture(
     )
     monkeypatch.setattr(
         docker_capabilities,
+        "require_patched_docker_runtime",
+        lambda runtime: calls.append(("runtime", runtime)) or "1.3.6",
+    )
+    monkeypatch.setattr(
+        docker_capabilities,
         "require_docker_resource_limits",
-        lambda runtime: resource_calls.append(runtime),
+        lambda runtime: calls.append(("resources", runtime)),
     )
     monkeypatch.setattr(
         isolated_runner,
@@ -84,4 +89,7 @@ def test_candidate_uses_shared_resource_gate_once_before_workspace_capture(
             container_runtime="docker-test",
         )
 
-    assert resource_calls == ["docker-test"]
+    assert calls == [
+        ("runtime", "docker-test"),
+        ("resources", "docker-test"),
+    ]
