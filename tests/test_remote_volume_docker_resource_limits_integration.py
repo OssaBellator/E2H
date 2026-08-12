@@ -94,10 +94,18 @@ for line in Path('/proc/self/status').read_text().splitlines():
     if ':' in line:
         key, value = line.split(':', 1)
         status[key] = value.strip()
+mount_targets = {
+    '/',
+    '/tmp',
+    '/workspace',
+    '/etc/hosts',
+    '/etc/hostname',
+    '/etc/resolv.conf',
+}
 mount_options = {}
 for line in Path('/proc/self/mountinfo').read_text().splitlines():
     fields = line.split()
-    if len(fields) > 5 and fields[4] in {'/', '/tmp', '/workspace'}:
+    if len(fields) > 5 and fields[4] in mount_targets:
         mount_options[fields[4]] = fields[5].split(',')
 payload = {
     'core': list(resource.getrlimit(resource.RLIMIT_CORE)),
@@ -117,6 +125,9 @@ payload = {
     'root_mount_options': mount_options.get('/'),
     'tmp_mount_options': mount_options.get('/tmp'),
     'workspace_mount_options': mount_options.get('/workspace'),
+    'hosts_mount_options': mount_options.get('/etc/hosts'),
+    'hostname_mount_options': mount_options.get('/etc/hostname'),
+    'resolv_conf_mount_options': mount_options.get('/etc/resolv.conf'),
 }
 if (root / 'memory.max').exists():
     payload['cgroup'] = 'v2'
@@ -204,6 +215,13 @@ def test_real_docker_enforces_remote_resource_and_security_controls(tmp_path: Pa
     assert "nosuid" in payload["tmp_mount_options"]
     assert payload["workspace_mount_options"] is not None
     assert "ro" in payload["workspace_mount_options"]
+    for key in (
+        "hosts_mount_options",
+        "hostname_mount_options",
+        "resolv_conf_mount_options",
+    ):
+        assert payload[key] is not None
+        assert "ro" in payload[key]
     if payload["cgroup"] == "v2":
         assert int(payload["swap_max"]) == 0
         quota, period = payload["cpu_max"].split()
