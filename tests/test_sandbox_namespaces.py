@@ -15,6 +15,7 @@ def test_container_builder_pins_private_cgroup_and_ipc_namespaces(tmp_path: Path
         sandbox=ContainerSandbox(image=IMAGE),
         success=SuccessSpec(commands=[CommandCheck(id="check", argv=["check"])]),
     )
+    assert capsule.sandbox is not None
 
     argv = build_container_argv(
         capsule,
@@ -30,4 +31,4 @@ def test_container_builder_pins_private_cgroup_and_ipc_namespaces(tmp_path: Path
     assert argv.count("--ipc") == 1
     assert argv[argv.index("--ipc") + 1] == "private"
     assert argv[argv.index("--network") + 1] == "none"
-    assert argv[argv.index("--pids-limit") + 1] == "128"
+    assert argv[argv.index("--pids-limit") + 1] == str(capsule.sandbox.pids_limit)
