@@ -68,11 +68,22 @@ def _outcome(
     )
 
 
+def _created_state() -> dict[str, Any]:
+    return {
+        "Status": "created",
+        "Running": False,
+        "ExitCode": 0,
+        "Error": "",
+        "OOMKilled": False,
+    }
+
+
 def _install_state_runtime(
     monkeypatch: pytest.MonkeyPatch,
     state: dict[str, Any],
 ) -> list[str]:
     cleanup_names: list[str] = []
+    inspect_count = 0
 
     def fake_execute(
         argv: list[str],
@@ -81,11 +92,16 @@ def _install_state_runtime(
         timeout: float,
         max_output_chars: int,
     ) -> _ProcessOutcome:
+        nonlocal inspect_count
         del cwd, env, timeout, max_output_chars
-        if argv[1] == "run":
+        if argv[1] == "create":
+            return _outcome(exit_code=0, stdout="a" * 64 + "\n")
+        if argv[1] == "start":
             return _outcome(exit_code=137, stdout="task output\n")
         if argv[1] == "inspect":
-            return _outcome(exit_code=0, stdout=json.dumps(state))
+            inspect_count += 1
+            payload = _created_state() if inspect_count == 1 else state
+            return _outcome(exit_code=0, stdout=json.dumps(payload))
         raise AssertionError(f"unexpected runtime command: {argv}")
 
     monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
