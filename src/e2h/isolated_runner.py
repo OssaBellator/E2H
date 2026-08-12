@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
 from e2h.directory_binding import directory_binding_supported
 from e2h.docker_remote import (
     DockerRemoteError,
-    _run_docker,
+    _require_volume_free_image,
     _validated_remote_sandbox,
     prepared_workspace_volume,
     require_patched_docker_archive,
@@ -75,26 +74,6 @@ def _validate_remote_archive_resources(
         )
 
 
-def _require_remote_image_without_declared_volumes(runtime: str, image: str) -> None:
-    """Reject image-declared writable volumes before remote workspace capture."""
-    rendered = _run_docker(
-        runtime,
-        ["image", "inspect", "--format", "{{json .Config.Volumes}}", image],
-    )
-    try:
-        volumes = json.loads(rendered)
-    except (TypeError, ValueError) as exc:
-        raise DockerRemoteError("Docker image volume inspection returned invalid JSON") from exc
-    if volumes is None:
-        return
-    if type(volumes) is not dict:
-        raise DockerRemoteError("Docker image volume inspection returned an invalid object")
-    if volumes:
-        raise DockerRemoteError(
-            "remote Docker replay rejects images with Dockerfile VOLUME declarations"
-        )
-
-
 def _run_capsule_isolated_container_candidate(
     capsule: TaskCapsule,
     workspace: Path,
@@ -114,7 +93,7 @@ def _run_capsule_isolated_container_candidate(
         # The importer revalidates these boundaries again immediately before Docker import.
         sandbox = _validated_remote_sandbox(sandbox)
         require_patched_docker_archive(runtime)
-        _require_remote_image_without_declared_volumes(runtime, sandbox.image)
+        _require_volume_free_image(runtime, sandbox.image)
         with stable_workspace_archive(
             workspace,
             max_bytes=max_workspace_bytes,
