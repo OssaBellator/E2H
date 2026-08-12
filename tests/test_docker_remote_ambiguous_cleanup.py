@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,7 +16,7 @@ def _bypass_precreate_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         docker_remote,
         "_validated_workspace_archive",
-        lambda archive: archive,
+        lambda archive: SimpleNamespace(file=object()),
     )
     monkeypatch.setattr(
         docker_remote,
@@ -97,7 +98,7 @@ def test_container_create_failure_still_attempts_named_container_cleanup(
     assert calls[3] == ["volume", "rm", "-f", volume_name]
 
 
-def test_primary_failure_retains_cleanup_failure_as_exception_note(
+def test_cleanup_failure_takes_precedence_and_chains_primary_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _bypass_precreate_dependencies(monkeypatch)
@@ -118,17 +119,16 @@ def test_primary_failure_retains_cleanup_failure_as_exception_note(
 
     monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
 
-    with pytest.raises(ValueError, match="body failed") as caught:
+    with pytest.raises(DockerRemoteError, match="workspace cleanup failed") as caught:
         with prepared_workspace_volume(
             ContainerSandbox(image=IMAGE),
             object(),  # type: ignore[arg-type]
         ):
             raise ValueError("body failed")
 
-    assert str(caught.value) == "body failed"
-    assert caught.value.__notes__ == [
-        "Docker workspace cleanup failed: volume cleanup failed"
-    ]
+    assert "volume cleanup failed" in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert str(caught.value.__cause__) == "body failed"
 
 
 def test_run_docker_wraps_stdin_rewind_failure() -> None:
