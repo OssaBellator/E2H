@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,7 +17,7 @@ def _bypass_precreate_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         docker_remote,
         "_validated_workspace_archive",
-        lambda archive: SimpleNamespace(file=object()),
+        lambda archive: SimpleNamespace(file=io.BytesIO()),
     )
     monkeypatch.setattr(
         docker_remote,
