@@ -51,7 +51,7 @@ Two independent conditions remain before re-enablement:
 
 The `--trusted-container-control-plane` option is an **operator attestation**, not an E2H security probe. It is wired in advance of re-enablement so any future MCP container execution remains default-deny after `auto` resolves to the container backend. Supplying it asserts that the deployment has already restricted Docker API/socket authority to trusted operator processes or placed Docker behind an appropriately narrow broker/helper. E2H does not verify that deployment property. Supplying the option does not override the current public capability gate and does not enable container replay by itself.
 
-`e2h_status` surfaces the configured control-plane flag. Treat that value as the operator's declaration, not as proof that E2H inspected daemon ACLs, socket ownership, peer privileges, or surrounding workload isolation.
+`e2h_status` surfaces that declaration as `container_control_plane_attested`. Treat the field as the operator's declaration, not as proof that E2H inspected daemon ACLs, socket ownership, peer privileges, or surrounding workload isolation.
 
 By default replay results omit stdout and stderr and return their SHA-256 digests, character counts, truncation flags, status, failures, and an exact replay-result digest. Results also report `execution_backend`, `workspace_mode`, and `workspace_mutations_persisted`; effective MCP replay currently reports the persistent handle-bound local mode. An operator can deliberately expose E2H's already bounded command output with `--expose-replay-output`.
 
