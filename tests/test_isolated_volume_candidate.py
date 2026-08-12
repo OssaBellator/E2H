@@ -208,8 +208,7 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert commands[1][-1] == "{{json .Server.Components}}"
     assert commands[5][-1] == "{{json .Server.Components}}"
     volume_name = str(commands[8][-1])
-    prep_name = commands[9][commands[9].index("--name") + 1]
-    assert commands[11] == ["rm", "-f", "-v", prep_name]
+    assert commands[11] == ["rm", "-f", "-v", CONTAINER_ID]
 
     create = commands[12]
     mount = create[create.index("--mount") + 1]
