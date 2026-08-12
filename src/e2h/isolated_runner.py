@@ -42,7 +42,6 @@ _REMOTE_PARSEABLE_PAX_HEADERS = frozenset({*_REMOTE_ALLOWED_PAX_HEADERS, "hdrcha
 _REMOTE_ALLOWED_TAR_HEADER_TYPES = frozenset(
     {
         tarfile.REGTYPE,
-        tarfile.AREGTYPE,
         tarfile.DIRTYPE,
         tarfile.SYMTYPE,
         tarfile.XHDTYPE,
@@ -313,7 +312,7 @@ def _validate_archive_header_types(archive: WorkspaceArchive) -> None:
 
             effective_size = member.size
             if pending_size is not None:
-                if member.type not in {tarfile.REGTYPE, tarfile.AREGTYPE}:
+                if member.type != tarfile.REGTYPE:
                     raise RunnerError(
                         "sealed workspace archive applies a PAX size override to a non-file member"
                     )
