@@ -93,7 +93,7 @@ if args and args[0] == "create":
                 "ExitCode": 0,
                 "Error": "",
                 "OOMKilled": False,
-                "Command": args[-1],
+                "Command": args[args.index("--entrypoint") + 1],
             }},
             sort_keys=True,
         ),
@@ -154,6 +154,10 @@ def _records(log: Path) -> list[list[str]]:
 
 def _create_records(log: Path) -> list[list[str]]:
     return [record for record in _records(log) if record and record[0] == "create"]
+
+
+def _create_entrypoints(log: Path) -> list[str]:
+    return [record[record.index("--entrypoint") + 1] for record in _create_records(log)]
 
 
 def test_prepared_volume_runner_resolves_symlinked_workdir(
@@ -252,7 +256,7 @@ def test_prepared_volume_runner_preserves_continue_on_failure(
         CheckStatus.FAILED,
         CheckStatus.PASSED,
     ]
-    assert [record[-1] for record in _create_records(log)] == ["fail", "pass"]
+    assert _create_entrypoints(log) == ["fail", "pass"]
 
 
 @pytest.mark.parametrize("exit_code", [125, 126, 127])
