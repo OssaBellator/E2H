@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _MAX_CONTAINER_NUMERIC_ID = (1 << 31) - 1
+_MAX_METADATA_STRUCTURE_DEPTH = 128
 
 
 def _validate_relative_path(value: str) -> str:
@@ -29,7 +30,13 @@ def _validate_json_compatible(
     *,
     path: str = "$",
     active: set[int] | None = None,
+    depth: int = 0,
 ) -> None:
+    if depth > _MAX_METADATA_STRUCTURE_DEPTH:
+        raise ValueError(
+            "metadata structure exceeds maximum nesting depth "
+            f"({_MAX_METADATA_STRUCTURE_DEPTH})"
+        )
     if value is None or type(value) in (str, bool, int):
         return
     if type(value) is float:
@@ -45,7 +52,12 @@ def _validate_json_compatible(
         active.add(identity)
         try:
             for index, item in enumerate(value):
-                _validate_json_compatible(item, path=f"{path}[{index}]", active=active)
+                _validate_json_compatible(
+                    item,
+                    path=f"{path}[{index}]",
+                    active=active,
+                    depth=depth + 1,
+                )
         finally:
             active.remove(identity)
         return
@@ -58,7 +70,12 @@ def _validate_json_compatible(
             for key, item in value.items():
                 if type(key) is not str:
                     raise ValueError(f"{path} mapping keys must be strings")
-                _validate_json_compatible(item, path=f"{path}[{key!r}]", active=active)
+                _validate_json_compatible(
+                    item,
+                    path=f"{path}[{key!r}]",
+                    active=active,
+                    depth=depth + 1,
+                )
         finally:
             active.remove(identity)
         return
@@ -68,7 +85,7 @@ def _validate_json_compatible(
 def _validate_metadata(value: Any, *, noun: str) -> Any:
     try:
         _validate_json_compatible(value)
-    except ValueError as exc:
+    except (RecursionError, ValueError) as exc:
         raise ValueError(f"{noun} metadata must contain canonical JSON data: {exc}") from exc
     return value
 
