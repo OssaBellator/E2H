@@ -84,3 +84,29 @@ def test_remote_host_budget_fails_before_docker_probe(
             max_workspace_entries=10,
             container_runtime="docker-test",
         )
+
+
+@pytest.mark.parametrize(
+    ("max_workspace_bytes", "max_workspace_entries"),
+    [(0, 10), (-1, 10), (1024, 0), (1024, -1)],
+)
+def test_invalid_remote_workspace_limits_fail_before_docker_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    max_workspace_bytes: int,
+    max_workspace_entries: int,
+) -> None:
+    def forbidden_probe(runtime: str) -> None:
+        del runtime
+        raise AssertionError("Docker must not be probed for invalid remote workspace limits")
+
+    monkeypatch.setattr(isolated_runner, "require_patched_docker_archive", forbidden_probe)
+
+    with pytest.raises(RunnerError, match="remote workspace archive limits must be positive"):
+        isolated_runner._run_capsule_isolated_container_candidate(
+            _capsule(1),
+            tmp_path / "unused-workspace",
+            max_workspace_bytes=max_workspace_bytes,
+            max_workspace_entries=max_workspace_entries,
+            container_runtime="docker-test",
+        )
