@@ -302,7 +302,7 @@ class MCPStatus(StrictModel):
     memory_enabled: bool
     replay_enabled: bool
     replay_backend: str
-    container_control_plane_trusted: bool
+    container_control_plane_attested: bool
     replay_output_exposed: bool
     max_artifact_bytes: int = Field(ge=1)
     max_memory_rows: int = Field(ge=1, le=MAX_QUERY_ROWS)
@@ -427,7 +427,7 @@ class E2HMCPService:
             memory_enabled=self.config.store is not None,
             replay_enabled=self.config.allow_replay,
             replay_backend=self.config.replay_backend.value,
-            container_control_plane_trusted=self.config.trusted_container_control_plane,
+            container_control_plane_attested=self.config.trusted_container_control_plane,
             replay_output_exposed=self.config.expose_replay_output,
             max_artifact_bytes=self.config.max_artifact_bytes,
             max_memory_rows=self.config.max_memory_rows,
