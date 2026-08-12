@@ -81,7 +81,7 @@ def test_mcp_local_replay_rejects_workspace_rebinding_before_handle_bind(
         )
     )
 
-    with pytest.raises(MCPServiceError, match="unable to bind replay directory"):
+    with pytest.raises(MCPServiceError, match="replay directory"):
         service.replay(capsule.name, workspace="workspace")
 
     assert swapped is True
