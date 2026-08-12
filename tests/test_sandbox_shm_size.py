@@ -34,5 +34,5 @@ def test_container_builder_pins_writable_memory_resources(tmp_path: Path) -> Non
     assert argv.count("--shm-size") == 1
     assert argv[argv.index("--shm-size") + 1] == "64m"
     assert argv[argv.index("--tmpfs") + 1] == (
-        f"/tmp:rw,nosuid,size={capsule.sandbox.tmpfs_mb}m"
+        f"/tmp:rw,nosuid,mode=1777,size={capsule.sandbox.tmpfs_mb}m"
     )
