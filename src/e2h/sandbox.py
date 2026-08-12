@@ -11,6 +11,7 @@ from e2h.models import AllowedActions, CommandCheck, ContainerSandbox, TaskCapsu
 _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
+_CONTAINER_SHM_SIZE = "64m"
 
 
 class SandboxError(RuntimeError):
@@ -124,6 +125,8 @@ def build_container_argv(
         sandbox.user,
         "--tmpfs",
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--shm-size",
+        _CONTAINER_SHM_SIZE,
         "--entrypoint",
         check.argv[0],
     ]
