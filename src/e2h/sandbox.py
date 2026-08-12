@@ -91,6 +91,7 @@ def build_container_argv(
     mount = f"type=bind,src={workspace_text},dst={_CONTAINER_ROOT}"
     if sandbox.workspace_access == "read_only":
         mount += ",readonly"
+    memory_limit = f"{sandbox.memory_mb}m"
     argv = [
         runtime,
         "run",
@@ -118,7 +119,9 @@ def build_container_argv(
         "--pids-limit",
         str(sandbox.pids_limit),
         "--memory",
-        f"{sandbox.memory_mb}m",
+        memory_limit,
+        "--memory-swap",
+        memory_limit,
         "--cpus",
         f"{sandbox.cpus:g}",
         "--user",
