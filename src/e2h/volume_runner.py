@@ -14,6 +14,7 @@ from time import monotonic
 from e2h.failures import (
     FailureCode,
     FailureImpact,
+    FailureRecord,
     launch_failure,
     output_capture_failure,
     sandbox_failure,
@@ -292,7 +293,7 @@ def run_capsule_prepared_volume(
 
         timeout = check.timeout_seconds or capsule.limits.default_timeout_seconds
         command_started = monotonic()
-        failure = None
+        failure: FailureRecord | None = None
         try:
             outcome = _execute_volume_command(
                 capsule,
