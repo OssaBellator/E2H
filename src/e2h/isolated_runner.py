@@ -32,6 +32,7 @@ _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
 _REMOTE_SIGNAL_EXIT_CODES = frozenset(
     128 + int(value) for value in signal.valid_signals() if int(value) > 0
 )
+_REMOTE_ALLOWED_PAX_HEADERS = frozenset({"path", "linkpath", "mtime", "uid", "gid", "size"})
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -117,6 +118,12 @@ def _validate_archive_member_ancestry(archive: WorkspaceArchive) -> None:
             errors="surrogateescape",
         ) as handle:
             for position, member in enumerate(handle):
+                unexpected_pax = sorted(set(member.pax_headers) - _REMOTE_ALLOWED_PAX_HEADERS)
+                if unexpected_pax:
+                    raise RunnerError(
+                        "sealed workspace archive contains unsupported PAX metadata "
+                        f"for member {member.name!r}: {unexpected_pax}"
+                    )
                 name = _member_path(member.name)
                 _require_utf8_archive_text(name, noun="member path")
                 member_names.append(name)
