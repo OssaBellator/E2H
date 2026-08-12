@@ -68,5 +68,12 @@ def test_archive_ancestry_rejects_unsupported_member_pax_metadata(
 def test_archive_ancestry_rejects_unsupported_global_pax_metadata() -> None:
     archive = _archive(global_pax={"SCHILY.xattr.user.e2h": "blocked"})
 
-    with pytest.raises(RunnerError, match="unsupported PAX metadata"):
+    with pytest.raises(RunnerError, match="unsupported global PAX metadata"):
+        _validate_archive_member_ancestry(archive)
+
+
+def test_archive_ancestry_rejects_global_pax_even_for_member_allowed_key() -> None:
+    archive = _archive(global_pax={"mtime": "123.25"})
+
+    with pytest.raises(RunnerError, match="unsupported global PAX metadata"):
         _validate_archive_member_ancestry(archive)
