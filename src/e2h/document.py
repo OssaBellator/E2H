@@ -18,6 +18,7 @@ from yaml.nodes import MappingNode
 
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
+_MAX_DOCUMENT_STRUCTURE_DEPTH = 128
 
 
 class _UniqueKeySafeLoader(yaml.SafeLoader):
@@ -119,7 +120,13 @@ def _validate_json_compatible(
     *,
     path: str = "$",
     active: set[int] | None = None,
+    depth: int = 0,
 ) -> None:
+    if depth > _MAX_DOCUMENT_STRUCTURE_DEPTH:
+        raise ValueError(
+            "document structure exceeds maximum nesting depth "
+            f"({_MAX_DOCUMENT_STRUCTURE_DEPTH})"
+        )
     if value is None or type(value) in (str, bool, int):
         return
     if type(value) is float:
@@ -135,7 +142,12 @@ def _validate_json_compatible(
         active.add(identity)
         try:
             for index, item in enumerate(value):
-                _validate_json_compatible(item, path=f"{path}[{index}]", active=active)
+                _validate_json_compatible(
+                    item,
+                    path=f"{path}[{index}]",
+                    active=active,
+                    depth=depth + 1,
+                )
         finally:
             active.remove(identity)
         return
@@ -148,7 +160,12 @@ def _validate_json_compatible(
             for key, item in value.items():
                 if type(key) is not str:
                     raise ValueError(f"{path} mapping keys must be strings")
-                _validate_json_compatible(item, path=f"{path}[{key!r}]", active=active)
+                _validate_json_compatible(
+                    item,
+                    path=f"{path}[{key!r}]",
+                    active=active,
+                    depth=depth + 1,
+                )
         finally:
             active.remove(identity)
         return
@@ -297,12 +314,14 @@ def load_mapping_document(
             )
         else:
             data = yaml.load(text, Loader=_UniqueKeySafeLoader)
+    except RecursionError as exc:
+        raise ValueError(f"invalid {noun} syntax: document nesting is too deep") from exc
     except (json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
         raise ValueError(f"invalid {noun} syntax: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{noun} root must be an object")
     try:
         _validate_json_compatible(data)
-    except ValueError as exc:
-        raise ValueError(f"{noun} must contain JSON-compatible values: {exc}") from exc
+    except (RecursionError, ValueError) as exc:
+        raise ValueError(f"{noun} must contain bounded JSON-compatible values: {exc}") from exc
     return cast(dict[str, Any], data)
