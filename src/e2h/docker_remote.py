@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -148,6 +149,8 @@ def _validated_workspace_archive(archive: WorkspaceArchive) -> WorkspaceArchive:
         raise DockerRemoteError(
             f"invalid workspace archive: expected WorkspaceArchive, got {type(archive).__name__}"
         )
+    if type(archive.file) is not io.FileIO:
+        raise DockerRemoteError("workspace archive file must be the producer's unbuffered FileIO")
     if archive.source_bytes < 0 or archive.entries < 0 or archive.archive_bytes < 1:
         raise DockerRemoteError("workspace archive metadata is invalid")
     required = _required_archive_seals()
