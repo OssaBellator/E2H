@@ -85,7 +85,6 @@ def test_verification_revalidates_capsule_before_digest_binding() -> None:
     base = capsule()
     variant = document(base)
     base.goal = ""
-    variant.base_capsule_sha256 = capsule_sha256(base)
 
     with pytest.raises(VariantError, match="invalid task capsule"):
         verify_variant_document(variant, base)

@@ -89,7 +89,6 @@ def test_apply_revalidates_base_capsule_before_digest_binding() -> None:
     base = capsule()
     candidate = genome(base)
     base.goal = ""
-    candidate.base_capsule_sha256 = capsule_sha256(base)
 
     with pytest.raises(GenomeError, match="invalid task capsule"):
         apply_genome(candidate, base)
