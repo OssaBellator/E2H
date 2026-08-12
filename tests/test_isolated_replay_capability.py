@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -21,35 +20,18 @@ def _capsule() -> TaskCapsule:
     )
 
 
-def test_snapshot_capture_support_requires_every_fd_primitive(
+@pytest.mark.parametrize("supported", [False, True])
+def test_snapshot_capture_support_matches_sealed_archive_capability(
     monkeypatch: pytest.MonkeyPatch,
+    supported: bool,
 ) -> None:
-    monkeypatch.setattr(isolated_runner, "directory_binding_supported", lambda: True)
     monkeypatch.setattr(
-        isolated_runner.os,
-        "supports_dir_fd",
-        {os.stat, os.readlink},
+        isolated_runner,
+        "sealed_workspace_archive_supported",
+        lambda: supported,
     )
-    monkeypatch.setattr(isolated_runner.os, "supports_fd", {os.listdir})
 
-    assert isolated_runner.isolated_workspace_snapshot_supported() is True
-
-    monkeypatch.setattr(isolated_runner.os, "supports_fd", set())
-    assert isolated_runner.isolated_workspace_snapshot_supported() is False
-
-
-def test_snapshot_capture_support_requires_directory_binding(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(isolated_runner, "directory_binding_supported", lambda: False)
-    monkeypatch.setattr(
-        isolated_runner.os,
-        "supports_dir_fd",
-        {os.stat, os.readlink},
-    )
-    monkeypatch.setattr(isolated_runner.os, "supports_fd", {os.listdir})
-
-    assert isolated_runner.isolated_workspace_snapshot_supported() is False
+    assert isolated_runner.isolated_workspace_snapshot_supported() is supported
 
 
 def test_remote_container_replay_remains_fail_closed() -> None:
