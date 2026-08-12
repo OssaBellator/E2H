@@ -18,6 +18,8 @@ IMAGE_ENV = "E2H_DOCKER_TEST_PYTHON_IMAGE"
 RUNTIME_ENV = "E2H_DOCKER_TEST_RUNTIME"
 _MEMORY_MB = 64
 _MEMORY_BYTES = _MEMORY_MB * 1024 * 1024
+_TMPFS_MB = 16
+_TMPFS_BYTES = _TMPFS_MB * 1024 * 1024
 _SHM_BYTES = 64 * 1024 * 1024
 _NOFILE_LIMIT = 1024
 _SANDBOX_UID = 65532
@@ -82,6 +84,11 @@ from pathlib import Path
 
 root = Path('/sys/fs/cgroup')
 shm = os.statvfs('/dev/shm')
+tmp = os.statvfs('/tmp')
+tmp_probe = Path('/tmp/e2h-write-probe')
+tmp_probe.write_text('ok', encoding='utf-8')
+tmp_writable = tmp_probe.read_text(encoding='utf-8') == 'ok'
+tmp_probe.unlink()
 status = {}
 for line in Path('/proc/self/status').read_text().splitlines():
     if ':' in line:
@@ -90,12 +97,15 @@ for line in Path('/proc/self/status').read_text().splitlines():
 mount_options = {}
 for line in Path('/proc/self/mountinfo').read_text().splitlines():
     fields = line.split()
-    if len(fields) > 5 and fields[4] in {'/', '/workspace'}:
+    if len(fields) > 5 and fields[4] in {'/', '/tmp', '/workspace'}:
         mount_options[fields[4]] = fields[5].split(',')
 payload = {
     'core': list(resource.getrlimit(resource.RLIMIT_CORE)),
     'nofile': list(resource.getrlimit(resource.RLIMIT_NOFILE)),
     'shm_bytes': shm.f_frsize * shm.f_blocks,
+    'tmp_bytes': tmp.f_frsize * tmp.f_blocks,
+    'tmp_mode': os.stat('/tmp').st_mode & 0o7777,
+    'tmp_writable': tmp_writable,
     'uid': os.getuid(),
     'gid': os.getgid(),
     'cap_eff': int(status['CapEff'], 16),
@@ -105,6 +115,7 @@ payload = {
     'seccomp': int(status['Seccomp']),
     'network_interfaces': sorted(path.name for path in Path('/sys/class/net').iterdir()),
     'root_mount_options': mount_options.get('/'),
+    'tmp_mount_options': mount_options.get('/tmp'),
     'workspace_mount_options': mount_options.get('/workspace'),
 }
 if (root / 'memory.max').exists():
@@ -145,6 +156,7 @@ def test_real_docker_enforces_remote_resource_and_security_controls(tmp_path: Pa
         sandbox=ContainerSandbox(
             image=image,
             memory_mb=_MEMORY_MB,
+            tmpfs_mb=_TMPFS_MB,
             cpus=_CPUS,
             pids_limit=_PIDS_LIMIT,
         ),
@@ -172,6 +184,9 @@ def test_real_docker_enforces_remote_resource_and_security_controls(tmp_path: Pa
     assert payload["core"] == [0, 0]
     assert payload["nofile"] == [_NOFILE_LIMIT, _NOFILE_LIMIT]
     assert int(payload["memory_max"]) == _MEMORY_BYTES
+    assert int(payload["tmp_bytes"]) == _TMPFS_BYTES
+    assert payload["tmp_mode"] == 0o1777
+    assert payload["tmp_writable"] is True
     assert int(payload["shm_bytes"]) == _SHM_BYTES
     assert int(payload["pids_max"]) == _PIDS_LIMIT
     assert payload["uid"] == _SANDBOX_UID
@@ -184,6 +199,9 @@ def test_real_docker_enforces_remote_resource_and_security_controls(tmp_path: Pa
     assert payload["network_interfaces"] == ["lo"]
     assert payload["root_mount_options"] is not None
     assert "ro" in payload["root_mount_options"]
+    assert payload["tmp_mount_options"] is not None
+    assert "rw" in payload["tmp_mount_options"]
+    assert "nosuid" in payload["tmp_mount_options"]
     assert payload["workspace_mount_options"] is not None
     assert "ro" in payload["workspace_mount_options"]
     if payload["cgroup"] == "v2":
