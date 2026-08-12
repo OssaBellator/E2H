@@ -12,8 +12,11 @@ from e2h.store_snapshot import StoreSnapshotError
 
 
 def test_parent_binding_closes_new_descriptor_when_fstat_fails(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    parent = tmp_path / "parent"
+    parent.mkdir()
     opened = iter([10, 11])
     closed: list[int] = []
 
@@ -32,7 +35,7 @@ def test_parent_binding_closes_new_descriptor_when_fstat_fails(
     monkeypatch.setattr(store_snapshot.os, "close", closed.append)
 
     with pytest.raises(StoreSnapshotError, match="unable to bind store parent: fstat failed"):
-        store_snapshot._open_absolute_directory(Path("/parent"))
+        store_snapshot._open_absolute_directory(parent.resolve())
 
     assert closed == [11, 10]
 
