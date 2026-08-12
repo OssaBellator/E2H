@@ -13,7 +13,7 @@ from e2h.docker_remote import (
 )
 from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult, _validated_capsule
-from e2h.volume_runner import run_capsule_prepared_volume
+from e2h.volume_runner import _workspace_tree, run_capsule_prepared_volume
 from e2h.workspace_archive import (
     _MAX_ARCHIVE_MEMBER_PATH_BYTES,
     WorkspaceArchive,
@@ -98,6 +98,9 @@ def _run_capsule_isolated_container_candidate(
                 max_source_bytes=max_workspace_bytes,
                 max_entries=max_workspace_entries,
             )
+            # Parse and revalidate the sealed tar before any archive bytes reach Docker.
+            # The prepared-volume runner repeats this validation when deriving cwd semantics.
+            _workspace_tree(archive)
             with prepared_workspace_volume(
                 sandbox,
                 archive,
