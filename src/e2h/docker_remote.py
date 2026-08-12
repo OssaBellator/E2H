@@ -324,7 +324,6 @@ def prepared_workspace_volume(
             runtime,
             [
                 "cp",
-                "--archive",
                 "--quiet",
                 "-",
                 f"{container_name}:{_WORKSPACE_ROOT}",
