@@ -96,7 +96,11 @@ def _validated_remote_sandbox(sandbox: ContainerSandbox) -> ContainerSandbox:
     if validated.pull_policy != "never":
         raise DockerRemoteError("remote Docker replay requires pull_policy='never'")
     user_parts = validated.user.split(":")
-    if len(user_parts) != 2 or int(user_parts[1]) == 0:
+    if (
+        len(user_parts) != 2
+        or any(not part or not part.isascii() or not part.isdecimal() for part in user_parts)
+        or int(user_parts[1]) == 0
+    ):
         raise DockerRemoteError(
             "remote Docker replay requires an explicit non-root numeric uid:gid"
         )
