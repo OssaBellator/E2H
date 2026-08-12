@@ -26,6 +26,7 @@ _VERSION_TIMEOUT_SECONDS = 10.0
 _CONTROL_TIMEOUT_SECONDS = 30.0
 _MAX_ERROR_CHARS = 4096
 _WORKSPACE_ROOT = "/workspace"
+_IMAGE_VOLUMES_FORMAT = "{{if .Config.Volumes}}declared{{else}}none{{end}}"
 
 
 class DockerRemoteError(RuntimeError):
@@ -213,6 +214,21 @@ def require_patched_docker_archive(
     return client, server
 
 
+def _require_volume_free_image(runtime: str, image: str) -> None:
+    """Reject images whose Dockerfile VOLUME directives would create extra mounts."""
+    result = _run_docker(
+        runtime,
+        ["image", "inspect", "--format", _IMAGE_VOLUMES_FORMAT, image],
+    )
+    if result == "none":
+        return
+    if result == "declared":
+        raise DockerRemoteError(
+            "remote Docker replay image must not declare VOLUME mount points"
+        )
+    raise DockerRemoteError("Docker image volume probe returned an unexpected response")
+
+
 def _resource_name(noun: str) -> str:
     value = f"e2h-replay-{noun}-{secrets.token_hex(16)}"
     if _RESOURCE_PATTERN.fullmatch(value) is None:
@@ -232,6 +248,7 @@ def prepared_workspace_volume(
     policy = _validated_remote_sandbox(sandbox)
     verified_archive = _validated_workspace_archive(archive)
     require_patched_docker_archive(runtime)
+    _require_volume_free_image(runtime, policy.image)
 
     volume_name = _resource_name("workspace")
     container_name = _resource_name("prepare")
@@ -301,7 +318,7 @@ def prepared_workspace_volume(
             stdin=verified_archive.file,
         )
 
-        _run_docker(runtime, ["rm", "-f", container_name])
+        _run_docker(runtime, ["rm", "-f", "-v", container_name])
         container_may_exist = False
         yield volume_name
     except BaseException as exc:
@@ -310,7 +327,7 @@ def prepared_workspace_volume(
     finally:
         cleanup_errors: list[str] = []
         if container_may_exist:
-            error = _best_effort_docker(runtime, ["rm", "-f", container_name])
+            error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_name])
             if error is not None:
                 cleanup_errors.append(error)
         if volume_may_exist:
