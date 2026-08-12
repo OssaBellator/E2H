@@ -96,9 +96,10 @@ def _validate_remote_archive_resources(
         )
 
 
-def _validate_no_symlink_ancestor_members(archive: WorkspaceArchive) -> None:
-    """Reject archive shapes the descriptor-bound producer cannot create."""
+def _validate_archive_member_ancestry(archive: WorkspaceArchive) -> None:
+    """Reject archive shapes the descriptor-recursive producer cannot create."""
     member_names: list[str] = []
+    directory_positions: dict[str, int] = {}
     symlink_names: set[str] = set()
     try:
         archive.file.seek(0)
@@ -108,10 +109,12 @@ def _validate_no_symlink_ancestor_members(archive: WorkspaceArchive) -> None:
             encoding="utf-8",
             errors="surrogateescape",
         ) as handle:
-            for member in handle:
+            for position, member in enumerate(handle):
                 name = _member_path(member.name)
                 member_names.append(name)
-                if member.issym():
+                if member.isdir():
+                    directory_positions[name] = position
+                elif member.issym():
                     symlink_names.add(name)
     except RunnerError:
         raise
@@ -123,7 +126,10 @@ def _validate_no_symlink_ancestor_members(archive: WorkspaceArchive) -> None:
         except (AttributeError, OSError, ValueError):
             pass
 
-    for name in member_names:
+    if not member_names or member_names[0] != "." or directory_positions.get(".") != 0:
+        raise RunnerError("sealed workspace archive root directory must be the first member")
+
+    for position, name in enumerate(member_names):
         parts = PurePosixPath(name).parts
         for depth in range(1, len(parts)):
             ancestor = PurePosixPath(*parts[:depth]).as_posix()
@@ -131,6 +137,17 @@ def _validate_no_symlink_ancestor_members(archive: WorkspaceArchive) -> None:
                 raise RunnerError(
                     f"sealed workspace archive member {name!r} is nested under "
                     f"symlink {ancestor!r}"
+                )
+            ancestor_position = directory_positions.get(ancestor)
+            if ancestor_position is None:
+                raise RunnerError(
+                    f"sealed workspace archive member {name!r} has missing directory "
+                    f"ancestor {ancestor!r}"
+                )
+            if ancestor_position >= position:
+                raise RunnerError(
+                    f"sealed workspace archive directory ancestor {ancestor!r} appears "
+                    f"after child {name!r}"
                 )
 
 
@@ -169,7 +186,7 @@ def _run_capsule_isolated_container_candidate(
             # Parse and revalidate the sealed tar before any archive bytes reach Docker.
             # The prepared-volume runner repeats this validation when deriving cwd semantics.
             _workspace_tree(archive)
-            _validate_no_symlink_ancestor_members(archive)
+            _validate_archive_member_ancestry(archive)
             with prepared_workspace_volume(
                 sandbox,
                 archive,
