@@ -36,13 +36,13 @@ def _write_capsule(path: Path, *, sandbox: bool) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_container_control_plane_trust_is_default_deny_and_visible_in_status(
+def test_container_control_plane_attestation_is_default_deny_and_visible_in_status(
     tmp_path: Path,
 ) -> None:
     service = E2HMCPService(MCPServerConfig(root=tmp_path))
 
     assert service.config.trusted_container_control_plane is False
-    assert service.status().container_control_plane_trusted is False
+    assert service.status().container_control_plane_attested is False
 
 
 def test_explicit_container_replay_requires_trust_before_replay_probe_or_launch(
