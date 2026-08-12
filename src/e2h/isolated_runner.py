@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from e2h.docker_capabilities import require_docker_resource_limits
 from e2h.docker_remote import (
     DockerRemoteError,
     _require_volume_free_image,
@@ -83,9 +84,10 @@ def _run_capsule_isolated_container_candidate(
     runtime = container_runtime or sandbox.engine
     try:
         # Reject cheap runtime/policy failures before walking or archiving the workspace.
-        # The importer revalidates these boundaries again immediately before Docker import.
+        # The importer revalidates archive/image boundaries again before Docker import.
         sandbox = _validated_remote_sandbox(sandbox)
         require_patched_docker_archive(runtime)
+        require_docker_resource_limits(runtime)
         _require_volume_free_image(runtime, sandbox.image)
         with stable_workspace_archive(
             workspace,
