@@ -262,10 +262,10 @@ def _run_capsule_isolated_container_candidate(
                 max_source_bytes=max_workspace_bytes,
                 max_entries=max_workspace_entries,
             )
-            # Parse and revalidate the sealed tar before any archive bytes reach Docker.
-            # The prepared-volume runner repeats this validation when deriving cwd semantics.
-            _workspace_tree(archive)
+            # Reject physical extension records before generic tar normalization, then
+            # revalidate the logical member tree from the same sealed bytes.
             _validate_archive_member_ancestry(archive)
+            _workspace_tree(archive)
             with prepared_workspace_volume(
                 sandbox,
                 archive,
