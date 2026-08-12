@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import secrets
 import tarfile
@@ -15,7 +14,6 @@ from time import monotonic
 from e2h.failures import (
     FailureCode,
     FailureImpact,
-    FailureRecord,
     launch_failure,
     output_capture_failure,
     sandbox_failure,
@@ -32,7 +30,9 @@ from e2h.runner import (
     RunnerError,
     RunResult,
     RunStatus,
+    _DOCKER_RUN_RESERVED_EXIT_CODES,
     _ProcessOutcome,
+    _docker_run_reserved_exit_failure,
     _execute_process,
     _skipped,
     _validated_capsule,
@@ -45,7 +45,6 @@ from e2h.sandbox import (
 from e2h.workspace_archive import WorkspaceArchive
 
 _MAX_CWD_SYMLINK_RESOLUTIONS = 40
-_DOCKER_RUN_RESERVED_EXIT_CODES = frozenset({125, 126, 127})
 
 
 @dataclass(frozen=True)
@@ -209,22 +208,6 @@ def _validate_remote_policy(capsule: TaskCapsule) -> None:
         raise RunnerError("prepared-volume replay requires sandbox.pull_policy='never'")
 
 
-def _docker_run_reserved_exit_failure(exit_code: int) -> FailureRecord | None:
-    if exit_code == 125:
-        return sandbox_failure()
-    if exit_code == 126:
-        return launch_failure(
-            OSError(errno.ENOEXEC, "container command could not be invoked"),
-            ExecutionBackend.CONTAINER.value,
-        )
-    if exit_code == 127:
-        return launch_failure(
-            FileNotFoundError(errno.ENOENT, "container command was not found"),
-            ExecutionBackend.CONTAINER.value,
-        )
-    return None
-
-
 def _execute_volume_command(
     capsule: TaskCapsule,
     check: CommandCheck,
@@ -309,7 +292,7 @@ def run_capsule_prepared_volume(
 
         timeout = check.timeout_seconds or capsule.limits.default_timeout_seconds
         command_started = monotonic()
-        failure: FailureRecord | None = None
+        failure = None
         try:
             outcome = _execute_volume_command(
                 capsule,
