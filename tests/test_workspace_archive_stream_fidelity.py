@@ -99,7 +99,7 @@ def test_workspace_archive_rejects_symlink_target_size_mismatch(
 
     monkeypatch.setattr(workspace_archive.os, "readlink", mismatched_readlink)
 
-    with pytest.raises(WorkspaceArchiveError, match="symlink target size changed"):
+    with pytest.raises(WorkspaceArchiveError, match="target size changed while reading"):
         with stable_workspace_archive(
             workspace.resolve(),
             max_bytes=1024,
