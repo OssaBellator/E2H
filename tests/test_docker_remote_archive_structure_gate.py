@@ -200,7 +200,7 @@ def test_importer_rejects_alternate_regular_file_header_type(
     _assert_rejected_before_docker(
         _sealed_alternate_regular_type_archive(),
         monkeypatch,
-        message="producer regular file type",
+        message="unsupported tar header type",
     )
 
 
