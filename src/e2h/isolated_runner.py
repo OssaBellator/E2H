@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from e2h.directory_binding import directory_binding_supported
 from e2h.docker_remote import (
     DockerRemoteError,
     _require_volume_free_image,
@@ -20,6 +18,7 @@ from e2h.workspace_archive import (
     _MAX_ARCHIVE_MEMBER_PATH_BYTES,
     WorkspaceArchive,
     WorkspaceArchiveError,
+    sealed_workspace_archive_supported,
     stable_workspace_archive,
 )
 
@@ -31,14 +30,8 @@ _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
 
 
 def isolated_workspace_snapshot_supported() -> bool:
-    """Return whether the host exposes every primitive required for safe snapshot capture."""
-    return (
-        directory_binding_supported()
-        and os.stat in os.supports_dir_fd
-        and os.stat in os.supports_follow_symlinks
-        and os.readlink in os.supports_dir_fd
-        and os.listdir in os.supports_fd
-    )
+    """Return whether the host can capture the sealed remote workspace archive."""
+    return sealed_workspace_archive_supported()
 
 
 def isolated_container_replay_supported() -> bool:
