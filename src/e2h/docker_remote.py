@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - imported only on non-POSIX platforms
 from e2h.models import ContainerSandbox
 from e2h.workspace_archive import WorkspaceArchive
 
-_MIN_DOCKER_ARCHIVE_VERSION = (29, 5, 2)
+_MIN_DOCKER_ARCHIVE_VERSION = (29, 7, 2)
 _VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)([-+].*)?$")
 _STABLE_HYPHEN_SUFFIXES = frozenset({"-ce", "-ee"})
 _RESOURCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
