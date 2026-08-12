@@ -17,7 +17,7 @@ from e2h.workspace_archive import sealed_workspace_archive_supported
 
 IMAGE_ENV = "E2H_DOCKER_TEST_PYTHON_IMAGE"
 RUNTIME_ENV = "E2H_DOCKER_TEST_RUNTIME"
-_MTIME_NS = 1_700_000_000 * 1_000_000_000
+_MTIME_NS = 1_700_000_000_123_456_789
 
 
 def _runtime() -> str:
@@ -133,12 +133,12 @@ def test_real_docker_import_preserves_workspace_metadata(tmp_path: Path) -> None
             "content": "trusted",
         },
     }
+    if any(expected[key]["mtime_ns"] != _MTIME_NS for key in ("root", "nested", "marker")):
+        pytest.skip("test filesystem cannot preserve the requested nanosecond mtime")
+    assert _MTIME_NS % 1_000_000_000 != 0
     assert expected["root"]["mode"] == 0o1755
     assert expected["nested"]["mode"] == 0o2755
     assert expected["marker"]["mode"] == 0o4755
-    assert expected["root"]["mtime_ns"] == _MTIME_NS
-    assert expected["nested"]["mtime_ns"] == _MTIME_NS
-    assert expected["marker"]["mtime_ns"] == _MTIME_NS
 
     before = _resources(runtime)
     capsule = TaskCapsule(
