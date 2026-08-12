@@ -141,3 +141,50 @@ def test_workspace_tree_rejects_member_beyond_capture_path_bound() -> None:
 
     with pytest.raises(RunnerError, match="exceeds capture path bound"):
         _workspace_tree(archive)
+
+
+def test_workspace_tree_rejects_relative_symlink_escape() -> None:
+    target = "../outside"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as handle:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+        link = tarfile.TarInfo("escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = target
+        handle.addfile(link)
+    archive = _archive_from_stream(
+        stream,
+        entries=1,
+        source_bytes=len(target.encode("utf-8")),
+    )
+
+    with pytest.raises(RunnerError, match="symlink escapes workspace root"):
+        _workspace_tree(archive)
+
+
+def test_workspace_tree_accepts_parent_relative_symlink_that_stays_contained() -> None:
+    target = "../peer"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as handle:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+        nested = tarfile.TarInfo("nested")
+        nested.type = tarfile.DIRTYPE
+        handle.addfile(nested)
+        link = tarfile.TarInfo("nested/link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = target
+        handle.addfile(link)
+    archive = _archive_from_stream(
+        stream,
+        directories=frozenset({".", "nested"}),
+        entries=2,
+        source_bytes=len(target.encode("utf-8")),
+    )
+
+    tree = _workspace_tree(archive)
+
+    assert tree.symlinks == (("nested/link", target),)
