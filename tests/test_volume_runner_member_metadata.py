@@ -37,7 +37,9 @@ def _archive(
     directories = {"."}
     if member_type == tarfile.DIRTYPE:
         directories.add("entry")
-    source_bytes = len(link_target.encode("utf-8")) if member_type == tarfile.SYMTYPE else len(payload)
+    source_bytes = (
+        len(link_target.encode("utf-8")) if member_type == tarfile.SYMTYPE else len(payload)
+    )
     if member_type == tarfile.DIRTYPE:
         source_bytes = 0
     return WorkspaceArchive(
