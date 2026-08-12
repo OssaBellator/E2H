@@ -151,7 +151,7 @@ def test_named_container_cleanup_does_not_use_host_cidfile(
         str(runtime),
         "e2h-replay-check-abc",
     ) is None
-    assert _records(log) == [["rm", "-f", "e2h-replay-check-abc"]]
+    assert _records(log) == [["rm", "-f", "-v", "e2h-replay-check-abc"]]
 
 
 def test_named_cleanup_fails_closed_after_ambiguous_removal_failure(
@@ -170,7 +170,7 @@ def test_named_cleanup_fails_closed_after_ambiguous_removal_failure(
     assert error is not None
     assert "cleanup cannot be proven" in error
     assert _records(log) == [
-        ["rm", "-f", "e2h-replay-check-abc"],
+        ["rm", "-f", "-v", "e2h-replay-check-abc"],
         [
             "ps",
             "-a",
