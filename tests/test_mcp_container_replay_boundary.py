@@ -40,6 +40,7 @@ def test_mcp_rejects_explicit_container_replay(
                 root=tmp_path,
                 allow_replay=True,
                 replay_backend=ExecutionBackend.CONTAINER,
+                trusted_container_control_plane=True,
             )
         )
 
