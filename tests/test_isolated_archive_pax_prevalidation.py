@@ -46,17 +46,20 @@ def _archive(
 
 
 @pytest.mark.parametrize(
-    "key",
+    ("key", "value"),
     [
-        "SCHILY.xattr.user.e2h",
-        "SCHILY.acl.access",
-        "LIBARCHIVE.xattr.user.e2h",
-        "GNU.sparse.map",
-        "VENDOR.unexpected",
+        ("SCHILY.xattr.user.e2h", "blocked"),
+        ("SCHILY.acl.access", "blocked"),
+        ("LIBARCHIVE.xattr.user.e2h", "blocked"),
+        ("GNU.sparse.map", "0,0"),
+        ("VENDOR.unexpected", "blocked"),
     ],
 )
-def test_archive_ancestry_rejects_unsupported_member_pax_metadata(key: str) -> None:
-    archive = _archive(member_pax={key: "blocked"})
+def test_archive_ancestry_rejects_unsupported_member_pax_metadata(
+    key: str,
+    value: str,
+) -> None:
+    archive = _archive(member_pax={key: value})
 
     with pytest.raises(RunnerError, match="unsupported PAX metadata"):
         _validate_archive_member_ancestry(archive)
