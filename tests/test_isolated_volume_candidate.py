@@ -22,6 +22,7 @@ from e2h.runner import CheckStatus, RunnerError, RunStatus, _ProcessOutcome
 from e2h.workspace_archive import sealed_workspace_archive_supported
 
 IMAGE = "python@sha256:" + "0" * 64
+CONTAINER_ID = "a" * 64
 
 pytestmark = pytest.mark.skipif(
     not sealed_workspace_archive_supported(),
@@ -98,8 +99,7 @@ elif args and args[0] == "start":
     print("remote-ok")
     raise SystemExit(exit_code)
 elif args and args[0] == "rm":
-    if args[-1].startswith("e2h-replay-check-"):
-        state_file.unlink(missing_ok=True)
+    state_file.unlink(missing_ok=True)
 elif args[:2] == ["volume", "rm"]:
     pass
 else:
@@ -199,11 +199,11 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert "--rm" not in create
     assert "--cidfile" not in create
     assert create[create.index("--workdir") + 1] == "/workspace/shared/nested"
-    check_name = create[create.index("--name") + 1]
-    assert commands[11][-1] == check_name
-    assert commands[12] == ["start", "--attach", check_name]
-    assert commands[13][-1] == check_name
-    assert commands[14] == ["rm", "-f", "-v", check_name]
+    assert create[create.index("--name") + 1].startswith("e2h-replay-check-")
+    assert commands[11][-1] == CONTAINER_ID
+    assert commands[12] == ["start", "--attach", CONTAINER_ID]
+    assert commands[13][-1] == CONTAINER_ID
+    assert commands[14] == ["rm", "-f", "-v", CONTAINER_ID]
     assert commands[15] == ["volume", "rm", "-f", volume_name]
     assert int(records[8]["stdin_bytes"]) > 0
 
@@ -276,14 +276,14 @@ def test_candidate_command_failure_still_removes_check_and_volume(
         if args[0] == "create"
         and args[args.index("--name") + 1].startswith("e2h-replay-check-")
     )
-    check_name = create[create.index("--name") + 1]
+    assert create[create.index("--name") + 1].startswith("e2h-replay-check-")
     volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
     volume_name = str(volume_create[-1])
-    assert ["rm", "-f", "-v", check_name] in commands
+    assert ["rm", "-f", "-v", CONTAINER_ID] in commands
     assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
 
-def test_candidate_timeout_removes_named_check_and_volume(
+def test_candidate_timeout_removes_confirmed_check_and_volume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -298,12 +298,13 @@ def test_candidate_timeout_removes_named_check_and_volume(
             return _ProcessOutcome(
                 exit_code=0,
                 timed_out=False,
-                stdout="a" * 64 + "\n",
+                stdout=CONTAINER_ID + "\n",
                 stderr="",
                 stdout_truncated=False,
                 stderr_truncated=False,
             )
         if argv[1] == "inspect":
+            assert argv[-1] == CONTAINER_ID
             inspect_count += 1
             assert inspect_count == 1
             return _ProcessOutcome(
@@ -322,7 +323,7 @@ def test_candidate_timeout_removes_named_check_and_volume(
                 stdout_truncated=False,
                 stderr_truncated=False,
             )
-        assert argv[1] == "start"
+        assert argv == [str(runtime), "start", "--attach", CONTAINER_ID]
         return _ProcessOutcome(
             exit_code=None,
             timed_out=True,
@@ -348,8 +349,7 @@ def test_candidate_timeout_removes_named_check_and_volume(
     volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
     volume_name = str(volume_create[-1])
     check_cleanup = commands[-2]
-    assert check_cleanup[:3] == ["rm", "-f", "-v"]
-    assert str(check_cleanup[-1]).startswith("e2h-replay-check-")
+    assert check_cleanup == ["rm", "-f", "-v", CONTAINER_ID]
     assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
 
