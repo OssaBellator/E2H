@@ -66,7 +66,7 @@ elif args and args[0] == "create":
                     "ExitCode": 0,
                     "Error": "",
                     "OOMKilled": False,
-                    "Command": args[-1],
+                    "Command": args[args.index("--entrypoint") + 1],
                 }},
                 sort_keys=True,
             ),
