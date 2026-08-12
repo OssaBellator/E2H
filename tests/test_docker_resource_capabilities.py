@@ -21,7 +21,7 @@ if args[:2] != ["info", "--format"]:
 if os.environ.get("DOCKER_TEST_FAIL"):
     print("info failed", file=sys.stderr)
     raise SystemExit(17)
-print(os.environ.get("DOCKER_TEST_CAPABILITIES", "true true"))
+print(os.environ.get("DOCKER_TEST_CAPABILITIES", "linux true true"))
 """,
         encoding="utf-8",
     )
@@ -29,7 +29,7 @@ print(os.environ.get("DOCKER_TEST_CAPABILITIES", "true true"))
     return runtime
 
 
-def test_resource_capability_probe_accepts_memory_and_swap_support(
+def test_resource_capability_probe_accepts_linux_memory_and_swap_support(
     tmp_path: Path,
 ) -> None:
     require_docker_resource_limits(str(_fake_docker(tmp_path)))
@@ -38,9 +38,9 @@ def test_resource_capability_probe_accepts_memory_and_swap_support(
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("false true", "memory_limit=false, swap_limit=true"),
-        ("true false", "memory_limit=true, swap_limit=false"),
-        ("false false", "memory_limit=false, swap_limit=false"),
+        ("linux false true", "memory_limit=false, swap_limit=true"),
+        ("linux true false", "memory_limit=true, swap_limit=false"),
+        ("linux false false", "memory_limit=false, swap_limit=false"),
     ],
 )
 def test_resource_capability_probe_rejects_missing_limits(
@@ -56,7 +56,23 @@ def test_resource_capability_probe_rejects_missing_limits(
         require_docker_resource_limits(str(runtime))
 
 
-@pytest.mark.parametrize("value", ["", "true", "yes true", "true false extra"])
+def test_resource_capability_probe_rejects_non_linux_daemon(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _fake_docker(tmp_path)
+    monkeypatch.setenv("DOCKER_TEST_CAPABILITIES", "windows true true")
+
+    with pytest.raises(DockerRemoteError, match="requires a Linux daemon") as raised:
+        require_docker_resource_limits(str(runtime))
+
+    assert "os_type=windows" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "linux true", "linux yes true", "linux true false extra"],
+)
 def test_resource_capability_probe_rejects_unexpected_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
