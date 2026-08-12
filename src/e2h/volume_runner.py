@@ -292,7 +292,7 @@ def _inspect_named_container_state(
     running = payload.get("Running")
     exit_code = payload.get("ExitCode")
     error = payload.get("Error")
-    oom_killed = payload.get("OOMKilled", False)
+    oom_killed = payload.get("OOMKilled")
     if (
         type(status) is not str
         or type(running) is not bool
