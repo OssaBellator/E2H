@@ -582,7 +582,7 @@ def run_capsule_prepared_volume(
             results.append(_missing_check_result(check, requested_cwd))
             infrastructure_error = True
             blocked_by_check_id = check.id
-            halt = not check.continue_on_failure
+            halt = True
             continue
 
         timeout = check.timeout_seconds or capsule.limits.default_timeout_seconds
@@ -672,7 +672,10 @@ def run_capsule_prepared_volume(
         )
         if status is not CheckStatus.PASSED:
             blocked_by_check_id = check.id
-            halt = not check.continue_on_failure
+            halt = (
+                failure is not None
+                and failure.impact is FailureImpact.INFRASTRUCTURE_ERROR
+            ) or not check.continue_on_failure
 
     failed = any(result.status is not CheckStatus.PASSED for result in results)
     run_status = (
