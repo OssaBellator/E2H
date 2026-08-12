@@ -408,8 +408,8 @@ def build_agent_card(
                 id="e2h_replay",
                 name="Replay E2H capsule",
                 description=(
-                    "Run a root-bounded E2H capsule using handle-bound local replay or a "
-                    "bounded read-only isolated container workspace, and return replay evidence."
+                    "Run a root-bounded E2H capsule using the operator-selected replay backend "
+                    "and return replay evidence."
                 ),
                 tags=["verification", "replay", "capsule"],
                 examples=['{"schema_version":"0.1","operation":"replay","capsule":"capsule.yaml"}'],
