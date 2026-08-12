@@ -38,7 +38,19 @@ if args and args[0] == "version":
 elif args and args[0] == "info":
     print("linux true true true true true")
 elif args[:2] == ["image", "inspect"]:
-    print("none")
+    image_format = args[args.index("--format") + 1]
+    if image_format == "{{{{json .Descriptor}}}}":
+        print(
+            json.dumps(
+                {{
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": "sha256:" + "0" * 64,
+                    "size": 123,
+                }}
+            )
+        )
+    else:
+        print("none")
 elif args[:2] == ["volume", "create"]:
     print(args[-1])
 elif args and args[0] == "create":
