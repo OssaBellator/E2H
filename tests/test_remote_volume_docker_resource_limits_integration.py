@@ -22,6 +22,10 @@ _SHM_BYTES = 64 * 1024 * 1024
 _NOFILE_LIMIT = 1024
 _SANDBOX_UID = 65532
 _SANDBOX_GID = 65532
+_CPUS = 0.5
+_CPU_PERIOD_US = 100_000
+_CPU_QUOTA_US = 50_000
+_PIDS_LIMIT = 32
 
 
 def _runtime() -> str:
@@ -107,17 +111,24 @@ if (root / 'memory.max').exists():
     payload['cgroup'] = 'v2'
     payload['memory_max'] = (root / 'memory.max').read_text().strip()
     payload['swap_max'] = (root / 'memory.swap.max').read_text().strip()
+    payload['cpu_max'] = (root / 'cpu.max').read_text().strip()
+    payload['pids_max'] = (root / 'pids.max').read_text().strip()
 else:
     memory_root = root / 'memory'
     payload['cgroup'] = 'v1'
     payload['memory_max'] = (memory_root / 'memory.limit_in_bytes').read_text().strip()
     memsw = memory_root / 'memory.memsw.limit_in_bytes'
     payload['memsw_max'] = memsw.read_text().strip() if memsw.exists() else None
+    cpu_root = next(path for path in root.iterdir() if (path / 'cpu.cfs_quota_us').exists())
+    pids_root = next(path for path in root.iterdir() if (path / 'pids.max').exists())
+    payload['cpu_quota_us'] = (cpu_root / 'cpu.cfs_quota_us').read_text().strip()
+    payload['cpu_period_us'] = (cpu_root / 'cpu.cfs_period_us').read_text().strip()
+    payload['pids_max'] = (pids_root / 'pids.max').read_text().strip()
 print(json.dumps(payload, sort_keys=True))
 """.strip()
 
 
-def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path) -> None:
+def test_real_docker_enforces_remote_resource_and_security_controls(tmp_path: Path) -> None:
     if not sealed_workspace_archive_supported():
         pytest.skip("real Docker resource validation requires Linux memfd sealing")
     runtime = _runtime()
@@ -131,7 +142,12 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
     capsule = TaskCapsule(
         id="real-docker-resource-limits",
         goal="Verify remote replay resource and security controls.",
-        sandbox=ContainerSandbox(image=image, memory_mb=_MEMORY_MB),
+        sandbox=ContainerSandbox(
+            image=image,
+            memory_mb=_MEMORY_MB,
+            cpus=_CPUS,
+            pids_limit=_PIDS_LIMIT,
+        ),
         success=SuccessSpec(
             commands=[
                 CommandCheck(
@@ -157,6 +173,7 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
     assert payload["nofile"] == [_NOFILE_LIMIT, _NOFILE_LIMIT]
     assert int(payload["memory_max"]) == _MEMORY_BYTES
     assert int(payload["shm_bytes"]) == _SHM_BYTES
+    assert int(payload["pids_max"]) == _PIDS_LIMIT
     assert payload["uid"] == _SANDBOX_UID
     assert payload["gid"] == _SANDBOX_GID
     assert payload["cap_eff"] == 0
@@ -171,10 +188,15 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
     assert "ro" in payload["workspace_mount_options"]
     if payload["cgroup"] == "v2":
         assert int(payload["swap_max"]) == 0
+        quota, period = payload["cpu_max"].split()
+        assert int(quota) == _CPU_QUOTA_US
+        assert int(period) == _CPU_PERIOD_US
     else:
         assert payload["cgroup"] == "v1"
         assert payload["memsw_max"] is not None
         assert int(payload["memsw_max"]) == _MEMORY_BYTES
+        assert int(payload["cpu_quota_us"]) == _CPU_QUOTA_US
+        assert int(payload["cpu_period_us"]) == _CPU_PERIOD_US
 
     after = _resources(runtime)
     assert not (after[0] - before[0])
