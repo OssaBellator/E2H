@@ -102,7 +102,7 @@ def test_cli_writes_all_outputs_and_redaction_artifacts(
     monkeypatch.setattr(runtime_cli, "ingest_gemini_generate_content_file", fake_ingest)
     monkeypatch.setattr(
         runtime_cli,
-        "write_traces_jsonl",
+        "_write_runtime_traces",
         lambda path, traces: path.write_text("trace\n", encoding="utf-8"),
     )
 
