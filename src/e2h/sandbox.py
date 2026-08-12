@@ -10,6 +10,7 @@ from e2h.models import AllowedActions, CommandCheck, ContainerSandbox, TaskCapsu
 
 _CONTAINER_ROOT = PurePosixPath("/workspace")
 _CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{12,64}$")
+_FULL_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _CONTAINER_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _VOLUME_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _CLEANUP_TIMEOUT_SECONDS = 10.0
@@ -368,3 +369,68 @@ def force_remove_named_container(runtime_binary: str, container_name: str) -> st
         f"container force-removal failed with exit {completed.returncode}: "
         f"{removal_error}; cleanup verification failed: {detail}"
     )
+
+
+def force_remove_confirmed_container(runtime_binary: str, container_id: str) -> str | None:
+    """Force-remove one exact full container identity returned by successful create."""
+    try:
+        runtime_binary = _validated_runtime_binary(runtime_binary)
+    except SandboxError as exc:
+        return str(exc)
+    if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_id) is None:
+        return "invalid confirmed Docker container ID"
+
+    removal_error: str
+    try:
+        completed = subprocess.run(
+            [runtime_binary, "rm", "-f", "-v", container_id],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        removal_error = f"unable to force-remove confirmed container: {exc}"
+    else:
+        if completed.returncode == 0:
+            return None
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        removal_error = (
+            f"confirmed container force-removal failed with exit {completed.returncode}: "
+            f"{stderr or 'unknown Docker error'}"
+        )
+
+    try:
+        probe = subprocess.run(
+            [
+                runtime_binary,
+                "ps",
+                "-a",
+                "--no-trunc",
+                "--format",
+                "{{.ID}}",
+                "--filter",
+                f"id={container_id}",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        return f"{removal_error}; unable to verify exact container cleanup: {exc}"
+    if probe.returncode != 0:
+        probe_error = probe.stderr.decode("utf-8", errors="replace").strip()
+        detail = probe_error or f"Docker ps failed with exit {probe.returncode}"
+        return f"{removal_error}; exact container cleanup verification failed: {detail}"
+
+    ids = {
+        line.strip()
+        for line in probe.stdout.decode("utf-8", errors="replace").splitlines()
+        if line.strip()
+    }
+    if container_id not in ids:
+        # This identity came from a completed `docker create`; unlike a generated
+        # name after an ambiguous create, the exact object cannot appear later.
+        return None
+    return f"{removal_error}; exact container still exists after failed removal"
