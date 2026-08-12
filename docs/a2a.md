@@ -92,7 +92,7 @@ A replay request is then:
 
 The remote A2A caller cannot select the execution backend, container-runtime binary, or Docker control-plane trust declaration. Those remain operator-side server settings. Replay output is digest-only by default; bounded stdout/stderr is included only when the operator also starts the server with `--expose-replay-output`.
 
-A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist.
+A2A reuses the MCP verification service and therefore has the same replay semantics. Effective local replay is handle-bound on supported Linux hosts and executes against the caller workspace, so command mutations persist. Before either local workspace binding or future Docker work, the shared replay boundary also rejects capsules with more than 50 checks, more than 2,000,000 aggregate retained stdout/stderr characters at the capsule output ceiling, or more than 1,800 seconds of aggregate declared check timeout.
 
 ### Container replay candidate remains disabled
 
@@ -118,6 +118,7 @@ The A2A layer reuses the same root-bounded verification service as the MCP integ
 - snapshot checks verify manifest structure, archive members, sizes, and content digests;
 - replay is absent unless operator-enabled;
 - supported local replay binds the workspace/check directory identities before process launch;
+- all replay backends enforce the shared host command/output/timeout budget before execution-specific work;
 - remote container replay remains disabled pending real-daemon evidence and an operator-attested Docker control-plane boundary;
 - the A2A response size is bounded to prevent large verification results from being copied automatically into another agent's context;
 - local absolute root paths are scrubbed from expected verification errors before they are returned to a remote agent.
