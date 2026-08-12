@@ -114,6 +114,7 @@ state_file.write_text(
             "Running": False,
             "ExitCode": exit_code,
             "Error": "",
+            "OOMKilled": False,
         }},
         sort_keys=True,
     ),
