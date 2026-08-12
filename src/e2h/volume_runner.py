@@ -57,6 +57,7 @@ _CONTROL_OUTPUT_CHARS = 8192
 _CONTROL_TIMEOUT_SECONDS = 10.0
 _MAX_TAR_TRAILER_BYTES = tarfile.RECORDSIZE + tarfile.BLOCKSIZE
 _CREATED_CONTAINER_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_MAX_LINUX_FILE_ID = (1 << 32) - 2
 # Docker encodes Linux signal termination as 128 + signal number. Use the Linux
 # kernel signal-number envelope instead of libc/Python's signal.valid_signals(),
 # which omits reserved-but-kernel-valid numbers such as 32 and 33.
@@ -118,7 +119,9 @@ def _validate_workspace_member_metadata(member: tarfile.TarInfo, name: str) -> N
     """Reject logical tar metadata the descriptor-bound producer cannot emit."""
     incompatible = (
         member.uid < 0
+        or member.uid > _MAX_LINUX_FILE_ID
         or member.gid < 0
+        or member.gid > _MAX_LINUX_FILE_ID
         or bool(member.uname)
         or bool(member.gname)
         or member.devmajor != 0
