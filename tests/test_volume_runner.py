@@ -460,7 +460,7 @@ def test_completed_container_cleanup_failure_is_infrastructure_error(
     assert result.status is RunStatus.ERROR
     assert result.checks[0].status is CheckStatus.ERROR
     assert result.checks[0].failure is not None
-    assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
+    assert result.checks[0].failure.code is FailureCode.SANDBOX_CLEANUP
     assert "cleanup failed" in (result.checks[0].error or "")
 
 
