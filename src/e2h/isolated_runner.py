@@ -118,6 +118,11 @@ def _validate_archive_member_ancestry(archive: WorkspaceArchive) -> None:
             encoding="utf-8",
             errors="surrogateescape",
         ) as handle:
+            if handle.pax_headers:
+                raise RunnerError(
+                    "sealed workspace archive contains unsupported global PAX metadata: "
+                    f"{sorted(handle.pax_headers)}"
+                )
             for position, member in enumerate(handle):
                 name = _member_path(member.name)
                 _require_utf8_archive_text(name, noun="member path")
