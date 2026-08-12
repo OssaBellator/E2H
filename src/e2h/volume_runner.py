@@ -31,9 +31,7 @@ from e2h.runner import (
     RunnerError,
     RunResult,
     RunStatus,
-    _DOCKER_RUN_RESERVED_EXIT_CODES,
     _ProcessOutcome,
-    _docker_run_reserved_exit_failure,
     _execute_process,
     _skipped,
     _validated_capsule,
@@ -346,12 +344,6 @@ def run_capsule_prepared_volume(
                 infrastructure_error = True
             elif outcome.exit_code is None:
                 raise RunnerError("completed command is missing an exit code")
-            elif outcome.exit_code in _DOCKER_RUN_RESERVED_EXIT_CODES:
-                status = CheckStatus.ERROR
-                failure = _docker_run_reserved_exit_failure(outcome.exit_code)
-                if failure is None:
-                    raise RunnerError("reserved Docker exit status lacks a failure mapping")
-                infrastructure_error = True
             elif outcome.exit_code in check.expected_exit_codes:
                 status = CheckStatus.PASSED
             else:
