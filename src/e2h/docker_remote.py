@@ -227,6 +227,39 @@ def _best_effort_docker(runtime: str, args: list[str]) -> str | None:
     return None
 
 
+def _remove_confirmed_preparation_container(runtime: str, container_id: str) -> str | None:
+    """Remove one confirmed preparation container and verify exact-ID absence on failure."""
+    if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_id) is None:
+        return "invalid confirmed Docker preparation container ID"
+    try:
+        _run_docker(runtime, ["rm", "-f", "-v", container_id])
+    except DockerRemoteError as exc:
+        removal_error = str(exc)
+    else:
+        return None
+
+    try:
+        observed = _run_docker(
+            runtime,
+            [
+                "ps",
+                "-a",
+                "--no-trunc",
+                "--format",
+                "{{.ID}}",
+                "--filter",
+                f"id={container_id}",
+            ],
+        )
+    except DockerRemoteError as exc:
+        return f"{removal_error}; unable to verify exact preparation container cleanup: {exc}"
+
+    ids = {line.strip() for line in observed.splitlines() if line.strip()}
+    if container_id not in ids:
+        return None
+    return f"{removal_error}; exact preparation container still exists after failed removal"
+
+
 def inspect_docker_versions(runtime_binary: str = "docker") -> tuple[DockerVersion, DockerVersion]:
     """Return Docker CLI and daemon versions from one bounded version probe."""
     runtime = _validated_runtime_binary(runtime_binary)
@@ -443,7 +476,9 @@ def prepared_workspace_volume(
             stdin=verified_archive.file,
         )
 
-        _run_docker(runtime, ["rm", "-f", "-v", container_identity])
+        cleanup_error = _remove_confirmed_preparation_container(runtime, container_identity)
+        if cleanup_error is not None:
+            raise DockerRemoteError(cleanup_error)
         container_may_exist = False
         yield volume_name
     except BaseException as exc:
@@ -452,7 +487,10 @@ def prepared_workspace_volume(
     finally:
         cleanup_errors: list[str] = []
         if container_may_exist:
-            error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_identity])
+            if _FULL_CONTAINER_ID_PATTERN.fullmatch(container_identity) is not None:
+                error = _remove_confirmed_preparation_container(runtime, container_identity)
+            else:
+                error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_identity])
             if error is not None:
                 cleanup_errors.append(error)
         if volume_may_exist:
