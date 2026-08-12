@@ -20,6 +20,8 @@ _MEMORY_MB = 64
 _MEMORY_BYTES = _MEMORY_MB * 1024 * 1024
 _SHM_BYTES = 64 * 1024 * 1024
 _NOFILE_LIMIT = 1024
+_SANDBOX_UID = 65532
+_SANDBOX_GID = 65532
 
 
 def _runtime() -> str:
@@ -76,10 +78,31 @@ from pathlib import Path
 
 root = Path('/sys/fs/cgroup')
 shm = os.statvfs('/dev/shm')
+status = {}
+for line in Path('/proc/self/status').read_text().splitlines():
+    if ':' in line:
+        key, value = line.split(':', 1)
+        status[key] = value.strip()
+root_probe = Path('/e2h-root-write-test')
+try:
+    root_probe.write_text('x')
+except OSError:
+    root_read_only = True
+else:
+    root_read_only = False
+    root_probe.unlink(missing_ok=True)
 payload = {
     'core': list(resource.getrlimit(resource.RLIMIT_CORE)),
     'nofile': list(resource.getrlimit(resource.RLIMIT_NOFILE)),
     'shm_bytes': shm.f_frsize * shm.f_blocks,
+    'uid': os.getuid(),
+    'gid': os.getgid(),
+    'cap_eff': int(status['CapEff'], 16),
+    'cap_prm': int(status['CapPrm'], 16),
+    'cap_bnd': int(status['CapBnd'], 16),
+    'no_new_privs': int(status['NoNewPrivs']),
+    'network_interfaces': sorted(path.name for path in Path('/sys/class/net').iterdir()),
+    'root_read_only': root_read_only,
 }
 if (root / 'memory.max').exists():
     payload['cgroup'] = 'v2'
@@ -135,6 +158,14 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
     assert payload["nofile"] == [_NOFILE_LIMIT, _NOFILE_LIMIT]
     assert int(payload["memory_max"]) == _MEMORY_BYTES
     assert int(payload["shm_bytes"]) == _SHM_BYTES
+    assert payload["uid"] == _SANDBOX_UID
+    assert payload["gid"] == _SANDBOX_GID
+    assert payload["cap_eff"] == 0
+    assert payload["cap_prm"] == 0
+    assert payload["cap_bnd"] == 0
+    assert payload["no_new_privs"] == 1
+    assert payload["network_interfaces"] == ["lo"]
+    assert payload["root_read_only"] is True
     if payload["cgroup"] == "v2":
         assert int(payload["swap_max"]) == 0
     else:
