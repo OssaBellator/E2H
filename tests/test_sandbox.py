@@ -213,7 +213,7 @@ def test_timeout_force_removes_container(tmp_path: Path, monkeypatch: pytest.Mon
     assert observed_argv[0][1] == "run"
     assert observed_argv[0][observed_argv[0].index("--entrypoint") + 1] == "timeout-check"
     records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    assert records == [["rm", "-f", "a" * 64]]
+    assert records == [["rm", "-f", "-v", "a" * 64]]
 
 
 def test_cleanup_rejects_invalid_container_id(tmp_path: Path) -> None:
