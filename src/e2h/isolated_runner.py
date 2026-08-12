@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 
 from e2h.directory_binding import directory_binding_supported
-from e2h.docker_remote import DockerRemoteError, prepared_workspace_volume
+from e2h.docker_remote import (
+    DockerRemoteError,
+    _validated_remote_sandbox,
+    prepared_workspace_volume,
+)
 from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult, _validated_capsule
 from e2h.volume_runner import run_capsule_prepared_volume
@@ -83,6 +87,10 @@ def _run_capsule_isolated_container_candidate(
         raise RunnerError("isolated container replay requires capsule.sandbox")
     runtime = container_runtime or sandbox.engine
     try:
+        # Reject attacker-controlled unsafe sandbox policy before walking or archiving
+        # the workspace. The importer revalidates this policy again at the Docker
+        # boundary, but doing the cheap check here avoids unnecessary capture work.
+        sandbox = _validated_remote_sandbox(sandbox)
         with stable_workspace_archive(
             workspace,
             max_bytes=max_workspace_bytes,
