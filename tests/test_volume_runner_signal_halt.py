@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import signal
 import tarfile
-from typing import Any
 
 import pytest
 
