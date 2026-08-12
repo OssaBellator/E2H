@@ -147,3 +147,56 @@ def test_archive_copy_failure_cleans_confirmed_preparation_container_id(
 
     assert [args[0] for args in calls] == ["volume", "create", "cp", "rm", "volume"]
     assert calls[3] == ["rm", "-f", "-v", container_id]
+
+
+def test_confirmed_preparation_cleanup_accepts_exact_id_absence_after_failed_remove(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container_id = "d" * 64
+    calls: list[list[str]] = []
+
+    def fake_run_docker(runtime: str, args: list[str], **kwargs: Any) -> str:
+        del runtime, kwargs
+        calls.append(list(args))
+        if args and args[0] == "rm":
+            raise DockerRemoteError("lost removal response")
+        if args and args[0] == "ps":
+            return ""
+        raise AssertionError(f"unexpected Docker call: {args}")
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+
+    assert docker_remote._remove_confirmed_preparation_container("docker-test", container_id) is None
+    assert calls == [
+        ["rm", "-f", "-v", container_id],
+        [
+            "ps",
+            "-a",
+            "--no-trunc",
+            "--format",
+            "{{.ID}}",
+            "--filter",
+            f"id={container_id}",
+        ],
+    ]
+
+
+def test_confirmed_preparation_cleanup_rejects_exact_id_still_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container_id = "e" * 64
+
+    def fake_run_docker(runtime: str, args: list[str], **kwargs: Any) -> str:
+        del runtime, kwargs
+        if args and args[0] == "rm":
+            raise DockerRemoteError("lost removal response")
+        if args and args[0] == "ps":
+            return container_id
+        raise AssertionError(f"unexpected Docker call: {args}")
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+
+    error = docker_remote._remove_confirmed_preparation_container("docker-test", container_id)
+
+    assert error is not None
+    assert "exact preparation container still exists" in error
