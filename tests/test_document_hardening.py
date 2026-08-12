@@ -101,7 +101,7 @@ def test_mapping_document_rejects_recursive_yaml_aliases(tmp_path: Path) -> None
     path = tmp_path / "document.yaml"
     path.write_text("loop: &loop\n  - *loop\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="recursive value"):
+    with pytest.raises(ValueError, match="YAML aliases are not supported"):
         load_mapping_document(path, noun="test document")
 
 
@@ -140,7 +140,7 @@ def test_capsule_identity_rejects_non_json_metadata() -> None:
         }
     )
 
-    with pytest.raises(GenomeError, match="cannot be canonically identified"):
+    with pytest.raises(GenomeError, match="invalid base capsule"):
         apply_genome(genome, base)
 
 
