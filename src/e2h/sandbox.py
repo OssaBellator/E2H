@@ -212,6 +212,8 @@ def build_container_volume_argv(
         sandbox.user,
         "--tmpfs",
         f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        "--ulimit",
+        "core=0:0",
         "--entrypoint",
         check.argv[0],
         "--read-only",
