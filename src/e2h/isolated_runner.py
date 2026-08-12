@@ -34,6 +34,10 @@ _REMOTE_SIGNAL_EXIT_CODES = frozenset(
     128 + int(value) for value in signal.valid_signals() if int(value) > 0
 )
 _REMOTE_ALLOWED_PAX_HEADERS = frozenset({"path", "linkpath", "mtime", "uid", "gid", "size"})
+# Python's PAX writer adds hdrcharset=BINARY when source names/targets contain
+# undecodable bytes. Permit that transport marker through the raw scan only so the
+# later UTF-8 validation can reject the reconstructed path or link target precisely.
+_REMOTE_PARSEABLE_PAX_HEADERS = frozenset({*_REMOTE_ALLOWED_PAX_HEADERS, "hdrcharset"})
 _REMOTE_ALLOWED_TAR_HEADER_TYPES = frozenset(
     {
         tarfile.REGTYPE,
@@ -170,7 +174,7 @@ def _validate_pax_payload(archive: WorkspaceArchive, payload_size: int) -> None:
         if not key or key in seen:
             raise RunnerError("sealed workspace archive contains a duplicate or empty PAX key")
         seen.add(key)
-        if key not in _REMOTE_ALLOWED_PAX_HEADERS:
+        if key not in _REMOTE_PARSEABLE_PAX_HEADERS:
             raise RunnerError(
                 f"sealed workspace archive contains unsupported PAX metadata key {key!r}"
             )
