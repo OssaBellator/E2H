@@ -111,3 +111,39 @@ def test_confirmed_preparation_container_id_is_used_for_copy_and_cleanup(
     assert calls[2] == ["cp", "--quiet", "-", f"{container_id}:/workspace"]
     assert calls[3] == ["rm", "-f", "-v", container_id]
     assert calls[4] == ["volume", "rm", "-f", volume_name]
+
+
+def test_archive_copy_failure_cleans_confirmed_preparation_container_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bypass_precreate_dependencies(monkeypatch)
+    calls: list[list[str]] = []
+    container_id = "c" * 64
+
+    def fake_run_docker(
+        runtime: str,
+        args: list[str],
+        **kwargs: Any,
+    ) -> str:
+        del runtime, kwargs
+        calls.append(list(args))
+        if args[:2] == ["volume", "create"]:
+            return args[-1]
+        if args and args[0] == "create":
+            return container_id
+        if args and args[0] == "cp":
+            raise DockerRemoteError("archive copy failed")
+        return ""
+
+    monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
+    archive = SimpleNamespace(file=object())
+
+    with pytest.raises(DockerRemoteError, match="archive copy failed"):
+        with prepared_workspace_volume(
+            ContainerSandbox(image=IMAGE),
+            archive,  # type: ignore[arg-type]
+        ):
+            raise AssertionError("failed archive copy must not yield")
+
+    assert [args[0] for args in calls] == ["volume", "create", "cp", "rm", "volume"]
+    assert calls[3] == ["rm", "-f", "-v", container_id]
