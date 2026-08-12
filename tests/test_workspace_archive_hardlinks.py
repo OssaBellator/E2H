@@ -38,3 +38,30 @@ def test_workspace_archive_rejects_multiply_linked_regular_file(tmp_path: Path) 
             max_entries=10,
         ):
             raise AssertionError("hard-linked workspace should fail closed")
+
+
+def test_workspace_archive_rejects_multiply_linked_symlink_inode(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / "source-link"
+    source.symlink_to("target")
+    alias = workspace / "alias-link"
+    try:
+        os.link(source, alias, follow_symlinks=False)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"hard-linked symlinks unavailable: {exc}")
+
+    source_info = source.lstat()
+    alias_info = alias.lstat()
+    assert source.is_symlink()
+    assert alias.is_symlink()
+    assert source_info.st_ino == alias_info.st_ino
+    assert source_info.st_nlink >= 2
+
+    with pytest.raises(WorkspaceArchiveError, match="symlink .*multiple hard links"):
+        with stable_workspace_archive(
+            workspace.resolve(),
+            max_bytes=1024,
+            max_entries=10,
+        ):
+            raise AssertionError("hard-linked symlink workspace should fail closed")
