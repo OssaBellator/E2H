@@ -84,44 +84,63 @@ log = Path(os.environ["DOCKER_TEST_LOG"])
 state_file = Path(str(log) + ".state")
 with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\\n")
+if args and args[0] == "create":
+    state_file.write_text(
+        json.dumps(
+            {{
+                "Status": "created",
+                "Running": False,
+                "ExitCode": 0,
+                "Error": "",
+                "OOMKilled": False,
+                "Command": args[-1],
+            }},
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    print("a" * 64)
+    raise SystemExit(0)
 if args and args[0] == "inspect":
     if os.environ.get("DOCKER_TEST_INSPECT_FAIL"):
         print("inspect failed", file=sys.stderr)
         raise SystemExit(8)
     state = json.loads(state_file.read_text(encoding="utf-8"))
-    if value := os.environ.get("DOCKER_TEST_INSPECT_STATUS"):
-        state["Status"] = value
-        state["Running"] = value == "running"
-    if value := os.environ.get("DOCKER_TEST_INSPECT_EXIT"):
-        state["ExitCode"] = int(value)
-    if value := os.environ.get("DOCKER_TEST_INSPECT_ERROR"):
-        state["Error"] = value
+    if state["Status"] != "created":
+        if value := os.environ.get("DOCKER_TEST_INSPECT_STATUS"):
+            state["Status"] = value
+            state["Running"] = value == "running"
+        if value := os.environ.get("DOCKER_TEST_INSPECT_EXIT"):
+            state["ExitCode"] = int(value)
+        if value := os.environ.get("DOCKER_TEST_INSPECT_ERROR"):
+            state["Error"] = value
+    state.pop("Command", None)
     print(json.dumps(state, sort_keys=True))
     raise SystemExit(0)
-if args and args[0] == "rm":
-    state_file.unlink(missing_ok=True)
-    raise SystemExit(0)
-command = args[-1] if args else ""
-exit_code = 0
-if command.startswith("docker-exit-"):
-    exit_code = int(command.removeprefix("docker-exit-"))
-elif command == "fail":
-    exit_code = 7
-state_file.write_text(
-    json.dumps(
+if args and args[0] == "start":
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    command = state.pop("Command")
+    exit_code = 0
+    if command.startswith("docker-exit-"):
+        exit_code = int(command.removeprefix("docker-exit-"))
+    elif command == "fail":
+        exit_code = 7
+    state.update(
         {{
             "Status": "exited",
             "Running": False,
             "ExitCode": exit_code,
             "Error": "",
             "OOMKilled": False,
-        }},
-        sort_keys=True,
-    ),
-    encoding="utf-8",
-)
-print(f"executed:{{command}}")
-raise SystemExit(exit_code)
+        }}
+    )
+    state_file.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    print(f"executed:{{command}}")
+    raise SystemExit(exit_code)
+if args and args[0] == "rm":
+    state_file.unlink(missing_ok=True)
+    raise SystemExit(0)
+raise SystemExit(13)
 """,
         encoding="utf-8",
     )
@@ -133,8 +152,8 @@ def _records(log: Path) -> list[list[str]]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
 
-def _run_records(log: Path) -> list[list[str]]:
-    return [record for record in _records(log) if record and record[0] == "run"]
+def _create_records(log: Path) -> list[list[str]]:
+    return [record for record in _records(log) if record and record[0] == "create"]
 
 
 def test_prepared_volume_runner_resolves_symlinked_workdir(
@@ -164,7 +183,13 @@ def test_prepared_volume_runner_resolves_symlinked_workdir(
     assert result.checks[0].cwd == "shared/nested"
     assert result.checks[0].stdout == "executed:ok\n"
     records = _records(log)
-    assert [record[0] for record in records] == ["run", "inspect", "rm"]
+    assert [record[0] for record in records] == [
+        "create",
+        "inspect",
+        "start",
+        "inspect",
+        "rm",
+    ]
     args = records[0]
     assert "--rm" not in args
     assert "--cidfile" not in args
@@ -176,7 +201,9 @@ def test_prepared_volume_runner_resolves_symlinked_workdir(
     )
     name = args[args.index("--name") + 1]
     assert records[1][-1] == name
-    assert records[2] == ["rm", "-f", name]
+    assert records[2] == ["start", "--attach", name]
+    assert records[3][-1] == name
+    assert records[4] == ["rm", "-f", "-v", name]
 
 
 def test_prepared_volume_runner_missing_cwd_fails_before_runtime(tmp_path: Path) -> None:
@@ -225,7 +252,7 @@ def test_prepared_volume_runner_preserves_continue_on_failure(
         CheckStatus.FAILED,
         CheckStatus.PASSED,
     ]
-    assert [record[-1] for record in _run_records(log)] == ["fail", "pass"]
+    assert [record[-1] for record in _create_records(log)] == ["fail", "pass"]
 
 
 @pytest.mark.parametrize("exit_code", [125, 126, 127])
@@ -328,6 +355,24 @@ def test_prepared_volume_runner_rejects_runtime_state_error(
     assert "start failed" in (result.checks[0].error or "")
 
 
+def _created_state() -> volume_runner._DockerContainerState:
+    return volume_runner._DockerContainerState(
+        status="created",
+        running=False,
+        exit_code=0,
+        error="",
+    )
+
+
+def _exited_state() -> volume_runner._DockerContainerState:
+    return volume_runner._DockerContainerState(
+        status="exited",
+        running=False,
+        exit_code=0,
+        error="",
+    )
+
+
 def test_prepared_volume_timeout_uses_generated_name_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -343,6 +388,16 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
         max_output_chars: int,
     ) -> _ProcessOutcome:
         del cwd, env, timeout, max_output_chars
+        if argv[1] == "create":
+            return _ProcessOutcome(
+                exit_code=0,
+                timed_out=False,
+                stdout="a" * 64 + "\n",
+                stderr="",
+                stdout_truncated=False,
+                stderr_truncated=False,
+            )
+        assert argv[1] == "start"
         observed["argv"] = argv
         return _ProcessOutcome(
             exit_code=None,
@@ -359,6 +414,7 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
         return None
 
     monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
+    monkeypatch.setattr(volume_runner, "_inspect_named_container_state", lambda *args: _created_state())
     monkeypatch.setattr(volume_runner, "force_remove_named_container", fake_cleanup)
 
     result = run_capsule_prepared_volume(
@@ -372,9 +428,8 @@ def test_prepared_volume_timeout_uses_generated_name_cleanup(
     assert result.checks[0].status is CheckStatus.TIMED_OUT
     argv = observed["argv"]
     assert isinstance(argv, list)
-    assert "--rm" not in argv
-    assert "--cidfile" not in argv
-    name = argv[argv.index("--name") + 1]
+    assert argv[1:3] == ["start", "--attach"]
+    name = argv[-1]
     assert observed["cleanup_name"] == name
     assert str(name).startswith("e2h-replay-check-")
 
@@ -385,18 +440,27 @@ def test_prepared_volume_timeout_cleanup_failure_is_infrastructure_error(
     archive = _archive(directories=["."])
     capsule = _capsule([CommandCheck(id="timeout", argv=["slow"])])
 
-    monkeypatch.setattr(
-        volume_runner,
-        "_execute_process",
-        lambda *args, **kwargs: _ProcessOutcome(
+    def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
+        if argv[1] == "create":
+            return _ProcessOutcome(
+                exit_code=0,
+                timed_out=False,
+                stdout="a" * 64 + "\n",
+                stderr="",
+                stdout_truncated=False,
+                stderr_truncated=False,
+            )
+        return _ProcessOutcome(
             exit_code=None,
             timed_out=True,
             stdout="",
             stderr="",
             stdout_truncated=False,
             stderr_truncated=False,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
+    monkeypatch.setattr(volume_runner, "_inspect_named_container_state", lambda *args: _created_state())
     monkeypatch.setattr(
         volume_runner,
         "force_remove_named_container",
@@ -422,28 +486,23 @@ def test_completed_container_cleanup_failure_is_infrastructure_error(
 ) -> None:
     archive = _archive(directories=["."])
     capsule = _capsule([CommandCheck(id="check", argv=["ok"])])
+    states = iter([_created_state(), _exited_state()])
 
-    monkeypatch.setattr(
-        volume_runner,
-        "_execute_process",
-        lambda *args, **kwargs: _ProcessOutcome(
+    def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
+        return _ProcessOutcome(
             exit_code=0,
             timed_out=False,
-            stdout="ok\n",
+            stdout="" if argv[1] == "create" else "ok\n",
             stderr="",
             stdout_truncated=False,
             stderr_truncated=False,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
     monkeypatch.setattr(
         volume_runner,
         "_inspect_named_container_state",
-        lambda *args, **kwargs: volume_runner._DockerContainerState(
-            status="exited",
-            running=False,
-            exit_code=0,
-            error="",
-        ),
+        lambda *args, **kwargs: next(states),
     )
     monkeypatch.setattr(
         volume_runner,
