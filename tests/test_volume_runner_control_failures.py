@@ -15,6 +15,7 @@ from e2h.volume_runner import run_capsule_prepared_volume
 from e2h.workspace_archive import WorkspaceArchive
 
 IMAGE = "python@sha256:" + "0" * 64
+CONTAINER_ID = "a" * 64
 
 
 def _archive() -> WorkspaceArchive:
@@ -48,7 +49,7 @@ def _outcome(
     exit_code: int = 0,
     timed_out: bool = False,
     error: str | None = None,
-    stdout: str = "task output\n",
+    stdout: str = CONTAINER_ID + "\n",
 ) -> _ProcessOutcome:
     return _ProcessOutcome(
         exit_code=exit_code,
@@ -106,15 +107,49 @@ def test_create_timeout_never_starts_check(monkeypatch: pytest.MonkeyPatch) -> N
     assert "creation timed out" in (result.checks[0].error or "")
 
 
+def test_invalid_create_id_never_starts_and_uses_name_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+    cleanup_names: list[str] = []
+
+    def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
+        del args, kwargs
+        commands.append(argv)
+        assert argv[1] == "create"
+        return _outcome(stdout="not-a-container-id\n")
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
+    monkeypatch.setattr(
+        volume_runner,
+        "force_remove_named_container",
+        lambda runtime, name: cleanup_names.append(name) or None,
+    )
+
+    result = run_capsule_prepared_volume(
+        _capsule(),
+        _archive(),
+        "e2h-replay-workspace-abc",
+        container_runtime="docker-test",
+    )
+
+    assert [argv[1] for argv in commands] == ["create"]
+    assert len(cleanup_names) == 1
+    assert cleanup_names[0].startswith("e2h-replay-check-")
+    assert result.status is RunStatus.ERROR
+    assert "invalid full container ID" in (result.checks[0].error or "")
+
+
 def test_noncreated_prestart_state_never_starts_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands: list[list[str]] = []
+    cleanup_ids: list[str] = []
 
     def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
         commands.append(argv)
         assert argv[1] == "create"
-        return _outcome(stdout="a" * 64 + "\n")
+        return _outcome()
 
     monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
     monkeypatch.setattr(
@@ -127,7 +162,11 @@ def test_noncreated_prestart_state_never_starts_check(
             error="",
         ),
     )
-    monkeypatch.setattr(volume_runner, "force_remove_named_container", lambda *args: None)
+    monkeypatch.setattr(
+        volume_runner,
+        "force_remove_confirmed_container",
+        lambda runtime, container_id: cleanup_ids.append(container_id) or None,
+    )
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -137,6 +176,7 @@ def test_noncreated_prestart_state_never_starts_check(
     )
 
     assert [argv[1] for argv in commands] == ["create"]
+    assert cleanup_ids == [CONTAINER_ID]
     assert result.status is RunStatus.ERROR
     assert result.checks[0].failure is not None
     assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
@@ -152,7 +192,7 @@ def test_inspect_failure_with_successful_cleanup_is_sandbox_runtime(
         "_inspect_named_container_state",
         lambda *args, **kwargs: (_ for _ in ()).throw(SandboxError("inspect failed")),
     )
-    monkeypatch.setattr(volume_runner, "force_remove_named_container", lambda *args: None)
+    monkeypatch.setattr(volume_runner, "force_remove_confirmed_container", lambda *args: None)
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -179,7 +219,7 @@ def test_inspect_and_cleanup_failure_prioritizes_sandbox_cleanup(
     )
     monkeypatch.setattr(
         volume_runner,
-        "force_remove_named_container",
+        "force_remove_confirmed_container",
         lambda *args: "cleanup failed",
     )
 
@@ -198,24 +238,31 @@ def test_inspect_and_cleanup_failure_prioritizes_sandbox_cleanup(
     assert "cleanup failed" in (result.checks[0].error or "")
 
 
-def test_output_capture_failure_survives_healthy_inspect_and_cleanup(
+def test_output_capture_failure_uses_confirmed_id_for_control_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     states = iter([_created_state(), _exited_state()])
+    inspected: list[str] = []
+    cleaned: list[str] = []
 
     def fake_execute(argv: list[str], *args: Any, **kwargs: Any) -> _ProcessOutcome:
         if argv[1] == "create":
-            return _outcome(stdout="a" * 64 + "\n")
-        assert argv[1] == "start"
-        return _outcome(error="capture failed")
+            return _outcome()
+        assert argv == ["docker-test", "start", "--attach", CONTAINER_ID]
+        return _outcome(error="capture failed", stdout="task output\n")
+
+    def inspect(runtime: str, identity: str) -> volume_runner._DockerContainerState:
+        assert runtime == "docker-test"
+        inspected.append(identity)
+        return next(states)
 
     monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
+    monkeypatch.setattr(volume_runner, "_inspect_named_container_state", inspect)
     monkeypatch.setattr(
         volume_runner,
-        "_inspect_named_container_state",
-        lambda *args, **kwargs: next(states),
+        "force_remove_confirmed_container",
+        lambda runtime, container_id: cleaned.append(container_id) or None,
     )
-    monkeypatch.setattr(volume_runner, "force_remove_named_container", lambda *args: None)
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -224,6 +271,8 @@ def test_output_capture_failure_survives_healthy_inspect_and_cleanup(
         container_runtime="docker-test",
     )
 
+    assert inspected == [CONTAINER_ID, CONTAINER_ID]
+    assert cleaned == [CONTAINER_ID]
     assert result.status is RunStatus.ERROR
     assert result.checks[0].status is CheckStatus.ERROR
     assert result.checks[0].failure is not None
