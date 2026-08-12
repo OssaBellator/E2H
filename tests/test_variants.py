@@ -194,7 +194,7 @@ def test_verify_rejects_wrong_capsule_and_noncanonical_metadata() -> None:
 
     bad = capsule()
     bad.metadata = {"bad": float("nan")}
-    with pytest.raises(VariantError, match="canonically identified"):
+    with pytest.raises(VariantError, match="invalid task capsule"):
         verify_variant_document(loaded, bad)
 
 
