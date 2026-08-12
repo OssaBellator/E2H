@@ -37,6 +37,10 @@ def _without_identity_mount_and_lifecycle(argv: list[str]) -> list[str]:
     return result
 
 
+def _ulimit_pairs(argv: list[str]) -> list[str]:
+    return [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "--ulimit"]
+
+
 def test_named_volume_runner_preserves_direct_policy_plus_remote_core_limit(
     tmp_path: Path,
 ) -> None:
@@ -61,8 +65,9 @@ def test_named_volume_runner_preserves_direct_policy_plus_remote_core_limit(
 
     direct_policy = _without_identity_mount_and_lifecycle(direct)
     remote_policy = _without_identity_mount_and_lifecycle(remote)
-    assert "--ulimit" not in direct_policy
-    ulimit_index = remote_policy.index("--ulimit")
-    assert remote_policy[ulimit_index : ulimit_index + 2] == ["--ulimit", "core=0:0"]
-    del remote_policy[ulimit_index : ulimit_index + 2]
+    assert _ulimit_pairs(direct_policy) == ["nofile=1024:1024"]
+    assert _ulimit_pairs(remote_policy) == ["nofile=1024:1024", "core=0:0"]
+    core_index = remote_policy.index("core=0:0")
+    assert remote_policy[core_index - 1] == "--ulimit"
+    del remote_policy[core_index - 1 : core_index + 1]
     assert remote_policy == direct_policy
