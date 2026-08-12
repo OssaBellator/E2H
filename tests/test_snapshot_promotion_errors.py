@@ -141,7 +141,10 @@ def test_snapshot_post_rename_stat_error_cleans_promoted_identity(
     def failing_stat(parent_descriptor: int, name: str) -> os.stat_result:
         nonlocal calls
         calls += 1
-        if calls == 2:
+        # Call 1 checks the temporary; call 2 checks for an existing output so a
+        # rollback hard link can be prepared. Fail the actual post-rename identity
+        # check rather than that new pre-publication probe.
+        if calls == 3:
             raise OSError("injected final stat failure")
         return original_stat_entry(parent_descriptor, name)
 
