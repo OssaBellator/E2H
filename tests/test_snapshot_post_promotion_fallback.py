@@ -45,7 +45,7 @@ def test_snapshot_output_fallback_rejects_final_replacement(
 
     assert swapped is True
     assert output.read_bytes() == b"attacker"
-    assert moved.is_file()
+    assert not moved.exists()
 
 
 def test_snapshot_output_fallback_rejects_parent_replacement(
@@ -81,7 +81,7 @@ def test_snapshot_output_fallback_rejects_parent_replacement(
     assert swapped is True
     assert (parent / "marker.txt").read_text(encoding="utf-8") == "replacement\n"
     assert not (parent / output.name).exists()
-    assert (moved / output.name).is_file()
+    assert not (moved / output.name).exists()
 
 
 def test_restore_fallback_rejects_final_replacement(
@@ -115,7 +115,7 @@ def test_restore_fallback_rejects_final_replacement(
 
     assert swapped is True
     assert (destination / "marker.txt").read_text(encoding="utf-8") == "attacker\n"
-    assert (moved / "value.txt").read_text(encoding="utf-8") == "inside\n"
+    assert not moved.exists()
 
 
 def test_restore_fallback_rejects_parent_replacement(
@@ -153,4 +153,4 @@ def test_restore_fallback_rejects_parent_replacement(
     assert swapped is True
     assert (parent / "marker.txt").read_text(encoding="utf-8") == "replacement\n"
     assert not (parent / destination.name).exists()
-    assert (moved / destination.name / "value.txt").read_text(encoding="utf-8") == "inside\n"
+    assert not (moved / destination.name).exists()
