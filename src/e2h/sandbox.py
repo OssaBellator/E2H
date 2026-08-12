@@ -98,6 +98,8 @@ def build_container_argv(
         "--log-driver",
         "none",
         "--no-healthcheck",
+        "--entrypoint",
+        "",
         "--cidfile",
         cidfile_text,
         "--pull",
