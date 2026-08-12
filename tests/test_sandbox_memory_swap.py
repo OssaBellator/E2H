@@ -25,7 +25,6 @@ def _argv(tmp_path: Path, memory_mb: int) -> list[str]:
     )
 
 
-@staticmethod
 def _value(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
 
