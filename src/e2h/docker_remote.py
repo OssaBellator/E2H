@@ -267,7 +267,6 @@ def prepared_workspace_volume(
 
     volume_name = _resource_name("workspace")
     container_name = _resource_name("prepare")
-    container_cleanup_target = container_name
     volume_may_exist = False
     container_may_exist = False
     primary_error: BaseException | None = None
@@ -321,7 +320,6 @@ def prepared_workspace_volume(
         )
         if _FULL_CONTAINER_ID_PATTERN.fullmatch(created_container) is None:
             raise DockerRemoteError("Docker returned an invalid preparation container ID")
-        container_cleanup_target = created_container
 
         _run_docker(
             runtime,
@@ -329,12 +327,12 @@ def prepared_workspace_volume(
                 "cp",
                 "--quiet",
                 "-",
-                f"{created_container}:{_WORKSPACE_ROOT}",
+                f"{container_name}:{_WORKSPACE_ROOT}",
             ],
             stdin=verified_archive.file,
         )
 
-        _run_docker(runtime, ["rm", "-f", "-v", created_container])
+        _run_docker(runtime, ["rm", "-f", "-v", container_name])
         container_may_exist = False
         yield volume_name
     except BaseException as exc:
@@ -343,10 +341,7 @@ def prepared_workspace_volume(
     finally:
         cleanup_errors: list[str] = []
         if container_may_exist:
-            error = _best_effort_docker(
-                runtime,
-                ["rm", "-f", "-v", container_cleanup_target],
-            )
+            error = _best_effort_docker(runtime, ["rm", "-f", "-v", container_name])
             if error is not None:
                 cleanup_errors.append(error)
         if volume_may_exist:
