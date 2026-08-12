@@ -258,6 +258,7 @@ def test_snapshot_source_nested_include_guards_and_cleanup(tmp_path: Path) -> No
     entries, _, _ = source._collect_descriptor(
         root,
         root_info,
+        requested_root=root,
         includes=("a/b/file.txt",),
         patterns=(),
         ignored=set(),
@@ -407,6 +408,7 @@ def test_snapshot_source_explicit_include_errors_and_duplicates(tmp_path: Path) 
         source._collect_descriptor(
             root,
             root_info,
+            requested_root=root,
             includes=("missing",),
             patterns=(),
             ignored=set(),
@@ -416,6 +418,7 @@ def test_snapshot_source_explicit_include_errors_and_duplicates(tmp_path: Path) 
     entries, _, _ = source._collect_descriptor(
         root,
         root.stat(follow_symlinks=False),
+        requested_root=root,
         includes=(file_entry.name,),
         patterns=(file_entry.name,),
         ignored=set(),
@@ -427,6 +430,7 @@ def test_snapshot_source_explicit_include_errors_and_duplicates(tmp_path: Path) 
         source._collect_descriptor(
             root,
             root.stat(follow_symlinks=False),
+            requested_root=root,
             includes=(link.name,),
             patterns=(),
             ignored=set(),
@@ -436,6 +440,7 @@ def test_snapshot_source_explicit_include_errors_and_duplicates(tmp_path: Path) 
     entries, _, _ = source._collect_descriptor(
         root,
         root.stat(follow_symlinks=False),
+        requested_root=root,
         includes=(directory.name, directory.name),
         patterns=(),
         ignored=set(),
@@ -453,6 +458,7 @@ def test_snapshot_source_explicit_include_errors_and_duplicates(tmp_path: Path) 
             source._collect_descriptor(
                 root,
                 root.stat(follow_symlinks=False),
+                requested_root=root,
                 includes=(fifo.name,),
                 patterns=(),
                 ignored=set(),
