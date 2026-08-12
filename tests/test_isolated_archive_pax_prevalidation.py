@@ -5,6 +5,7 @@ import tarfile
 
 import pytest
 
+import e2h.isolated_runner as isolated_runner
 from e2h.isolated_runner import _validate_archive_member_ancestry
 from e2h.runner import RunnerError
 from e2h.workspace_archive import WorkspaceArchive
@@ -60,6 +61,21 @@ def test_archive_ancestry_rejects_unsupported_member_pax_metadata(
     value: str,
 ) -> None:
     archive = _archive(member_pax={key: value})
+
+    with pytest.raises(RunnerError, match="unsupported PAX metadata"):
+        _validate_archive_member_ancestry(archive)
+
+
+def test_unsupported_pax_key_is_rejected_before_logical_tar_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _archive(member_pax={"GNU.sparse.map": "0,0"})
+
+    def forbidden_open(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("unsupported PAX metadata must fail before tarfile.open")
+
+    monkeypatch.setattr(isolated_runner.tarfile, "open", forbidden_open)
 
     with pytest.raises(RunnerError, match="unsupported PAX metadata"):
         _validate_archive_member_ancestry(archive)
