@@ -16,6 +16,7 @@ from e2h.volume_runner import run_capsule_prepared_volume
 from e2h.workspace_archive import WorkspaceArchive
 
 IMAGE = "python@sha256:" + "0" * 64
+CONTAINER_ID = "a" * 64
 
 
 def _archive() -> WorkspaceArchive:
@@ -82,7 +83,7 @@ def _install_state_runtime(
     monkeypatch: pytest.MonkeyPatch,
     state: dict[str, Any],
 ) -> list[str]:
-    cleanup_names: list[str] = []
+    cleanup_ids: list[str] = []
     inspect_count = 0
 
     def fake_execute(
@@ -95,10 +96,12 @@ def _install_state_runtime(
         nonlocal inspect_count
         del cwd, env, timeout, max_output_chars
         if argv[1] == "create":
-            return _outcome(exit_code=0, stdout="a" * 64 + "\n")
+            return _outcome(exit_code=0, stdout=CONTAINER_ID + "\n")
         if argv[1] == "start":
+            assert argv[-1] == CONTAINER_ID
             return _outcome(exit_code=137, stdout="task output\n")
         if argv[1] == "inspect":
+            assert argv[-1] == CONTAINER_ID
             inspect_count += 1
             payload = _created_state() if inspect_count == 1 else state
             return _outcome(exit_code=0, stdout=json.dumps(payload))
@@ -107,10 +110,10 @@ def _install_state_runtime(
     monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
     monkeypatch.setattr(
         volume_runner,
-        "force_remove_named_container",
-        lambda runtime, name: cleanup_names.append(name) or None,
+        "force_remove_confirmed_container",
+        lambda runtime, container_id: cleanup_ids.append(container_id) or None,
     )
-    return cleanup_names
+    return cleanup_ids
 
 
 def _state(*, oom_killed: object) -> dict[str, Any]:
@@ -126,7 +129,7 @@ def _state(*, oom_killed: object) -> dict[str, Any]:
 def test_oom_killed_expected_137_is_infrastructure_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cleanup_names = _install_state_runtime(monkeypatch, _state(oom_killed=True))
+    cleanup_ids = _install_state_runtime(monkeypatch, _state(oom_killed=True))
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -141,14 +144,13 @@ def test_oom_killed_expected_137_is_infrastructure_error(
     assert result.checks[0].failure is not None
     assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
     assert "OOM-killed" in (result.checks[0].error or "")
-    assert len(cleanup_names) == 1
-    assert cleanup_names[0].startswith("e2h-replay-check-")
+    assert cleanup_ids == [CONTAINER_ID]
 
 
 def test_non_oom_expected_137_remains_normal_task_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cleanup_names = _install_state_runtime(monkeypatch, _state(oom_killed=False))
+    cleanup_ids = _install_state_runtime(monkeypatch, _state(oom_killed=False))
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -161,13 +163,13 @@ def test_non_oom_expected_137_remains_normal_task_exit(
     assert result.checks[0].status is CheckStatus.PASSED
     assert result.checks[0].exit_code == 137
     assert result.checks[0].failure is None
-    assert len(cleanup_names) == 1
+    assert cleanup_ids == [CONTAINER_ID]
 
 
 def test_invalid_oom_killed_state_fails_closed_and_still_cleans_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cleanup_names = _install_state_runtime(monkeypatch, _state(oom_killed="yes"))
+    cleanup_ids = _install_state_runtime(monkeypatch, _state(oom_killed="yes"))
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -181,7 +183,7 @@ def test_invalid_oom_killed_state_fails_closed_and_still_cleans_up(
     assert result.checks[0].failure is not None
     assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
     assert "invalid fields" in (result.checks[0].error or "")
-    assert len(cleanup_names) == 1
+    assert cleanup_ids == [CONTAINER_ID]
 
 
 def test_missing_oom_killed_state_fails_closed_and_still_cleans_up(
@@ -189,7 +191,7 @@ def test_missing_oom_killed_state_fails_closed_and_still_cleans_up(
 ) -> None:
     state = _state(oom_killed=False)
     del state["OOMKilled"]
-    cleanup_names = _install_state_runtime(monkeypatch, state)
+    cleanup_ids = _install_state_runtime(monkeypatch, state)
 
     result = run_capsule_prepared_volume(
         _capsule(),
@@ -203,4 +205,4 @@ def test_missing_oom_killed_state_fails_closed_and_still_cleans_up(
     assert result.checks[0].failure is not None
     assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
     assert "invalid fields" in (result.checks[0].error or "")
-    assert len(cleanup_names) == 1
+    assert cleanup_ids == [CONTAINER_ID]
