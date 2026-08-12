@@ -83,14 +83,11 @@ for line in Path('/proc/self/status').read_text().splitlines():
     if ':' in line:
         key, value = line.split(':', 1)
         status[key] = value.strip()
-root_probe = Path('/e2h-root-write-test')
-try:
-    root_probe.write_text('x')
-except OSError:
-    root_read_only = True
-else:
-    root_read_only = False
-    root_probe.unlink(missing_ok=True)
+mount_options = {}
+for line in Path('/proc/self/mountinfo').read_text().splitlines():
+    fields = line.split()
+    if len(fields) > 5 and fields[4] in {'/', '/workspace'}:
+        mount_options[fields[4]] = fields[5].split(',')
 payload = {
     'core': list(resource.getrlimit(resource.RLIMIT_CORE)),
     'nofile': list(resource.getrlimit(resource.RLIMIT_NOFILE)),
@@ -101,8 +98,10 @@ payload = {
     'cap_prm': int(status['CapPrm'], 16),
     'cap_bnd': int(status['CapBnd'], 16),
     'no_new_privs': int(status['NoNewPrivs']),
+    'seccomp': int(status['Seccomp']),
     'network_interfaces': sorted(path.name for path in Path('/sys/class/net').iterdir()),
-    'root_read_only': root_read_only,
+    'root_mount_options': mount_options.get('/'),
+    'workspace_mount_options': mount_options.get('/workspace'),
 }
 if (root / 'memory.max').exists():
     payload['cgroup'] = 'v2'
@@ -131,7 +130,7 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
     before = _resources(runtime)
     capsule = TaskCapsule(
         id="real-docker-resource-limits",
-        goal="Verify remote replay memory, swap, shared-memory, and process limits.",
+        goal="Verify remote replay resource and security controls.",
         sandbox=ContainerSandbox(image=image, memory_mb=_MEMORY_MB),
         success=SuccessSpec(
             commands=[
@@ -164,8 +163,12 @@ def test_real_docker_enforces_remote_memory_swap_shm_and_ulimits(tmp_path: Path)
     assert payload["cap_prm"] == 0
     assert payload["cap_bnd"] == 0
     assert payload["no_new_privs"] == 1
+    assert payload["seccomp"] == 2
     assert payload["network_interfaces"] == ["lo"]
-    assert payload["root_read_only"] is True
+    assert payload["root_mount_options"] is not None
+    assert "ro" in payload["root_mount_options"]
+    assert payload["workspace_mount_options"] is not None
+    assert "ro" in payload["workspace_mount_options"]
     if payload["cgroup"] == "v2":
         assert int(payload["swap_max"]) == 0
     else:
