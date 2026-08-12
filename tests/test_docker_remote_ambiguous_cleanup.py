@@ -22,6 +22,11 @@ def _bypass_precreate_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         "require_patched_docker_archive",
         lambda runtime_binary: None,
     )
+    monkeypatch.setattr(
+        docker_remote,
+        "_require_volume_free_image",
+        lambda runtime, image: None,
+    )
 
 
 def test_volume_create_failure_still_attempts_named_volume_cleanup(
@@ -88,7 +93,7 @@ def test_container_create_failure_still_attempts_named_container_cleanup(
     create_args = calls[1]
     container_name = create_args[create_args.index("--name") + 1]
     volume_name = calls[0][-1]
-    assert calls[2] == ["rm", "-f", container_name]
+    assert calls[2] == ["rm", "-f", "-v", container_name]
     assert calls[3] == ["volume", "rm", "-f", volume_name]
 
 
@@ -177,3 +182,5 @@ def test_prepared_workspace_volume_pins_local_driver_and_read_only_root(
     assert volume_create[volume_create.index("--driver") + 1] == "local"
     create = calls[1]
     assert "--read-only" in create
+    container_name = create[create.index("--name") + 1]
+    assert calls[3] == ["rm", "-f", "-v", container_name]
