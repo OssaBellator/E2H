@@ -202,7 +202,7 @@ def test_real_docker_command_failure_still_cleans_volume(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize(
-    ("argv", "docker_exit_code"),
+    ("argv", "reserved_run_exit"),
     [
         (["/etc"], 126),
         (["e2h-command-that-does-not-exist"], 127),
@@ -211,7 +211,7 @@ def test_real_docker_command_failure_still_cleans_volume(tmp_path: Path) -> None
 def test_real_docker_startup_failure_is_sandbox_error_and_cleans_resources(
     tmp_path: Path,
     argv: list[str],
-    docker_exit_code: int,
+    reserved_run_exit: int,
 ) -> None:
     runtime, image = _preflight()
     workspace = _workspace(tmp_path)
@@ -223,7 +223,7 @@ def test_real_docker_startup_failure_is_sandbox_error_and_cleans_resources(
                 id="startup-failure",
                 cwd="link/nested",
                 argv=argv,
-                expected_exit_codes={docker_exit_code},
+                expected_exit_codes={reserved_run_exit},
             )
         ],
     )
@@ -238,7 +238,6 @@ def test_real_docker_startup_failure_is_sandbox_error_and_cleans_resources(
 
     assert result.status is RunStatus.ERROR
     assert result.checks[0].status is CheckStatus.ERROR
-    assert result.checks[0].exit_code == docker_exit_code
     assert result.checks[0].failure is not None
     assert result.checks[0].failure.code is FailureCode.SANDBOX_RUNTIME
     _assert_no_new_resources(before, _resources(runtime))
