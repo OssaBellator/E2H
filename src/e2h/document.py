@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from yaml.composer import ComposerError
 from yaml.constructor import ConstructorError
+from yaml.events import AliasEvent
 from yaml.nodes import MappingNode
 
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
@@ -19,7 +21,18 @@ _STAT_SUPPORTS_DIR_FD = os.stat in os.supports_dir_fd
 
 
 class _UniqueKeySafeLoader(yaml.SafeLoader):
-    """Safe YAML loader that rejects duplicate mapping keys at every depth."""
+    """Safe YAML loader that rejects aliases and duplicate mapping keys."""
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(AliasEvent):
+            event = self.peek_event()
+            raise ComposerError(
+                "while composing a document",
+                event.start_mark,
+                "YAML aliases are not supported",
+                event.start_mark,
+            )
+        return super().compose_node(parent, index)
 
     def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Any, Any]:
         self.flatten_mapping(node)
