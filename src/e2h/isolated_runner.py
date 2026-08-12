@@ -34,6 +34,15 @@ _REMOTE_SIGNAL_EXIT_CODES = frozenset(
     128 + int(value) for value in signal.valid_signals() if int(value) > 0
 )
 _REMOTE_ALLOWED_PAX_HEADERS = frozenset({"path", "linkpath", "mtime", "uid", "gid", "size"})
+_REMOTE_ALLOWED_TAR_HEADER_TYPES = frozenset(
+    {
+        tarfile.REGTYPE,
+        tarfile.AREGTYPE,
+        tarfile.DIRTYPE,
+        tarfile.SYMTYPE,
+        tarfile.XHDTYPE,
+    }
+)
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -105,8 +114,50 @@ def _require_utf8_archive_text(value: str, *, noun: str) -> None:
         raise RunnerError(f"sealed workspace archive {noun} is not valid UTF-8") from exc
 
 
+def _validate_archive_header_types(archive: WorkspaceArchive) -> None:
+    """Reject physical tar extension records the PAX workspace producer cannot emit."""
+    offset = 0
+    try:
+        archive.file.seek(0)
+        while offset + tarfile.BLOCKSIZE <= archive.archive_bytes:
+            header = archive.file.read(tarfile.BLOCKSIZE)
+            if len(header) != tarfile.BLOCKSIZE:
+                raise RunnerError("sealed workspace archive contains a truncated tar header")
+            if not any(header):
+                return
+            try:
+                member = tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
+            except (tarfile.TarError, UnicodeError, ValueError) as exc:
+                raise RunnerError(f"sealed workspace archive has an invalid tar header: {exc}") from exc
+            if member.type not in _REMOTE_ALLOWED_TAR_HEADER_TYPES:
+                raise RunnerError(
+                    "sealed workspace archive contains unsupported tar header type "
+                    f"{member.type!r}"
+                )
+            if member.size < 0:
+                raise RunnerError("sealed workspace archive contains a negative tar member size")
+            payload_bytes = (
+                (member.size + tarfile.BLOCKSIZE - 1) // tarfile.BLOCKSIZE
+            ) * tarfile.BLOCKSIZE
+            offset += tarfile.BLOCKSIZE + payload_bytes
+            if offset > archive.archive_bytes:
+                raise RunnerError("sealed workspace archive tar member exceeds archive bounds")
+            archive.file.seek(offset)
+        raise RunnerError("sealed workspace archive is missing its tar trailer")
+    except RunnerError:
+        raise
+    except (AttributeError, OSError, ValueError) as exc:
+        raise RunnerError(f"unable to inspect sealed workspace archive headers: {exc}") from exc
+    finally:
+        try:
+            archive.file.seek(0)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def _validate_archive_member_ancestry(archive: WorkspaceArchive) -> None:
     """Reject archive shapes the descriptor-recursive producer cannot create."""
+    _validate_archive_header_types(archive)
     member_names: list[str] = []
     directory_positions: dict[str, int] = {}
     symlink_names: set[str] = set()
