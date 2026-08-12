@@ -43,6 +43,8 @@ _REMOTE_ALLOWED_TAR_HEADER_TYPES = frozenset(
         tarfile.XHDTYPE,
     }
 )
+_MAX_PAX_KEY_BYTES = 128
+_MAX_PAX_LENGTH_DIGITS = 20
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -114,6 +116,79 @@ def _require_utf8_archive_text(value: str, *, noun: str) -> None:
         raise RunnerError(f"sealed workspace archive {noun} is not valid UTF-8") from exc
 
 
+def _validate_pax_payload(archive: WorkspaceArchive, payload_size: int) -> None:
+    """Validate PAX record keys without materializing or interpreting their values."""
+    if payload_size < 1:
+        raise RunnerError("sealed workspace archive contains an empty PAX extension")
+    remaining = payload_size
+    seen: set[str] = set()
+    while remaining:
+        record_available = remaining
+        length_digits = bytearray()
+        while True:
+            token = archive.file.read(1)
+            if len(token) != 1:
+                raise RunnerError("sealed workspace archive contains a truncated PAX length")
+            remaining -= 1
+            if token == b" ":
+                break
+            if (
+                token < b"0"
+                or token > b"9"
+                or len(length_digits) >= _MAX_PAX_LENGTH_DIGITS
+            ):
+                raise RunnerError("sealed workspace archive contains an invalid PAX length")
+            length_digits.extend(token)
+        if not length_digits:
+            raise RunnerError("sealed workspace archive contains an empty PAX length")
+        record_size = int(length_digits)
+        prefix_size = len(length_digits) + 1
+        if record_size <= prefix_size or record_size > record_available:
+            raise RunnerError("sealed workspace archive PAX record exceeds extension bounds")
+
+        body_size = record_size - prefix_size
+        body_consumed = 0
+        key_bytes = bytearray()
+        while body_consumed < body_size:
+            token = archive.file.read(1)
+            if len(token) != 1:
+                raise RunnerError("sealed workspace archive contains a truncated PAX record")
+            remaining -= 1
+            body_consumed += 1
+            if token == b"=":
+                break
+            if token == b"\n" or len(key_bytes) >= _MAX_PAX_KEY_BYTES:
+                raise RunnerError("sealed workspace archive contains an invalid PAX key")
+            key_bytes.extend(token)
+        else:
+            raise RunnerError("sealed workspace archive PAX record is missing '='")
+
+        try:
+            key = key_bytes.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise RunnerError("sealed workspace archive contains a non-ASCII PAX key") from exc
+        if not key or key in seen:
+            raise RunnerError("sealed workspace archive contains a duplicate or empty PAX key")
+        seen.add(key)
+        if key not in _REMOTE_ALLOWED_PAX_HEADERS:
+            raise RunnerError(
+                f"sealed workspace archive contains unsupported PAX metadata key {key!r}"
+            )
+
+        body_remaining = body_size - body_consumed
+        if body_remaining < 1:
+            raise RunnerError("sealed workspace archive PAX record is missing its terminator")
+        if body_remaining > 1:
+            archive.file.seek(body_remaining - 1, 1)
+            remaining -= body_remaining - 1
+        terminator = archive.file.read(1)
+        if len(terminator) != 1:
+            raise RunnerError("sealed workspace archive contains a truncated PAX terminator")
+        remaining -= 1
+        if terminator != b"\n":
+            raise RunnerError("sealed workspace archive PAX record has an invalid terminator")
+
+
 def _validate_archive_header_types(archive: WorkspaceArchive) -> None:
     """Reject physical tar extension records the PAX workspace producer cannot emit."""
     offset = 0
@@ -141,9 +216,12 @@ def _validate_archive_header_types(archive: WorkspaceArchive) -> None:
             payload_bytes = (
                 (member.size + tarfile.BLOCKSIZE - 1) // tarfile.BLOCKSIZE
             ) * tarfile.BLOCKSIZE
-            offset += tarfile.BLOCKSIZE + payload_bytes
-            if offset > archive.archive_bytes:
+            next_offset = offset + tarfile.BLOCKSIZE + payload_bytes
+            if next_offset > archive.archive_bytes:
                 raise RunnerError("sealed workspace archive tar member exceeds archive bounds")
+            if member.type == tarfile.XHDTYPE:
+                _validate_pax_payload(archive, member.size)
+            offset = next_offset
             archive.file.seek(offset)
         raise RunnerError("sealed workspace archive is missing its tar trailer")
     except RunnerError:
