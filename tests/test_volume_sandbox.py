@@ -74,7 +74,7 @@ def _records(log: Path) -> list[list[str]]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
 
 
-def test_volume_builder_uses_read_only_named_volume_without_cidfile() -> None:
+def test_volume_builder_uses_retained_read_only_named_volume_without_cidfile() -> None:
     capsule = _capsule()
     argv = build_container_volume_argv(
         capsule,
@@ -85,7 +85,8 @@ def test_volume_builder_uses_read_only_named_volume_without_cidfile() -> None:
         runtime_binary="docker-test",
     )
 
-    assert argv[:3] == ["docker-test", "run", "--rm"]
+    assert argv[:2] == ["docker-test", "run"]
+    assert "--rm" not in argv
     assert "--name" in argv
     assert "--cidfile" not in argv
     assert argv[argv.index("--name") + 1] == "e2h-replay-check-def"
@@ -152,7 +153,7 @@ def test_named_container_cleanup_does_not_use_host_cidfile(
     assert _records(log) == [["rm", "-f", "e2h-replay-check-abc"]]
 
 
-def test_named_cleanup_fails_closed_after_ambiguous_auto_remove_race(
+def test_named_cleanup_fails_closed_after_ambiguous_removal_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
