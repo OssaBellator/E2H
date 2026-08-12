@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 from pathlib import Path
 
 from e2h.docker_remote import (
@@ -27,6 +28,9 @@ from e2h.workspace_archive import (
 # headers, and block padding; the fixed allowance covers the root member and trailer.
 _REMOTE_ARCHIVE_ENTRY_OVERHEAD_BYTES = 4 * _MAX_ARCHIVE_MEMBER_PATH_BYTES
 _REMOTE_ARCHIVE_FIXED_OVERHEAD_BYTES = 1024 * 1024
+_REMOTE_SIGNAL_EXIT_CODES = frozenset(
+    128 + int(value) for value in signal.valid_signals() if int(value) > 0
+)
 
 
 def isolated_workspace_snapshot_supported() -> bool:
@@ -37,6 +41,17 @@ def isolated_workspace_snapshot_supported() -> bool:
 def isolated_container_replay_supported() -> bool:
     """Return false until the runtime can consume workspace state by stable identity."""
     return False
+
+
+def _validate_remote_expected_exit_codes(capsule: TaskCapsule) -> None:
+    """Reject expected statuses that Docker cannot distinguish from signal death."""
+    for check in capsule.success.commands:
+        ambiguous = sorted(check.expected_exit_codes & _REMOTE_SIGNAL_EXIT_CODES)
+        if ambiguous:
+            raise RunnerError(
+                "remote container replay cannot safely distinguish signal-encoded "
+                f"expected exit codes for check {check.id!r}: {ambiguous}"
+            )
 
 
 def _max_remote_archive_bytes(max_source_bytes: int, max_entries: int) -> int:
@@ -80,6 +95,7 @@ def _run_capsule_isolated_container_candidate(
     sandbox = capsule.sandbox
     if sandbox is None:
         raise RunnerError("isolated container replay requires capsule.sandbox")
+    _validate_remote_expected_exit_codes(capsule)
     runtime = container_runtime or sandbox.engine
     try:
         # Reject cheap runtime/policy failures before walking or archiving the workspace.
