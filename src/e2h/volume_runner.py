@@ -44,7 +44,11 @@ from e2h.sandbox import (
     build_container_volume_argv,
     force_remove_named_container,
 )
-from e2h.workspace_archive import WorkspaceArchive
+from e2h.workspace_archive import (
+    _MAX_ARCHIVE_DEPTH,
+    _MAX_ARCHIVE_MEMBER_PATH_BYTES,
+    WorkspaceArchive,
+)
 
 _MAX_CWD_SYMLINK_RESOLUTIONS = 40
 _CONTROL_OUTPUT_CHARS = 8192
@@ -71,7 +75,11 @@ def _member_path(value: str) -> str:
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
         raise RunnerError("sealed workspace archive contains an unsafe member path")
+    if len(path.parts) > _MAX_ARCHIVE_DEPTH:
+        raise RunnerError("sealed workspace archive member exceeds capture depth")
     rendered = path.as_posix()
+    if len(rendered.encode("utf-8", errors="surrogateescape")) > _MAX_ARCHIVE_MEMBER_PATH_BYTES:
+        raise RunnerError("sealed workspace archive member exceeds capture path bound")
     return "." if rendered == "." else rendered
 
 
@@ -88,19 +96,29 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
         raise RunnerError(
             f"invalid workspace archive: expected WorkspaceArchive, got {type(archive).__name__}"
         )
+    if archive.source_bytes < 0 or archive.entries < 0 or archive.archive_bytes < 1:
+        raise RunnerError("sealed workspace archive metadata is invalid")
+    expected_members = archive.entries + 1
     directories: set[str] = set()
     symlinks: dict[str, str] = {}
     seen: set[str] = set()
     source_bytes = 0
     try:
+        archive.file.seek(0, os.SEEK_END)
+        if archive.file.tell() != archive.archive_bytes:
+            raise RunnerError("sealed workspace archive size does not match captured metadata")
         archive.file.seek(0)
         with tarfile.open(
             fileobj=archive.file,
-            mode="r:*",
+            mode="r:",
             encoding="utf-8",
             errors="surrogateescape",
         ) as handle:
             for member in handle:
+                if len(seen) >= expected_members:
+                    raise RunnerError(
+                        "sealed workspace archive capture metadata does not match archive bytes"
+                    )
                 name = _member_path(member.name)
                 if name in seen:
                     raise RunnerError(
@@ -114,19 +132,25 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
                     symlinks[name] = target
                     source_bytes += len(target.encode("utf-8", errors="surrogateescape"))
                 elif member.isfile():
+                    if member.size < 0:
+                        raise RunnerError("sealed workspace archive contains an invalid file size")
                     source_bytes += member.size
                 else:
                     raise RunnerError(
                         f"sealed workspace archive contains unsupported member {name!r}"
                     )
+                if source_bytes > archive.source_bytes:
+                    raise RunnerError(
+                        "sealed workspace archive capture metadata does not match archive bytes"
+                    )
     except RunnerError:
         raise
-    except (OSError, tarfile.TarError, UnicodeError, ValueError) as exc:
+    except (AttributeError, OSError, tarfile.TarError, UnicodeError, ValueError) as exc:
         raise RunnerError(f"unable to inspect sealed workspace archive: {exc}") from exc
     finally:
         try:
             archive.file.seek(0)
-        except (OSError, ValueError):
+        except (AttributeError, OSError, ValueError):
             pass
     if "." not in directories:
         raise RunnerError("sealed workspace archive is missing its root directory")
@@ -134,7 +158,7 @@ def _workspace_tree(archive: WorkspaceArchive) -> _WorkspaceTree:
         raise RunnerError(
             "sealed workspace archive directory metadata does not match archive bytes"
         )
-    if len(seen) != archive.entries + 1 or source_bytes != archive.source_bytes:
+    if len(seen) != expected_members or source_bytes != archive.source_bytes:
         raise RunnerError(
             "sealed workspace archive capture metadata does not match archive bytes"
         )
