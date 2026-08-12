@@ -40,12 +40,14 @@ import os
 from pathlib import Path
 import sys
 args = sys.argv[1:]
+log = Path(os.environ["DOCKER_TEST_LOG"])
+state_file = Path(str(log) + ".check-state")
 record = {{"args": args}}
 if args and args[0] == "cp":
     data = sys.stdin.buffer.read()
     record["stdin_bytes"] = len(data)
     record["stdin_sha256"] = hashlib.sha256(data).hexdigest()
-with Path(os.environ["DOCKER_TEST_LOG"]).open("a", encoding="utf-8") as handle:
+with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\\n")
 if args and args[0] == "version":
     print("29.5.2 29.5.2")
@@ -55,13 +57,29 @@ elif args and args[0] == "create":
     print("a" * 64)
 elif args and args[0] == "cp":
     pass
+elif args and args[0] == "inspect":
+    print(state_file.read_text(encoding="utf-8"))
 elif args and args[0] == "rm":
-    pass
+    if args[-1].startswith("e2h-replay-check-"):
+        state_file.unlink(missing_ok=True)
 elif args[:2] == ["volume", "rm"]:
     pass
 elif args and args[0] == "run":
+    exit_code = int(os.environ.get("DOCKER_TEST_RUN_EXIT", "0"))
+    state_file.write_text(
+        json.dumps(
+            {{
+                "Status": "exited",
+                "Running": False,
+                "ExitCode": exit_code,
+                "Error": "",
+            }},
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     print("remote-ok")
-    raise SystemExit(int(os.environ.get("DOCKER_TEST_RUN_EXIT", "0")))
+    raise SystemExit(exit_code)
 else:
     raise SystemExit(13)
 """,
@@ -135,6 +153,8 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "cp",
         "rm",
         "run",
+        "inspect",
+        "rm",
         "volume",
     ]
     volume_name = str(commands[1][-1])
@@ -147,13 +167,17 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         f"type=volume,src={volume_name},dst=/workspace,volume-nocopy,readonly"
     )
     assert "type=bind" not in mount
+    assert "--rm" not in run
     assert "--cidfile" not in run
     assert run[run.index("--workdir") + 1] == "/workspace/shared/nested"
-    assert commands[6] == ["volume", "rm", "-f", volume_name]
+    check_name = run[run.index("--name") + 1]
+    assert commands[6][-1] == check_name
+    assert commands[7] == ["rm", "-f", check_name]
+    assert commands[8] == ["volume", "rm", "-f", volume_name]
     assert int(records[3]["stdin_bytes"]) > 0
 
 
-def test_candidate_command_failure_still_removes_volume(
+def test_candidate_command_failure_still_removes_check_and_volume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -173,7 +197,10 @@ def test_candidate_command_failure_still_removes_volume(
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.FAILED
     commands = [record["args"] for record in _records(log)]
+    run = next(args for args in commands if args[0] == "run")
+    check_name = run[run.index("--name") + 1]
     volume_name = str(commands[1][-1])
+    assert ["rm", "-f", check_name] in commands
     assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
 
