@@ -104,7 +104,7 @@ def test_real_docker_rejects_signal_ambiguous_137_task_verdict(
     workspace.mkdir()
     before = _resources(runtime)
 
-    with pytest.raises(RunnerError, match="signal-ambiguous Docker exit status.*137"):
+    with pytest.raises(RunnerError, match=r"signal-ambiguous Docker exit status.*137"):
         _run_capsule_isolated_container_candidate(
             _capsule(image, program),
             workspace.resolve(),
