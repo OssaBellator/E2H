@@ -42,6 +42,13 @@ def _root_tar(*, mode: str = "w") -> io.BytesIO:
     return stream
 
 
+def test_workspace_tree_accepts_capture_format_zero_trailer() -> None:
+    tree = _workspace_tree(_archive_from_stream(_root_tar()))
+
+    assert tree.directories == frozenset({"."})
+    assert tree.symlinks == ()
+
+
 def test_workspace_tree_rejects_compressed_archive() -> None:
     archive = _archive_from_stream(_root_tar(mode="w:gz"))
 
@@ -54,6 +61,23 @@ def test_workspace_tree_rejects_physical_size_mismatch() -> None:
     archive = _archive_from_stream(stream, archive_bytes=len(stream.getbuffer()) + 1)
 
     with pytest.raises(RunnerError, match="size does not match captured metadata"):
+        _workspace_tree(archive)
+
+
+def test_workspace_tree_rejects_concatenated_tar_after_end_marker() -> None:
+    stream = io.BytesIO(_root_tar().getvalue() + _root_tar().getvalue())
+    archive = _archive_from_stream(stream)
+
+    with pytest.raises(RunnerError, match="invalid trailer padding"):
+        _workspace_tree(archive)
+
+
+def test_workspace_tree_rejects_nonzero_trailing_payload() -> None:
+    payload = bytearray(_root_tar().getvalue())
+    payload[-1] = 1
+    archive = _archive_from_stream(io.BytesIO(payload))
+
+    with pytest.raises(RunnerError, match="non-zero trailing data"):
         _workspace_tree(archive)
 
 
