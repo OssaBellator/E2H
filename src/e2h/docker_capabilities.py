@@ -9,7 +9,7 @@ import subprocess
 from e2h.docker_remote import DockerRemoteError
 
 _RESOURCE_TIMEOUT_SECONDS = 10.0
-_RESOURCE_FORMAT = "{{.MemoryLimit}} {{.SwapLimit}}"
+_RESOURCE_FORMAT = "{{.OSType}} {{.MemoryLimit}} {{.SwapLimit}}"
 _RUNTIME_COMPONENTS_FORMAT = "{{json .Server.Components}}"
 _RUNC_VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)([-+].*)?$")
 
@@ -82,7 +82,7 @@ def require_patched_docker_runtime(runtime_binary: str = "docker") -> str:
 
 
 def require_docker_resource_limits(runtime_binary: str = "docker") -> None:
-    """Require Docker daemon support for both memory and swap enforcement."""
+    """Require a Linux Docker daemon with memory and swap enforcement."""
     runtime = _validated_runtime_binary(runtime_binary)
     try:
         completed = subprocess.run(
@@ -105,9 +105,14 @@ def require_docker_resource_limits(runtime_binary: str = "docker") -> None:
         )
 
     fields = completed.stdout.strip().split()
-    if len(fields) != 2 or any(field not in {"true", "false"} for field in fields):
+    if len(fields) != 3 or any(field not in {"true", "false"} for field in fields[1:]):
         raise DockerRemoteError("Docker resource capability probe returned an unexpected response")
-    memory_limit, swap_limit = fields
+    os_type, memory_limit, swap_limit = fields
+    if os_type != "linux":
+        raise DockerRemoteError(
+            "remote Docker replay requires a Linux daemon; "
+            f"observed os_type={os_type}"
+        )
     if memory_limit != "true" or swap_limit != "true":
         raise DockerRemoteError(
             "remote Docker replay requires memory and swap limit support; "
