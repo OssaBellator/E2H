@@ -92,6 +92,51 @@ def _symlink_parent_archive(*, child_first: bool) -> WorkspaceArchive:
     )
 
 
+def _missing_parent_archive() -> WorkspaceArchive:
+    payload = b"x"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as handle:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+        child = tarfile.TarInfo("missing/payload.txt")
+        child.size = len(payload)
+        handle.addfile(child, io.BytesIO(payload))
+    archive_bytes = stream.tell()
+    stream.seek(0)
+    return WorkspaceArchive(
+        file=stream,
+        directories=frozenset({"."}),
+        source_bytes=len(payload),
+        entries=1,
+        archive_bytes=archive_bytes,
+    )
+
+
+def _late_parent_archive() -> WorkspaceArchive:
+    payload = b"x"
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as handle:
+        root = tarfile.TarInfo(".")
+        root.type = tarfile.DIRTYPE
+        handle.addfile(root)
+        child = tarfile.TarInfo("nested/payload.txt")
+        child.size = len(payload)
+        handle.addfile(child, io.BytesIO(payload))
+        parent = tarfile.TarInfo("nested")
+        parent.type = tarfile.DIRTYPE
+        handle.addfile(parent)
+    archive_bytes = stream.tell()
+    stream.seek(0)
+    return WorkspaceArchive(
+        file=stream,
+        directories=frozenset({".", "nested"}),
+        source_bytes=len(payload),
+        entries=2,
+        archive_bytes=archive_bytes,
+    )
+
+
 def _capsule() -> TaskCapsule:
     return TaskCapsule(
         id="preimport-archive-validation",
@@ -175,6 +220,42 @@ def test_candidate_rejects_member_under_symlink_before_docker_import(
     )
 
     with pytest.raises(RunnerError, match="nested under symlink 'alias'"):
+        isolated_runner._run_capsule_isolated_container_candidate(
+            _capsule(),
+            tmp_path / "unused-workspace",
+            max_workspace_bytes=1024 * 1024,
+            max_workspace_entries=10,
+            container_runtime="docker-test",
+        )
+
+    assert imported == [False]
+
+
+def test_candidate_rejects_missing_directory_ancestor_before_docker_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imported = _install_preflight_stubs(monkeypatch, _missing_parent_archive())
+
+    with pytest.raises(RunnerError, match="missing directory ancestor 'missing'"):
+        isolated_runner._run_capsule_isolated_container_candidate(
+            _capsule(),
+            tmp_path / "unused-workspace",
+            max_workspace_bytes=1024 * 1024,
+            max_workspace_entries=10,
+            container_runtime="docker-test",
+        )
+
+    assert imported == [False]
+
+
+def test_candidate_rejects_directory_ancestor_after_child_before_docker_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imported = _install_preflight_stubs(monkeypatch, _late_parent_archive())
+
+    with pytest.raises(RunnerError, match="directory ancestor 'nested' appears after child"):
         isolated_runner._run_capsule_isolated_container_candidate(
             _capsule(),
             tmp_path / "unused-workspace",
