@@ -50,38 +50,56 @@ if args and args[0] == "cp":
 with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\\n")
 if args and args[0] == "version":
-    print("29.5.2 29.5.2")
+    print("29.7.2 29.7.2")
 elif args[:2] == ["image", "inspect"]:
     print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "none"))
 elif args[:2] == ["volume", "create"]:
     print(args[-1])
 elif args and args[0] == "create":
+    name = args[args.index("--name") + 1]
+    if name.startswith("e2h-replay-check-"):
+        state_file.write_text(
+            json.dumps(
+                {{
+                    "Status": "created",
+                    "Running": False,
+                    "ExitCode": 0,
+                    "Error": "",
+                    "OOMKilled": False,
+                    "Command": args[-1],
+                }},
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
     print("a" * 64)
 elif args and args[0] == "cp":
     pass
 elif args and args[0] == "inspect":
-    print(state_file.read_text(encoding="utf-8"))
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state.pop("Command", None)
+    print(json.dumps(state, sort_keys=True))
+elif args and args[0] == "start":
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state.pop("Command", None)
+    exit_code = int(os.environ.get("DOCKER_TEST_RUN_EXIT", "0"))
+    state.update(
+        {{
+            "Status": "exited",
+            "Running": False,
+            "ExitCode": exit_code,
+            "Error": "",
+            "OOMKilled": False,
+        }}
+    )
+    state_file.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    print("remote-ok")
+    raise SystemExit(exit_code)
 elif args and args[0] == "rm":
     if args[-1].startswith("e2h-replay-check-"):
         state_file.unlink(missing_ok=True)
 elif args[:2] == ["volume", "rm"]:
     pass
-elif args and args[0] == "run":
-    exit_code = int(os.environ.get("DOCKER_TEST_RUN_EXIT", "0"))
-    state_file.write_text(
-        json.dumps(
-            {{
-                "Status": "exited",
-                "Running": False,
-                "ExitCode": exit_code,
-                "Error": "",
-            }},
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    print("remote-ok")
-    raise SystemExit(exit_code)
 else:
     raise SystemExit(13)
 """,
@@ -157,7 +175,9 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "create",
         "cp",
         "rm",
-        "run",
+        "create",
+        "inspect",
+        "start",
         "inspect",
         "rm",
         "volume",
@@ -166,19 +186,21 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     prep_name = commands[5][commands[5].index("--name") + 1]
     assert commands[7] == ["rm", "-f", "-v", prep_name]
 
-    run = commands[8]
-    mount = run[run.index("--mount") + 1]
+    create = commands[8]
+    mount = create[create.index("--mount") + 1]
     assert mount == (
         f"type=volume,src={volume_name},dst=/workspace,volume-nocopy,readonly"
     )
     assert "type=bind" not in mount
-    assert "--rm" not in run
-    assert "--cidfile" not in run
-    assert run[run.index("--workdir") + 1] == "/workspace/shared/nested"
-    check_name = run[run.index("--name") + 1]
+    assert "--rm" not in create
+    assert "--cidfile" not in create
+    assert create[create.index("--workdir") + 1] == "/workspace/shared/nested"
+    check_name = create[create.index("--name") + 1]
     assert commands[9][-1] == check_name
-    assert commands[10] == ["rm", "-f", check_name]
-    assert commands[11] == ["volume", "rm", "-f", volume_name]
+    assert commands[10] == ["start", "--attach", check_name]
+    assert commands[11][-1] == check_name
+    assert commands[12] == ["rm", "-f", "-v", check_name]
+    assert commands[13] == ["volume", "rm", "-f", volume_name]
     assert int(records[6]["stdin_bytes"]) > 0
 
 
@@ -223,11 +245,16 @@ def test_candidate_command_failure_still_removes_check_and_volume(
     assert result.status is RunStatus.FAILED
     assert result.checks[0].status is CheckStatus.FAILED
     commands = [record["args"] for record in _records(log)]
-    run = next(args for args in commands if args[0] == "run")
-    check_name = run[run.index("--name") + 1]
+    create = next(
+        args
+        for args in commands
+        if args[0] == "create"
+        and args[args.index("--name") + 1].startswith("e2h-replay-check-")
+    )
+    check_name = create[create.index("--name") + 1]
     volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
     volume_name = str(volume_create[-1])
-    assert ["rm", "-f", check_name] in commands
+    assert ["rm", "-f", "-v", check_name] in commands
     assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
 
@@ -238,19 +265,49 @@ def test_candidate_timeout_removes_named_check_and_volume(
     workspace = _workspace(tmp_path)
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
+    inspect_count = 0
 
-    monkeypatch.setattr(
-        volume_runner,
-        "_execute_process",
-        lambda *args, **kwargs: _ProcessOutcome(
+    def fake_execute(argv: list[str], *args: object, **kwargs: object) -> _ProcessOutcome:
+        nonlocal inspect_count
+        if argv[1] == "create":
+            return _ProcessOutcome(
+                exit_code=0,
+                timed_out=False,
+                stdout="a" * 64 + "\n",
+                stderr="",
+                stdout_truncated=False,
+                stderr_truncated=False,
+            )
+        if argv[1] == "inspect":
+            inspect_count += 1
+            assert inspect_count == 1
+            return _ProcessOutcome(
+                exit_code=0,
+                timed_out=False,
+                stdout=json.dumps(
+                    {
+                        "Status": "created",
+                        "Running": False,
+                        "ExitCode": 0,
+                        "Error": "",
+                        "OOMKilled": False,
+                    }
+                ),
+                stderr="",
+                stdout_truncated=False,
+                stderr_truncated=False,
+            )
+        assert argv[1] == "start"
+        return _ProcessOutcome(
             exit_code=None,
             timed_out=True,
             stdout="",
             stderr="",
             stdout_truncated=False,
             stderr_truncated=False,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(volume_runner, "_execute_process", fake_execute)
 
     result = _run_capsule_isolated_container_candidate(
         _capsule(),
@@ -266,7 +323,7 @@ def test_candidate_timeout_removes_named_check_and_volume(
     volume_create = next(args for args in commands if args[:2] == ["volume", "create"])
     volume_name = str(volume_create[-1])
     check_cleanup = commands[-2]
-    assert check_cleanup[:2] == ["rm", "-f"]
+    assert check_cleanup[:3] == ["rm", "-f", "-v"]
     assert str(check_cleanup[-1]).startswith("e2h-replay-check-")
     assert commands[-1] == ["volume", "rm", "-f", volume_name]
 
