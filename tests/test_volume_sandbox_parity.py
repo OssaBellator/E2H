@@ -37,7 +37,9 @@ def _without_identity_mount_and_lifecycle(argv: list[str]) -> list[str]:
     return result
 
 
-def test_named_volume_runner_preserves_direct_container_policy(tmp_path: Path) -> None:
+def test_named_volume_runner_preserves_direct_policy_plus_remote_core_limit(
+    tmp_path: Path,
+) -> None:
     capsule = _capsule()
     check = capsule.success.commands[0]
     direct = build_container_argv(
@@ -57,6 +59,10 @@ def test_named_volume_runner_preserves_direct_container_policy(tmp_path: Path) -
         runtime_binary="docker-test",
     )
 
-    assert _without_identity_mount_and_lifecycle(remote) == (
-        _without_identity_mount_and_lifecycle(direct)
-    )
+    direct_policy = _without_identity_mount_and_lifecycle(direct)
+    remote_policy = _without_identity_mount_and_lifecycle(remote)
+    assert "--ulimit" not in direct_policy
+    ulimit_index = remote_policy.index("--ulimit")
+    assert remote_policy[ulimit_index : ulimit_index + 2] == ["--ulimit", "core=0:0"]
+    del remote_policy[ulimit_index : ulimit_index + 2]
+    assert remote_policy == direct_policy
