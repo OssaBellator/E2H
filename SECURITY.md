@@ -55,6 +55,10 @@ A remote replay service must therefore use one of these deployment models before
 
 Filesystem protections such as descriptor-bound capture and sealed in-memory archives protect against pathname rebinding and same-UID mutation that do not require Docker authority. They do not convert the Docker control plane itself into an untrusted boundary. Runtime documentation and validation must state which deployment model is assumed whenever Docker-backed remote replay is enabled.
 
+MCP/A2A configuration may expose an operator control-plane trust flag. That flag is an **attestation by the deployer**, not a measurement performed by E2H. A true value must never be interpreted as evidence that E2H inspected Docker socket ACLs, daemon authorization, peer capabilities, workload placement, or host policy. The default remains false, and container replay must fail closed when the attestation is absent even if all code-level sandbox checks otherwise pass.
+
+The attestation is also not an override for runtime capability gates. Docker-backed remote replay remains unavailable until its independent code/runtime prerequisites are satisfied; declaring the control plane trusted does not make an unsupported runtime supported.
+
 ## Handling reports
 
 Maintainers should reproduce reports with synthetic data when possible, minimize redistribution of sensitive artifacts, and add an adversarial regression test for confirmed boundary failures.
