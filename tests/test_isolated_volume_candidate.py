@@ -52,7 +52,7 @@ with log.open("a", encoding="utf-8") as handle:
 if args and args[0] == "version":
     print("29.5.2 29.5.2")
 elif args[:2] == ["image", "inspect"]:
-    print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "null"))
+    print(os.environ.get("DOCKER_TEST_IMAGE_VOLUMES", "none"))
 elif args[:2] == ["volume", "create"]:
     print(args[-1])
 elif args and args[0] == "create":
@@ -152,6 +152,7 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "version",
         "image",
         "version",
+        "image",
         "volume",
         "create",
         "cp",
@@ -161,11 +162,11 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
         "rm",
         "volume",
     ]
-    volume_name = str(commands[3][-1])
-    prep_name = commands[4][commands[4].index("--name") + 1]
-    assert commands[6] == ["rm", "-f", prep_name]
+    volume_name = str(commands[4][-1])
+    prep_name = commands[5][commands[5].index("--name") + 1]
+    assert commands[7] == ["rm", "-f", "-v", prep_name]
 
-    run = commands[7]
+    run = commands[8]
     mount = run[run.index("--mount") + 1]
     assert mount == (
         f"type=volume,src={volume_name},dst=/workspace,volume-nocopy,readonly"
@@ -175,10 +176,10 @@ def test_sealed_volume_candidate_runs_complete_fake_docker_lifecycle(
     assert "--cidfile" not in run
     assert run[run.index("--workdir") + 1] == "/workspace/shared/nested"
     check_name = run[run.index("--name") + 1]
-    assert commands[8][-1] == check_name
-    assert commands[9] == ["rm", "-f", check_name]
-    assert commands[10] == ["volume", "rm", "-f", volume_name]
-    assert int(records[5]["stdin_bytes"]) > 0
+    assert commands[9][-1] == check_name
+    assert commands[10] == ["rm", "-f", check_name]
+    assert commands[11] == ["volume", "rm", "-f", volume_name]
+    assert int(records[6]["stdin_bytes"]) > 0
 
 
 def test_candidate_rejects_image_declared_volumes_before_workspace_capture(
@@ -187,9 +188,9 @@ def test_candidate_rejects_image_declared_volumes_before_workspace_capture(
 ) -> None:
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
-    monkeypatch.setenv("DOCKER_TEST_IMAGE_VOLUMES", '{"/data":{}}')
+    monkeypatch.setenv("DOCKER_TEST_IMAGE_VOLUMES", "declared")
 
-    with pytest.raises(RunnerError, match="VOLUME declarations"):
+    with pytest.raises(RunnerError, match="must not declare VOLUME"):
         _run_capsule_isolated_container_candidate(
             _capsule(),
             tmp_path / "workspace-does-not-exist",
