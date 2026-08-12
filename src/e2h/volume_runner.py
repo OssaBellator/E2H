@@ -263,7 +263,7 @@ def _completed_cleanup_failure() -> FailureRecord:
         code=FailureCode.SANDBOX_CLEANUP,
         impact=FailureImpact.INFRASTRUCTURE_ERROR,
         retryability=Retryability.AFTER_FIX,
-        summary="completed container could not be cleaned up safely",
+        summary="replay container could not be cleaned up safely",
         details={"backend": ExecutionBackend.CONTAINER.value},
     )
 
@@ -421,6 +421,11 @@ def _execute_volume_command(
     except BaseException as exc:
         cleanup_error = force_remove_named_container(runtime, container_name)
         if cleanup_error is not None:
+            if isinstance(exc, Exception):
+                return _control_failure_outcome(
+                    f"Docker container creation failed before a result was available: {exc}",
+                    cleanup_error=cleanup_error,
+                )
             exc.add_note(
                 "Docker replay check cleanup failed after creation interruption: "
                 + cleanup_error
@@ -451,6 +456,11 @@ def _execute_volume_command(
     except BaseException as exc:
         cleanup_error = force_remove_named_container(runtime, container_name)
         if cleanup_error is not None:
+            if isinstance(exc, Exception):
+                return _control_failure_outcome(
+                    f"Docker start --attach failed before a result was available: {exc}",
+                    cleanup_error=cleanup_error,
+                )
             exc.add_note(
                 "Docker replay check cleanup failed after execution interruption: "
                 + cleanup_error
