@@ -137,7 +137,7 @@ def build_container_argv(
         "--user",
         sandbox.user,
         "--tmpfs",
-        f"/tmp:rw,nosuid,size={sandbox.tmpfs_mb}m",
+        f"/tmp:rw,nosuid,mode=1777,size={sandbox.tmpfs_mb}m",
         "--shm-size",
         _CONTAINER_SHM_SIZE,
         "--ulimit",
