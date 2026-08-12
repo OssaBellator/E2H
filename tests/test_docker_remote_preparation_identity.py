@@ -57,12 +57,14 @@ def test_invalid_preparation_container_id_fails_before_archive_copy_and_cleans_n
 
     monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
 
-    with pytest.raises(DockerRemoteError, match="invalid preparation container ID"):
-        with prepared_workspace_volume(
-            ContainerSandbox(image=IMAGE),
-            object(),  # type: ignore[arg-type]
-        ):
-            raise AssertionError("malformed preparation identity must not yield")
+    with pytest.raises(
+        DockerRemoteError,
+        match="invalid preparation container ID",
+    ), prepared_workspace_volume(
+        ContainerSandbox(image=IMAGE),
+        object(),  # type: ignore[arg-type]
+    ):
+        raise AssertionError("malformed preparation identity must not yield")
 
     assert [args[0] for args in calls] == ["volume", "create", "rm", "volume"]
     create = calls[1]
