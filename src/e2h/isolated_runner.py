@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from e2h.directory_binding import directory_binding_supported
 from e2h.models import TaskCapsule
 from e2h.runner import RunnerError, RunResult
+from e2h.workspace_archive import sealed_workspace_archive_supported
 
 
 def isolated_workspace_snapshot_supported() -> bool:
-    """Return whether the host exposes every primitive required for safe snapshot capture."""
-    return (
-        directory_binding_supported()
-        and os.stat in os.supports_dir_fd
-        and os.stat in os.supports_follow_symlinks
-        and os.readlink in os.supports_dir_fd
-        and os.listdir in os.supports_fd
-    )
+    """Return whether the host can capture the sealed workspace snapshot this path uses."""
+    return sealed_workspace_archive_supported()
 
 
 def isolated_container_replay_supported() -> bool:
