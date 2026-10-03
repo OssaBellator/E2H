@@ -35,9 +35,7 @@ def _event(sequence: int, context: TraceContext) -> TraceEvent:
     return TraceEvent(
         trace_id="trace",
         sequence=sequence,
-        event_type=(
-            TraceEventType.RUN_STARTED if sequence == 0 else TraceEventType.RUN_COMPLETED
-        ),
+        event_type=(TraceEventType.RUN_STARTED if sequence == 0 else TraceEventType.RUN_COMPLETED),
         timestamp=NOW + timedelta(seconds=sequence),
         context=context,
     )

@@ -18,10 +18,11 @@ def test_public_error_does_not_mangle_filesystem_root() -> None:
 
 def test_a2a_help_describes_local_and_isolated_container_replay() -> None:
     help_text = _parser().format_help()
+    normalized = " ".join(help_text.split())
 
-    assert "read-only isolated workspace copy" in help_text
-    assert "command-executing replay" in help_text
-    assert "currently unavailable" not in help_text
+    assert "bounded read-only isolated workspace copy" in normalized
+    assert "command-executing replay" in normalized
+    assert "currently unavailable" not in normalized
 
 
 @pytest.mark.skipif(

@@ -169,9 +169,7 @@ def test_store_info_rejects_old_schema_without_migrating(tmp_path: Path) -> None
     assert result.exit_code == 0, result.output
 
     with duckdb.connect(str(database)) as connection:
-        connection.execute(
-            "UPDATE store_metadata SET value = '1' WHERE key = 'schema_version'"
-        )
+        connection.execute("UPDATE store_metadata SET value = '1' WHERE key = 'schema_version'")
 
     result = runner.invoke(app, ["store", "info", str(database)])
 

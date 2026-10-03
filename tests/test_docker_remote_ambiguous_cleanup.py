@@ -49,12 +49,14 @@ def test_volume_create_failure_still_attempts_named_volume_cleanup(
 
     monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
 
-    with pytest.raises(DockerRemoteError, match="lost response"):
-        with prepared_workspace_volume(
+    with (
+        pytest.raises(DockerRemoteError, match="lost response"),
+        prepared_workspace_volume(
             ContainerSandbox(image=IMAGE),
             object(),  # type: ignore[arg-type]
-        ):
-            raise AssertionError("failed create must not yield")
+        ),
+    ):
+        raise AssertionError("failed create must not yield")
 
     assert len(calls) == 2
     assert calls[0][:2] == ["volume", "create"]
@@ -83,12 +85,14 @@ def test_container_create_failure_still_attempts_named_container_cleanup(
 
     monkeypatch.setattr(docker_remote, "_run_docker", fake_run_docker)
 
-    with pytest.raises(DockerRemoteError, match="lost response"):
-        with prepared_workspace_volume(
+    with (
+        pytest.raises(DockerRemoteError, match="lost response"),
+        prepared_workspace_volume(
             ContainerSandbox(image=IMAGE),
             object(),  # type: ignore[arg-type]
-        ):
-            raise AssertionError("failed create must not yield")
+        ),
+    ):
+        raise AssertionError("failed create must not yield")
 
     assert [args[0] for args in calls] == ["volume", "create", "rm", "volume"]
     create_args = calls[1]

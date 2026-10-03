@@ -157,11 +157,7 @@ def test_artifact_hash_rejects_parent_replacement_while_opening(
     state = {"swapped": False}
 
     def swapping_open(target: Any, flags: int, *args: Any, **kwargs: Any) -> int:
-        if (
-            not state["swapped"]
-            and kwargs.get("dir_fd") is None
-            and Path(target) == parent
-        ):
+        if not state["swapped"] and kwargs.get("dir_fd") is None and Path(target) == parent:
             state["swapped"] = True
             parent.rename(moved_parent)
             replacement_parent.rename(parent)

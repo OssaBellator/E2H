@@ -103,7 +103,7 @@ def test_verify_snapshot_with_archive_sha256_rejects_parent_escape_after_archive
 
     monkeypatch.setattr(snapshot.os, "fdopen", swapping_fdopen)
 
-    with pytest.raises(SnapshotError, match="snapshot archive parent escapes the configured root"):
+    with pytest.raises(SnapshotError, match="snapshot archive parent changed while reading"):
         verify_snapshot_with_archive_sha256(
             archive,
             containment_root=root.resolve(),

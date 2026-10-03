@@ -34,8 +34,7 @@ def _validate_json_compatible(
 ) -> None:
     if depth > _MAX_METADATA_STRUCTURE_DEPTH:
         raise ValueError(
-            "metadata structure exceeds maximum nesting depth "
-            f"({_MAX_METADATA_STRUCTURE_DEPTH})"
+            f"metadata structure exceeds maximum nesting depth ({_MAX_METADATA_STRUCTURE_DEPTH})"
         )
     if value is None or type(value) in (str, bool, int):
         return
@@ -151,16 +150,13 @@ class ContainerSandbox(StrictModel):
     @classmethod
     def user_must_be_non_root(cls, value: str) -> str:
         parts = value.split(":")
-        if (
-            len(parts) not in {1, 2}
-            or any(not part or not part.isascii() or not part.isdecimal() for part in parts)
+        if len(parts) not in {1, 2} or any(
+            not part or not part.isascii() or not part.isdecimal() for part in parts
         ):
             raise ValueError("container user must be a numeric uid or uid:gid")
         ids = [int(part) for part in parts]
         if any(identifier > _MAX_CONTAINER_NUMERIC_ID for identifier in ids):
-            raise ValueError(
-                f"container user ids must not exceed {_MAX_CONTAINER_NUMERIC_ID}"
-            )
+            raise ValueError(f"container user ids must not exceed {_MAX_CONTAINER_NUMERIC_ID}")
         if ids[0] == 0:
             raise ValueError("container user must be non-root")
         return value

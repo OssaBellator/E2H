@@ -133,9 +133,7 @@ def test_bound_runner_matches_continue_on_failure(tmp_path: Path) -> None:
 
 
 def test_bound_runner_matches_missing_command_failure(tmp_path: Path) -> None:
-    capsule = _capsule(
-        [{"id": "missing", "argv": ["e2h-command-that-does-not-exist"]}]
-    )
+    capsule = _capsule([{"id": "missing", "argv": ["e2h-command-that-does-not-exist"]}])
 
     _assert_parity(capsule, tmp_path)
 

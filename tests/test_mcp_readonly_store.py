@@ -63,9 +63,7 @@ def test_mcp_memory_query_does_not_upgrade_store_schema(tmp_path: Path) -> None:
     database = tmp_path / "store.duckdb"
     initialize_store(database)
     _set_store_schema_version(database, "1")
-    service = E2HMCPService(
-        MCPServerConfig(root=tmp_path, store=Path("store.duckdb"))
-    )
+    service = E2HMCPService(MCPServerConfig(root=tmp_path, store=Path("store.duckdb")))
 
     with pytest.raises(MCPServiceError, match="unsupported store schema version '1'"):
         service.memory_query(QueryView.SOURCES, limit=10)

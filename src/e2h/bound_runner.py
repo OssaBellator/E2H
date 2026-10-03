@@ -33,8 +33,8 @@ from e2h.runner import (
     RunnerError,
     RunResult,
     RunStatus,
-    _ProcessOutcome,
     _execute_local_command,
+    _ProcessOutcome,
     _skipped,
     _validated_capsule,
 )
@@ -110,8 +110,7 @@ def run_capsule_bound_local(
         )
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise RunnerError(
-            "working directory does not exist: "
-            f"{capsule.initial_state.working_directory}"
+            f"working directory does not exist: {capsule.initial_state.working_directory}"
         ) from exc
     except DirectoryBindingError as exc:
         raise RunnerError(str(exc)) from exc

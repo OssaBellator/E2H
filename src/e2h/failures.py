@@ -257,9 +257,7 @@ class FailureSummary(StrictModel):
             raise ValueError("primary failure code must appear in failure code counts")
         if self.primary_code is not None:
             primary_rank = _IMPACT_PRIMARY_RANK[_CODE_IMPACT[self.primary_code]]
-            best_rank = min(
-                _IMPACT_PRIMARY_RANK[_CODE_IMPACT[code]] for code in code_counts
-            )
+            best_rank = min(_IMPACT_PRIMARY_RANK[_CODE_IMPACT[code]] for code in code_counts)
             if primary_rank != best_rank:
                 raise ValueError("primary failure must use the highest-priority failure impact")
         return self

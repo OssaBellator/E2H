@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Iterator
 
 _READ_CHUNK_BYTES = 1024 * 1024
 _STORE_SUFFIXES = ("", ".wal", ".wal.checkpoint", ".wal.recovery")
@@ -164,10 +164,9 @@ def _revalidate_store_set(
         after = os.fstat(descriptor)
         if current is None:
             raise StoreSnapshotError(f"DuckDB store file {name!r} changed while snapshotting")
-        if (
-            _stat_identity(after) != _stat_identity(before)
-            or _stat_identity(current) != _stat_identity(before)
-        ):
+        if _stat_identity(after) != _stat_identity(before) or _stat_identity(
+            current
+        ) != _stat_identity(before):
             raise StoreSnapshotError(f"DuckDB store file {name!r} changed while snapshotting")
 
 

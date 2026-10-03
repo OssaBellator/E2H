@@ -33,9 +33,7 @@ def test_store_query_rejects_old_schema_without_migrating(tmp_path: Path) -> Non
     initialize_store(database)
     connection = duckdb.connect(str(database))
     try:
-        connection.execute(
-            "UPDATE store_metadata SET value = '1' WHERE key = 'schema_version'"
-        )
+        connection.execute("UPDATE store_metadata SET value = '1' WHERE key = 'schema_version'")
     finally:
         connection.close()
 

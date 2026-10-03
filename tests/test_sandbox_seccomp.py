@@ -26,8 +26,6 @@ def test_container_builder_pins_builtin_seccomp_profile() -> None:
     )
 
     security_opts = [
-        argv[index + 1]
-        for index, value in enumerate(argv[:-1])
-        if value == "--security-opt"
+        argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "--security-opt"
     ]
     assert security_opts == ["no-new-privileges:true", "seccomp=builtin"]

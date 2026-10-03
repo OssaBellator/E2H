@@ -451,9 +451,7 @@ class E2HMCPService:
                     read_only=True,
                 )
         except (StoreError, StoreSnapshotError, ValueError) as exc:
-            raise MCPServiceError(
-                _redact_operation_error(str(exc), self.config.root)
-            ) from exc
+            raise MCPServiceError(_redact_operation_error(str(exc), self.config.root)) from exc
         material = {
             "view": selected.value,
             "rows": rows,
@@ -498,9 +496,7 @@ class E2HMCPService:
                 root=self.config.root,
             )
         except MCPServiceError as exc:
-            raise MCPServiceError(
-                _redact_operation_error(str(exc), self.config.root)
-            ) from exc
+            raise MCPServiceError(_redact_operation_error(str(exc), self.config.root)) from exc
         digest_matches = None if expected_sha256 is None else digest == expected_sha256
         size_matches = (min_bytes is None or size >= min_bytes) and (
             max_bytes is None or size <= max_bytes
@@ -529,9 +525,7 @@ class E2HMCPService:
                 containment_root=self.config.root,
             )
         except SnapshotError as exc:
-            raise MCPServiceError(
-                _redact_operation_error(str(exc), self.config.root)
-            ) from exc
+            raise MCPServiceError(_redact_operation_error(str(exc), self.config.root)) from exc
         return SnapshotVerification(
             archive=relative,
             snapshot_id=manifest.snapshot_id,
@@ -597,9 +591,7 @@ class E2HMCPService:
             RunnerError,
             WorkspaceSnapshotError,
         ) as exc:
-            raise MCPServiceError(
-                _redact_operation_error(str(exc), self.config.root)
-            ) from exc
+            raise MCPServiceError(_redact_operation_error(str(exc), self.config.root)) from exc
 
         raw_result = result.model_dump(mode="json")
         replay_material = {

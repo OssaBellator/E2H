@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import Iterator
 
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
 _DIRECTORY_BINDING_SUPPORTED = (

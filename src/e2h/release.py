@@ -530,10 +530,9 @@ def _read_release_manifest_bytes(path: Path) -> bytes:
     try:
         parent_opened = os.fstat(parent_descriptor)
         requested_opened = _requested_manifest_parent_identity(requested_parent)
-        if (
-            _stat_identity(parent_opened) != _stat_identity(parent_expected)
-            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
-        ):
+        if _stat_identity(parent_opened) != _stat_identity(parent_expected) or _stat_identity(
+            requested_opened
+        ) != _stat_identity(parent_opened):
             raise ReleaseIntegrityError("release manifest parent changed while opening")
         try:
             expected = (

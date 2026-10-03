@@ -14,7 +14,7 @@ import zipfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -58,9 +58,7 @@ _CLEANUP_DIR_FD_SUPPORTED = (
     and _UNLINK_SUPPORTS_DIR_FD
 )
 _WRITE_DIR_FD_SUPPORTED = (
-    _CLEANUP_DIR_FD_SUPPORTED
-    and _MKDIR_SUPPORTS_DIR_FD
-    and _RENAME_SUPPORTS_DIR_FD
+    _CLEANUP_DIR_FD_SUPPORTED and _MKDIR_SUPPORTS_DIR_FD and _RENAME_SUPPORTS_DIR_FD
 )
 _PLATFORM_PATH_TYPE = type(Path())
 
@@ -340,7 +338,7 @@ def _bound_snapshot_path_parent(self: Any) -> Path:
     parent.requested_parent = self.requested_parent
     parent.expected_parent = self.expected_parent
     parent.noun = self.noun
-    return parent
+    return cast(Path, parent)
 
 
 _BOUND_SNAPSHOT_PATH_TYPE = type(
@@ -364,7 +362,7 @@ def _bind_snapshot_path(
     bound.requested_parent = requested_parent
     bound.expected_parent = expected_parent
     bound.noun = noun
-    return bound
+    return cast(Path, bound)
 
 
 def _validated_snapshot_core(core: SnapshotCore) -> SnapshotCore:
@@ -1248,9 +1246,12 @@ def create_snapshot(
         if temporary_descriptor is not None:
             with suppress(OSError):
                 os.close(temporary_descriptor)
-        if temporary_name is not None and temporary_identity is not None:
-            if _CLEANUP_DIR_FD_SUPPORTED:
-                _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
+        if (
+            temporary_name is not None
+            and temporary_identity is not None
+            and _CLEANUP_DIR_FD_SUPPORTED
+        ):
+            _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
         with suppress(OSError):
             os.close(parent_descriptor)
 

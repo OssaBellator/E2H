@@ -18,7 +18,10 @@ def test_release_manifest_normalizes_initial_resolve_runtime_error(
 ) -> None:
     monkeypatch.setattr(Path, "resolve", _raise_resolution_error)
 
-    with pytest.raises(ReleaseIntegrityError, match="unable to read release manifest: symlink loop"):
+    with pytest.raises(
+        ReleaseIntegrityError,
+        match="unable to read release manifest: symlink loop",
+    ):
         load_release_manifest(tmp_path / "release.json")
 
 

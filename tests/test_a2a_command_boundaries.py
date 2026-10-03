@@ -19,9 +19,7 @@ from e2h.mcp_server import E2HMCPService, MCPServerConfig
 
 
 def test_text_command_rejects_duplicate_object_keys() -> None:
-    message = new_text_message(
-        '{"schema_version":"0.1","operation":"status","operation":"replay"}'
-    )
+    message = new_text_message('{"schema_version":"0.1","operation":"status","operation":"replay"}')
 
     with pytest.raises(A2AAgentError, match="valid JSON"):
         parse_verification_message(message, max_bytes=1024)

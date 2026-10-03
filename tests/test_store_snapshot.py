@@ -218,9 +218,11 @@ def test_snapshot_fails_closed_when_descriptor_binding_is_unavailable(
     database.write_bytes(b"inside")
     monkeypatch.setattr(store_snapshot, "_DESCRIPTOR_BOUND_SUPPORTED", False)
 
-    with pytest.raises(
-        StoreSnapshotError,
-        match="platform does not support descriptor-bound DuckDB store snapshots",
+    with (
+        pytest.raises(
+            StoreSnapshotError,
+            match="platform does not support descriptor-bound DuckDB store snapshots",
+        ),
+        stable_store_snapshot(database),
     ):
-        with stable_store_snapshot(database):
-            raise AssertionError("unsupported platform should not yield a snapshot")
+        raise AssertionError("unsupported platform should not yield a snapshot")

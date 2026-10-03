@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -105,10 +106,8 @@ def _connection(
 
 def _rollback_best_effort(connection: duckdb.DuckDBPyConnection) -> None:
     """Attempt transaction rollback without replacing the primary DuckDB failure."""
-    try:
+    with contextlib.suppress(duckdb.Error):
         connection.execute("ROLLBACK")
-    except duckdb.Error:
-        pass
 
 
 def _scalar_int(connection: duckdb.DuckDBPyConnection, sql: str) -> int:
@@ -314,10 +313,7 @@ def query_store_with_info(
             else:
                 columns = [str(item[0]) for item in cursor.description]
                 rows = [
-                    {
-                        column: _normalize(value)
-                        for column, value in zip(columns, row, strict=True)
-                    }
+                    {column: _normalize(value) for column, value in zip(columns, row, strict=True)}
                     for row in cursor.fetchall()
                 ]
             connection.execute("COMMIT")
