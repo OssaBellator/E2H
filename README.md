@@ -14,6 +14,31 @@ Python 3.11, 3.12, and 3.13 are exercised in CI.
 - **Evidence rule:** E2H records observable events and artifacts only; it does not attempt to capture or reconstruct hidden model chain-of-thought.
 - **Boundary:** a valid harness or artifact is not a general-purpose sandbox and does not make arbitrary candidate code safe.
 
+## Evidence lifecycle
+
+```mermaid
+flowchart LR
+    A[Observable run / transcript] --> B[Ingest + privacy review]
+    B --> C[Content-addressed evidence]
+    C --> D[Harness proposal]
+    D --> E[Mutation verification]
+    E --> F[Human review]
+    F --> G[Materialized capsule]
+    G --> H[Replay / experiment]
+    H --> I[Promotion / rollback evidence]
+    I --> J[Reproducible release]
+```
+
+### Reviewer path
+
+- Snapshot implementation: [`src/e2h/workspace_snapshot.py`](./src/e2h/workspace_snapshot.py)
+- Runtime request planning: [`src/e2h/runtime_plan.py`](./src/e2h/runtime_plan.py)
+- Release integrity: [`docs/release-integrity.md`](./docs/release-integrity.md)
+- Provider conformance: [`docs/provider-runtime-conformance.md`](./docs/provider-runtime-conformance.md)
+- Privacy CI: [`.github/workflows/privacy-ci.yml`](./.github/workflows/privacy-ci.yml)
+- Release-integrity CI: [`.github/workflows/release-integrity.yml`](./.github/workflows/release-integrity.yml)
+- Representative boundary tests: [`tests/test_compiler_boundaries.py`](./tests/test_compiler_boundaries.py)
+
 ## What E2H provides
 
 | Area | Capabilities |
