@@ -40,7 +40,10 @@ def test_benchmark_environment_root_resolution_failure_is_normalized() -> None:
             del strict
             raise RuntimeError("resolution loop")
 
-    with pytest.raises(BenchmarkEnvironmentError, match="unable to resolve benchmark environment root"):
+    with pytest.raises(
+        BenchmarkEnvironmentError,
+        match="unable to resolve benchmark environment root",
+    ):
         seal_benchmark_environment_suite(_suite(), root=BrokenPath("root"))
 
 

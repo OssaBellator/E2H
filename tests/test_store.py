@@ -66,9 +66,7 @@ def run_result(
         finished_at=started + timedelta(seconds=1),
         duration_seconds=1,
         checks=resolved_checks,
-        failure_summary=summarize_failures(
-            (check.id, check.failure) for check in resolved_checks
-        ),
+        failure_summary=summarize_failures((check.id, check.failure) for check in resolved_checks),
     )
 
 

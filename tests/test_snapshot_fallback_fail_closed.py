@@ -81,9 +81,7 @@ def test_restore_fallback_failure_preserves_existing_empty_destination(
     create_snapshot(root, archive)
     destination = tmp_path / "restored"
     destination.mkdir()
-    destination_identity = snapshot_module._inode_identity(
-        destination.stat(follow_symlinks=False)
-    )
+    destination_identity = snapshot_module._inode_identity(destination.stat(follow_symlinks=False))
     original_replace = os.replace
     monkeypatch.setattr(snapshot_module, "_WRITE_DIR_FD_SUPPORTED", False)
 
@@ -98,7 +96,8 @@ def test_restore_fallback_failure_preserves_existing_empty_destination(
         restore_snapshot(archive, destination)
 
     assert destination.is_dir()
-    assert snapshot_module._inode_identity(
-        destination.stat(follow_symlinks=False)
-    ) == destination_identity
+    assert (
+        snapshot_module._inode_identity(destination.stat(follow_symlinks=False))
+        == destination_identity
+    )
     assert not list(destination.iterdir())

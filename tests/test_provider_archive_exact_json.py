@@ -125,18 +125,27 @@ def test_gemini_document_rejects_json_coercible_metadata(metadata: dict[str, Any
 def test_provider_archives_preserve_valid_nested_json() -> None:
     metadata = {"enabled": True, "values": [1, 2.5, None], "mapping": {"1": "value"}}
 
-    assert OpenAIResponsesDocument(
-        id="openai",
-        responses=[_openai_record()],
-        metadata=metadata,
-    ).metadata == metadata
-    assert AnthropicMessagesDocument(
-        id="anthropic",
-        records=[_anthropic_record()],
-        metadata=metadata,
-    ).metadata == metadata
-    assert GeminiGenerateContentDocument(
-        id="gemini",
-        records=[_gemini_record()],
-        metadata=metadata,
-    ).metadata == metadata
+    assert (
+        OpenAIResponsesDocument(
+            id="openai",
+            responses=[_openai_record()],
+            metadata=metadata,
+        ).metadata
+        == metadata
+    )
+    assert (
+        AnthropicMessagesDocument(
+            id="anthropic",
+            records=[_anthropic_record()],
+            metadata=metadata,
+        ).metadata
+        == metadata
+    )
+    assert (
+        GeminiGenerateContentDocument(
+            id="gemini",
+            records=[_gemini_record()],
+            metadata=metadata,
+        ).metadata
+        == metadata
+    )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -100,14 +99,13 @@ def test_successful_cleanup_preserves_body_exception(
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
 
-    with _archive(tmp_path) as archive:
-        with pytest.raises(ValueError, match="body failed"):
-            with prepared_workspace_volume(
-                ContainerSandbox(image=IMAGE),
-                archive,
-                runtime_binary=str(runtime),
-            ):
-                raise ValueError("body failed")
+    with _archive(tmp_path) as archive, pytest.raises(ValueError, match="body failed"):
+        with prepared_workspace_volume(
+            ContainerSandbox(image=IMAGE),
+            archive,
+            runtime_binary=str(runtime),
+        ):
+            raise ValueError("body failed")
 
 
 def test_cleanup_failure_does_not_mask_system_exit(
@@ -118,14 +116,13 @@ def test_cleanup_failure_does_not_mask_system_exit(
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
     monkeypatch.setenv("DOCKER_TEST_VOLUME_RM_FAIL", "1")
 
-    with _archive(tmp_path) as archive:
-        with pytest.raises(SystemExit) as caught:
-            with prepared_workspace_volume(
-                ContainerSandbox(image=IMAGE),
-                archive,
-                runtime_binary=str(runtime),
-            ):
-                raise SystemExit(3)
+    with _archive(tmp_path) as archive, pytest.raises(SystemExit) as caught:
+        with prepared_workspace_volume(
+            ContainerSandbox(image=IMAGE),
+            archive,
+            runtime_binary=str(runtime),
+        ):
+            raise SystemExit(3)
 
     assert caught.value.code == 3
     assert caught.value.__notes__ is not None

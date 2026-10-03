@@ -10,8 +10,7 @@ from e2h.docker_remote import DockerRemoteError
 
 _RESOURCE_TIMEOUT_SECONDS = 10.0
 _RESOURCE_FORMAT = (
-    "{{.OSType}} {{.MemoryLimit}} {{.SwapLimit}} "
-    "{{.CpuCfsPeriod}} {{.CpuCfsQuota}} {{.PidsLimit}}"
+    "{{.OSType}} {{.MemoryLimit}} {{.SwapLimit}} {{.CpuCfsPeriod}} {{.CpuCfsQuota}} {{.PidsLimit}}"
 )
 _RUNTIME_COMPONENTS_FORMAT = "{{json .Server.Components}}"
 _RUNC_VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)([-+].*)?$")
@@ -97,14 +96,11 @@ def require_docker_resource_limits(runtime_binary: str = "docker") -> None:
             text=True,
         )
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
-        raise DockerRemoteError(
-            f"unable to query Docker resource capabilities: {exc}"
-        ) from exc
+        raise DockerRemoteError(f"unable to query Docker resource capabilities: {exc}") from exc
     if completed.returncode != 0:
         error = completed.stderr.strip() or completed.stdout.strip() or "unknown Docker error"
         raise DockerRemoteError(
-            "Docker resource capability probe failed with exit "
-            f"{completed.returncode}: {error}"
+            f"Docker resource capability probe failed with exit {completed.returncode}: {error}"
         )
 
     fields = completed.stdout.strip().split()
@@ -120,19 +116,14 @@ def require_docker_resource_limits(runtime_binary: str = "docker") -> None:
     ) = fields
     if os_type != "linux":
         raise DockerRemoteError(
-            "remote Docker replay requires a Linux daemon; "
-            f"observed os_type={os_type}"
+            f"remote Docker replay requires a Linux daemon; observed os_type={os_type}"
         )
     if memory_limit != "true" or swap_limit != "true":
         raise DockerRemoteError(
             "remote Docker replay requires memory and swap limit support; "
             f"observed memory_limit={memory_limit}, swap_limit={swap_limit}"
         )
-    if (
-        cpu_cfs_period != "true"
-        or cpu_cfs_quota != "true"
-        or pids_limit != "true"
-    ):
+    if cpu_cfs_period != "true" or cpu_cfs_quota != "true" or pids_limit != "true":
         raise DockerRemoteError(
             "remote Docker replay requires CPU CFS period/quota and PID limit support; "
             f"observed cpu_cfs_period={cpu_cfs_period}, "

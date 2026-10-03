@@ -404,13 +404,12 @@ def test_prepared_workspace_volume_rejects_unsafe_remote_policy_before_docker(
     runtime, log = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_LOG", str(log))
 
-    with _sealed_archive(tmp_path) as archive:
-        with pytest.raises(DockerRemoteError, match=message):
-            with prepared_workspace_volume(
-                sandbox,
-                archive,
-                runtime_binary=str(runtime),
-            ):
-                raise AssertionError("unsafe policy should not reach Docker")
+    with _sealed_archive(tmp_path) as archive, pytest.raises(DockerRemoteError, match=message):
+        with prepared_workspace_volume(
+            sandbox,
+            archive,
+            runtime_binary=str(runtime),
+        ):
+            raise AssertionError("unsafe policy should not reach Docker")
 
     assert not log.exists()

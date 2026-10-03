@@ -92,9 +92,8 @@ def _root_path_must_be_stable(
         current = root.stat(follow_symlinks=False)
     except OSError as exc:
         raise SnapshotError(f"unable to restat snapshot root: {exc}") from exc
-    if (
-        not stat.S_ISDIR(current.st_mode)
-        or _directory_identity(current) != _directory_identity(expected)
+    if not stat.S_ISDIR(current.st_mode) or _directory_identity(current) != _directory_identity(
+        expected
     ):
         raise SnapshotError("snapshot root changed during traversal")
     requested_root = _requested_root(root, requested_root)

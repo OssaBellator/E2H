@@ -186,9 +186,7 @@ def _revalidate_trace_for_write(value: Trace) -> Trace:
 
 def _revalidate_run_result_for_trace(result: RunResult) -> RunResult:
     if type(result) is not RunResult:
-        raise ValueError(
-            f"invalid run result: expected RunResult, got {type(result).__name__}"
-        )
+        raise ValueError(f"invalid run result: expected RunResult, got {type(result).__name__}")
     try:
         payload = result.model_dump(mode="python", warnings="none")
         return RunResult.model_validate(payload)

@@ -85,6 +85,10 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["SIM117", "RUF043"]
+"tests/test_container_user_ids.py" = ["RUF001"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

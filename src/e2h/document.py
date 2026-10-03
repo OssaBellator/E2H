@@ -124,8 +124,7 @@ def _validate_json_compatible(
 ) -> None:
     if depth > _MAX_DOCUMENT_STRUCTURE_DEPTH:
         raise ValueError(
-            "document structure exceeds maximum nesting depth "
-            f"({_MAX_DOCUMENT_STRUCTURE_DEPTH})"
+            f"document structure exceeds maximum nesting depth ({_MAX_DOCUMENT_STRUCTURE_DEPTH})"
         )
     if value is None or type(value) in (str, bool, int):
         return
@@ -206,10 +205,9 @@ def _read_document_bytes(
             noun=noun,
             containment_root=containment_root,
         )
-        if (
-            _stat_identity(parent_opened) != _stat_identity(parent_expected)
-            or _stat_identity(requested_opened) != _stat_identity(parent_opened)
-        ):
+        if _stat_identity(parent_opened) != _stat_identity(parent_expected) or _stat_identity(
+            requested_opened
+        ) != _stat_identity(parent_opened):
             raise ValueError(f"{noun} parent changed while opening")
         try:
             expected = (

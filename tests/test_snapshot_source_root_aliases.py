@@ -74,9 +74,7 @@ def test_descriptor_snapshot_root_retarget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    requested, alias, original_root, replacement_parent, replacement_root = _aliased_root(
-        tmp_path
-    )
+    requested, alias, original_root, replacement_parent, replacement_root = _aliased_root(tmp_path)
     output = tmp_path / "descriptor.e2hsnap"
     state = _retarget_on_read(alias, replacement_parent, monkeypatch)
 
@@ -93,9 +91,7 @@ def test_fallback_snapshot_root_retarget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    requested, alias, original_root, replacement_parent, replacement_root = _aliased_root(
-        tmp_path
-    )
+    requested, alias, original_root, replacement_parent, replacement_root = _aliased_root(tmp_path)
     output = tmp_path / "fallback.e2hsnap"
     monkeypatch.setattr(snapshot_source, "_SOURCE_DIR_FD_SUPPORTED", False)
     state = _retarget_on_read(alias, replacement_parent, monkeypatch)
@@ -113,9 +109,7 @@ def test_snapshot_root_retarget_before_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    requested, alias, original_root, replacement_parent, replacement_root = _aliased_root(
-        tmp_path
-    )
+    requested, alias, original_root, replacement_parent, replacement_root = _aliased_root(tmp_path)
     output = tmp_path / "publication.e2hsnap"
     original_collect = snapshot_source.collect_snapshot_source
     state = {"swapped": False}

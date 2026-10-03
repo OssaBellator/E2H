@@ -127,9 +127,7 @@ def _open_staged(staged: Path) -> tuple[int, os.stat_result]:
     try:
         expected = staged.stat(follow_symlinks=False)
     except OSError as exc:
-        raise ParquetOutputError(
-            "Parquet export did not produce a regular staging file"
-        ) from exc
+        raise ParquetOutputError("Parquet export did not produce a regular staging file") from exc
     if stat.S_ISLNK(expected.st_mode) or not stat.S_ISREG(expected.st_mode):
         raise ParquetOutputError("Parquet export did not produce a regular staging file")
     descriptor: int | None = None
@@ -167,9 +165,8 @@ def _copy_staged(
         staged_before = os.fstat(staged_descriptor)
     except OSError as exc:
         raise ParquetOutputError(f"unable to inspect Parquet staging file: {exc}") from exc
-    if (
-        not stat.S_ISREG(staged_before.st_mode)
-        or _stat_identity(staged_before) != _stat_identity(staged_expected)
+    if not stat.S_ISREG(staged_before.st_mode) or _stat_identity(staged_before) != _stat_identity(
+        staged_expected
     ):
         raise ParquetOutputError("Parquet staging file changed before installation")
     observed = 0
@@ -320,9 +317,7 @@ def _install_new(
         try:
             current_temporary = _stat_entry(parent_descriptor, parent, temp_name)
         except OSError as exc:
-            raise ParquetOutputError(
-                f"unable to restat temporary Parquet output: {exc}"
-            ) from exc
+            raise ParquetOutputError(f"unable to restat temporary Parquet output: {exc}") from exc
         if not stat.S_ISREG(current_temporary.st_mode) or _inode_identity(
             current_temporary
         ) != _inode_identity(opened):

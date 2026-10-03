@@ -25,9 +25,5 @@ def test_container_builder_pins_current_docker_nofile_default(tmp_path: Path) ->
         runtime_binary="docker-test",
     )
 
-    pairs = [
-        argv[index + 1]
-        for index, value in enumerate(argv[:-1])
-        if value == "--ulimit"
-    ]
+    pairs = [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "--ulimit"]
     assert pairs == ["nofile=1024:1024"]

@@ -52,11 +52,13 @@ def test_sealed_archive_emits_exact_file_mtime_pax_record(tmp_path: Path) -> Non
     if observed_ns % 1_000_000_000 == 0:
         pytest.skip("test filesystem rounds mtimes to whole seconds")
 
-    with stable_workspace_archive(
-        workspace,
-        max_bytes=1024,
-        max_entries=10,
-    ) as captured:
-        with tarfile.open(fileobj=captured.file, mode="r:") as archive:
-            member = archive.getmember("marker.txt")
-            assert member.pax_headers["mtime"] == _expected_pax_timestamp(observed_ns)
+    with (
+        stable_workspace_archive(
+            workspace,
+            max_bytes=1024,
+            max_entries=10,
+        ) as captured,
+        tarfile.open(fileobj=captured.file, mode="r:") as archive,
+    ):
+        member = archive.getmember("marker.txt")
+        assert member.pax_headers["mtime"] == _expected_pax_timestamp(observed_ns)

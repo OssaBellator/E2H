@@ -169,17 +169,15 @@ class RunResult(BaseModel):
                             "skipped checks must immediately follow the halting failed check"
                         )
                     blocking_check_id = self.checks[index - 1].id
-                if (
-                    check.failure is None
-                    or check.failure.caused_by_check_id != blocking_check_id
-                ):
-                    raise ValueError("skipped checks must reference the check that halted execution")
+                if check.failure is None or check.failure.caused_by_check_id != blocking_check_id:
+                    raise ValueError(
+                        "skipped checks must reference the check that halted execution"
+                    )
         expected_summary = summarize_failures((check.id, check.failure) for check in self.checks)
         if self.failure_summary != expected_summary:
             raise ValueError("run failure_summary must match check failures")
         has_infrastructure_error = any(
-            check.failure is not None
-            and check.failure.impact is FailureImpact.INFRASTRUCTURE_ERROR
+            check.failure is not None and check.failure.impact is FailureImpact.INFRASTRUCTURE_ERROR
             for check in self.checks
         )
         has_failed_check = any(check.status is not CheckStatus.PASSED for check in self.checks)

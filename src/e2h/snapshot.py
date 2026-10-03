@@ -58,9 +58,7 @@ _CLEANUP_DIR_FD_SUPPORTED = (
     and _UNLINK_SUPPORTS_DIR_FD
 )
 _WRITE_DIR_FD_SUPPORTED = (
-    _CLEANUP_DIR_FD_SUPPORTED
-    and _MKDIR_SUPPORTS_DIR_FD
-    and _RENAME_SUPPORTS_DIR_FD
+    _CLEANUP_DIR_FD_SUPPORTED and _MKDIR_SUPPORTS_DIR_FD and _RENAME_SUPPORTS_DIR_FD
 )
 _PLATFORM_PATH_TYPE = type(Path())
 
@@ -1248,9 +1246,12 @@ def create_snapshot(
         if temporary_descriptor is not None:
             with suppress(OSError):
                 os.close(temporary_descriptor)
-        if temporary_name is not None and temporary_identity is not None:
-            if _CLEANUP_DIR_FD_SUPPORTED:
-                _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
+        if (
+            temporary_name is not None
+            and temporary_identity is not None
+            and _CLEANUP_DIR_FD_SUPPORTED
+        ):
+            _remove_regular_file_by_identity_at(parent_descriptor, temporary_identity)
         with suppress(OSError):
             os.close(parent_descriptor)
 

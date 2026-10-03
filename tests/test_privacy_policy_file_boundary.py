@@ -30,10 +30,7 @@ def test_privacy_policy_loader_rejects_final_symlink(tmp_path: Path) -> None:
         ("policy.json", '{"id":"first","id":"second"}\n'),
         (
             "policy.yaml",
-            "custom_rules:\n"
-            "  - id: duplicate\n"
-            "    pattern: one\n"
-            "    pattern: two\n",
+            "custom_rules:\n  - id: duplicate\n    pattern: one\n    pattern: two\n",
         ),
     ],
 )

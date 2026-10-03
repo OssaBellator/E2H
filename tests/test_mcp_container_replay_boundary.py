@@ -17,11 +17,7 @@ def _sandbox_capsule(path: Path) -> None:
                 "id": "container-boundary",
                 "goal": "Exercise the MCP container replay boundary.",
                 "sandbox": {"image": "python@sha256:" + "0" * 64},
-                "success": {
-                    "commands": [
-                        {"id": "check", "argv": ["python", "-V"]}
-                    ]
-                },
+                "success": {"commands": [{"id": "check", "argv": ["python", "-V"]}]},
             }
         ),
         encoding="utf-8",

@@ -7,10 +7,11 @@ import os
 import stat
 import sys
 import tarfile
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
 try:
     import fcntl
@@ -175,9 +176,7 @@ def _capture_directory_names(
     except WorkspaceArchiveError:
         raise
     except (OSError, TypeError) as exc:
-        raise WorkspaceArchiveError(
-            f"unable to list replay workspace directory: {exc}"
-        ) from exc
+        raise WorkspaceArchiveError(f"unable to list replay workspace directory: {exc}") from exc
     return sorted(names)
 
 
@@ -197,17 +196,13 @@ def _list_directory(
     except WorkspaceArchiveError:
         raise
     except (OSError, TypeError) as exc:
-        raise WorkspaceArchiveError(
-            f"unable to list replay workspace directory: {exc}"
-        ) from exc
+        raise WorkspaceArchiveError(f"unable to list replay workspace directory: {exc}") from exc
     return sorted(names)
 
 
 def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
     if not target or "\x00" in target:
-        raise WorkspaceArchiveError(
-            "replay workspace symlink target must be non-empty without NUL"
-        )
+        raise WorkspaceArchiveError("replay workspace symlink target must be non-empty without NUL")
     value = PurePosixPath(target)
     if value.is_absolute():
         raise WorkspaceArchiveError("replay workspace symlink target must be relative")
@@ -287,13 +282,8 @@ def _add_regular_file(
         ) from exc
     try:
         opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or _file_identity(opened) != _file_identity(expected)
-        ):
-            raise WorkspaceArchiveError(
-                f"replay workspace file {name!r} changed while opening"
-            )
+        if not stat.S_ISREG(opened.st_mode) or _file_identity(opened) != _file_identity(expected):
+            raise WorkspaceArchiveError(f"replay workspace file {name!r} changed while opening")
         _reject_descriptor_xattrs(descriptor, noun=f"file {name!r}")
         member = _tar_info(relative, expected, entry_type=tarfile.REGTYPE)
         member.size = expected.st_size
@@ -301,13 +291,10 @@ def _add_regular_file(
             archive.addfile(member, source)
         after = os.fstat(descriptor)
         current = _stat_entry(parent_descriptor, name)
-        if (
-            _file_identity(after) != _file_identity(expected)
-            or _file_identity(current) != _file_identity(expected)
-        ):
-            raise WorkspaceArchiveError(
-                f"replay workspace file {name!r} changed while archiving"
-            )
+        if _file_identity(after) != _file_identity(expected) or _file_identity(
+            current
+        ) != _file_identity(expected):
+            raise WorkspaceArchiveError(f"replay workspace file {name!r} changed while archiving")
     except (OSError, tarfile.TarError) as exc:
         raise WorkspaceArchiveError(
             f"unable to archive replay workspace file {name!r}: {exc}"
@@ -326,9 +313,7 @@ def _add_symlink(
     state: _ArchiveState,
 ) -> None:
     if expected.st_nlink > 1:
-        raise WorkspaceArchiveError(
-            f"replay workspace symlink {name!r} has multiple hard links"
-        )
+        raise WorkspaceArchiveError(f"replay workspace symlink {name!r} has multiple hard links")
     try:
         target = os.readlink(name, dir_fd=parent_descriptor)
     except OSError as exc:
@@ -350,9 +335,7 @@ def _add_symlink(
             f"unable to archive replay workspace symlink {name!r}: {exc}"
         ) from exc
     if _file_identity(current) != _file_identity(expected) or current_target != target:
-        raise WorkspaceArchiveError(
-            f"replay workspace symlink {name!r} changed while archiving"
-        )
+        raise WorkspaceArchiveError(f"replay workspace symlink {name!r} changed while archiving")
 
 
 def _add_directory_entry(
@@ -364,11 +347,7 @@ def _add_directory_entry(
     state: _ArchiveState,
     directories: set[str],
 ) -> None:
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         child_descriptor = os.open(name, flags, dir_fd=source_descriptor)
     except OSError as exc:
@@ -377,9 +356,8 @@ def _add_directory_entry(
         ) from exc
     try:
         opened = os.fstat(child_descriptor)
-        if (
-            not stat.S_ISDIR(opened.st_mode)
-            or _directory_identity(opened) != _directory_identity(info)
+        if not stat.S_ISDIR(opened.st_mode) or _directory_identity(opened) != _directory_identity(
+            info
         ):
             raise WorkspaceArchiveError(
                 f"replay workspace directory {name!r} changed while opening"
@@ -391,10 +369,9 @@ def _add_directory_entry(
         directories.add(relative.as_posix())
         _add_directory(archive, child_descriptor, relative, state, directories)
         current = _stat_entry(source_descriptor, name)
-        if (
-            _directory_identity(os.fstat(child_descriptor)) != _directory_identity(info)
-            or _directory_identity(current) != _directory_identity(info)
-        ):
+        if _directory_identity(os.fstat(child_descriptor)) != _directory_identity(
+            info
+        ) or _directory_identity(current) != _directory_identity(info):
             raise WorkspaceArchiveError(
                 f"replay workspace directory {name!r} changed while archiving"
             )
@@ -437,9 +414,7 @@ def _add_directory(
                 directories,
             )
             continue
-        raise WorkspaceArchiveError(
-            f"replay workspace entry {name!r} has unsupported file type"
-        )
+        raise WorkspaceArchiveError(f"replay workspace entry {name!r} has unsupported file type")
 
     current_names = _list_directory(
         source_descriptor,
@@ -451,20 +426,13 @@ def _add_directory(
     for name, before in expected.items():
         current = _stat_entry(source_descriptor, name)
         if _entry_identity(current) != _entry_identity(before):
-            raise WorkspaceArchiveError(
-                f"replay workspace entry {name!r} changed while archiving"
-            )
+            raise WorkspaceArchiveError(f"replay workspace entry {name!r} changed while archiving")
 
 
 def _seal_archive(handle: BinaryIO) -> None:
     if not sealed_workspace_archive_supported() or fcntl is None:
         raise WorkspaceArchiveError("sealed replay workspace archives are unavailable")
-    seals = (
-        fcntl.F_SEAL_WRITE
-        | fcntl.F_SEAL_GROW
-        | fcntl.F_SEAL_SHRINK
-        | fcntl.F_SEAL_SEAL
-    )
+    seals = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
     try:
         handle.flush()
         fcntl.fcntl(handle.fileno(), fcntl.F_ADD_SEALS, seals)

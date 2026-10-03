@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
-from typing import Iterator
 
 from e2h.directory_binding import DirectoryBindingError, open_absolute_directory
 
@@ -89,9 +89,7 @@ def _list_directory(descriptor: int) -> list[str]:
     try:
         return sorted(os.listdir(descriptor))
     except (OSError, TypeError) as exc:
-        raise WorkspaceSnapshotError(
-            f"unable to list replay workspace directory: {exc}"
-        ) from exc
+        raise WorkspaceSnapshotError(f"unable to list replay workspace directory: {exc}") from exc
 
 
 def _copy_regular_file(
@@ -112,13 +110,8 @@ def _copy_regular_file(
         ) from exc
     try:
         opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or _file_identity(opened) != _file_identity(expected)
-        ):
-            raise WorkspaceSnapshotError(
-                f"replay workspace file {name!r} changed while opening"
-            )
+        if not stat.S_ISREG(opened.st_mode) or _file_identity(opened) != _file_identity(expected):
+            raise WorkspaceSnapshotError(f"replay workspace file {name!r} changed while opening")
         copied = 0
         try:
             with (
@@ -137,19 +130,14 @@ def _copy_regular_file(
                 f"unable to copy replay workspace file {name!r}: {exc}"
             ) from exc
         if copied != expected.st_size:
-            raise WorkspaceSnapshotError(
-                f"replay workspace file {name!r} changed while copying"
-            )
+            raise WorkspaceSnapshotError(f"replay workspace file {name!r} changed while copying")
         state.add_bytes(copied)
         after = os.fstat(descriptor)
         current = _stat_entry(parent_descriptor, name)
-        if (
-            _file_identity(after) != _file_identity(expected)
-            or _file_identity(current) != _file_identity(expected)
-        ):
-            raise WorkspaceSnapshotError(
-                f"replay workspace file {name!r} changed while copying"
-            )
+        if _file_identity(after) != _file_identity(expected) or _file_identity(
+            current
+        ) != _file_identity(expected):
+            raise WorkspaceSnapshotError(f"replay workspace file {name!r} changed while copying")
         _apply_metadata(destination, expected)
     finally:
         with suppress(OSError):
@@ -170,9 +158,7 @@ def _safe_symlink_target(parent: PurePosixPath, target: str) -> None:
             continue
         if part == "..":
             if not stack:
-                raise WorkspaceSnapshotError(
-                    "replay workspace symlink escapes isolated root"
-                )
+                raise WorkspaceSnapshotError("replay workspace symlink escapes isolated root")
             stack.pop()
         else:
             stack.append(part)
@@ -208,9 +194,7 @@ def _copy_symlink(
             f"unable to re-read replay workspace symlink {name!r}: {exc}"
         ) from exc
     if _file_identity(current) != _file_identity(expected) or current_target != target:
-        raise WorkspaceSnapshotError(
-            f"replay workspace symlink {name!r} changed while copying"
-        )
+        raise WorkspaceSnapshotError(f"replay workspace symlink {name!r} changed while copying")
 
 
 def _copy_directory_entry(
@@ -221,11 +205,7 @@ def _copy_directory_entry(
     relative: PurePosixPath,
     state: _SnapshotState,
 ) -> None:
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         child_descriptor = os.open(name, flags, dir_fd=source_descriptor)
     except OSError as exc:
@@ -234,23 +214,18 @@ def _copy_directory_entry(
         ) from exc
     try:
         opened = os.fstat(child_descriptor)
-        if (
-            not stat.S_ISDIR(opened.st_mode)
-            or _directory_snapshot_identity(opened)
-            != _directory_snapshot_identity(info)
-        ):
+        if not stat.S_ISDIR(opened.st_mode) or _directory_snapshot_identity(
+            opened
+        ) != _directory_snapshot_identity(info):
             raise WorkspaceSnapshotError(
                 f"replay workspace directory {name!r} changed while opening"
             )
         destination.mkdir(mode=0o700)
         _copy_directory(child_descriptor, destination, relative / name, state)
         current = _stat_entry(source_descriptor, name)
-        if (
-            _directory_snapshot_identity(os.fstat(child_descriptor))
-            != _directory_snapshot_identity(info)
-            or _directory_snapshot_identity(current)
-            != _directory_snapshot_identity(info)
-        ):
+        if _directory_snapshot_identity(os.fstat(child_descriptor)) != _directory_snapshot_identity(
+            info
+        ) or _directory_snapshot_identity(current) != _directory_snapshot_identity(info):
             raise WorkspaceSnapshotError(
                 f"replay workspace directory {name!r} changed while copying"
             )
@@ -289,18 +264,14 @@ def _copy_directory(
                 state,
             )
             continue
-        raise WorkspaceSnapshotError(
-            f"replay workspace entry {name!r} has unsupported file type"
-        )
+        raise WorkspaceSnapshotError(f"replay workspace entry {name!r} has unsupported file type")
 
     if _list_directory(source_descriptor) != names:
         raise WorkspaceSnapshotError("replay workspace directory changed while copying")
     for name, before in expected.items():
         current = _stat_entry(source_descriptor, name)
         if _entry_identity(current) != _entry_identity(before):
-            raise WorkspaceSnapshotError(
-                f"replay workspace entry {name!r} changed while copying"
-            )
+            raise WorkspaceSnapshotError(f"replay workspace entry {name!r} changed while copying")
 
 
 @contextmanager
@@ -334,15 +305,11 @@ def stable_workspace_snapshot(
             if _directory_snapshot_identity(os.fstat(descriptor)) != (
                 _directory_snapshot_identity(root_info)
             ):
-                raise WorkspaceSnapshotError(
-                    "replay workspace root changed while copying"
-                )
+                raise WorkspaceSnapshotError("replay workspace root changed while copying")
             _apply_metadata(private_workspace, root_info)
             yield private_workspace
     except OSError as exc:
-        raise WorkspaceSnapshotError(
-            f"unable to create isolated replay workspace: {exc}"
-        ) from exc
+        raise WorkspaceSnapshotError(f"unable to create isolated replay workspace: {exc}") from exc
     finally:
         with suppress(OSError):
             os.close(descriptor)

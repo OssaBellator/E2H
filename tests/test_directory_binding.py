@@ -27,11 +27,7 @@ def test_absolute_directory_binding_rejects_real_directory_replacement(
 
     def swapping_open(target: Any, flags: int, *args: Any, **kwargs: Any) -> int:
         nonlocal swapped
-        if (
-            not swapped
-            and kwargs.get("dir_fd") is not None
-            and str(target) == workspace.name
-        ):
+        if not swapped and kwargs.get("dir_fd") is not None and str(target) == workspace.name:
             swapped = True
             workspace.rename(moved)
             workspace.mkdir()

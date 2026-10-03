@@ -49,9 +49,7 @@ def _tool_payload(arguments: str) -> dict[str, object]:
         ),
     )
     event = next(
-        item
-        for item in bundle.traces[0].events
-        if item.event_type is TraceEventType.TOOL_CALLED
+        item for item in bundle.traces[0].events if item.event_type is TraceEventType.TOOL_CALLED
     )
     return event.payload
 

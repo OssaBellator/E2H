@@ -6,9 +6,10 @@ import os
 import re
 import secrets
 import subprocess
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
 try:
     import fcntl
@@ -237,9 +238,7 @@ def _require_volume_free_image(runtime: str, image: str) -> None:
     if result == "none":
         return
     if result == "declared":
-        raise DockerRemoteError(
-            "remote Docker replay image must not declare VOLUME mount points"
-        )
+        raise DockerRemoteError("remote Docker replay image must not declare VOLUME mount points")
     raise DockerRemoteError("Docker image volume probe returned an unexpected response")
 
 

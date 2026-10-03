@@ -57,6 +57,4 @@ def test_container_builder_keeps_simple_mount_text_stable(tmp_path: Path) -> Non
         runtime_binary="docker-test",
     )
 
-    assert argv[argv.index("--mount") + 1] == (
-        f"type=bind,src={workspace},dst=/workspace,readonly"
-    )
+    assert argv[argv.index("--mount") + 1] == (f"type=bind,src={workspace},dst=/workspace,readonly")

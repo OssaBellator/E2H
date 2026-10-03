@@ -59,9 +59,8 @@ def _parent_path_must_be_stable(
     expected: os.stat_result,
 ) -> None:
     current = _requested_parent_identity(requested_parent)
-    if (
-        not stat.S_ISDIR(current.st_mode)
-        or _directory_identity(current) != _directory_identity(expected)
+    if not stat.S_ISDIR(current.st_mode) or _directory_identity(current) != _directory_identity(
+        expected
     ):
         raise OSError("atomic output parent changed while writing")
 
@@ -171,10 +170,9 @@ def _write_text_atomic_descriptor(
     temporary_identity: tuple[int, int] | None = None
     try:
         parent_opened = os.fstat(parent_descriptor)
-        if (
-            not stat.S_ISDIR(parent_opened.st_mode)
-            or _directory_identity(parent_opened) != _directory_identity(parent_expected)
-        ):
+        if not stat.S_ISDIR(parent_opened.st_mode) or _directory_identity(
+            parent_opened
+        ) != _directory_identity(parent_expected):
             raise OSError("atomic output parent changed while opening")
         _parent_descriptor_must_be_stable(
             requested_parent,

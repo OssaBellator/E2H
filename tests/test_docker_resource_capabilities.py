@@ -82,7 +82,10 @@ def test_resource_capability_probe_rejects_missing_cpu_or_pid_limits(
     runtime = _fake_docker(tmp_path)
     monkeypatch.setenv("DOCKER_TEST_CAPABILITIES", value)
 
-    with pytest.raises(DockerRemoteError, match="CPU CFS period/quota and PID limit support") as raised:
+    with pytest.raises(
+        DockerRemoteError,
+        match="CPU CFS period/quota and PID limit support",
+    ) as raised:
         require_docker_resource_limits(str(runtime))
 
     assert expected in str(raised.value)

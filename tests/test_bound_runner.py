@@ -133,18 +133,14 @@ def test_bound_runner_rejects_symlink_escape(tmp_path: Path) -> None:
         escape.symlink_to(outside, target_is_directory=True)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable: {exc}")
-    capsule = _capsule(
-        [{"id": "escape", "cwd": "escape", "argv": [sys.executable, "-V"]}]
-    )
+    capsule = _capsule([{"id": "escape", "cwd": "escape", "argv": [sys.executable, "-V"]}])
 
     with pytest.raises(RunnerError, match="escapes bound workspace"):
         _run_bound(capsule, tmp_path)
 
 
 def test_bound_runner_preserves_missing_command_classification(tmp_path: Path) -> None:
-    capsule = _capsule(
-        [{"id": "missing", "argv": ["e2h-command-that-does-not-exist"]}]
-    )
+    capsule = _capsule([{"id": "missing", "argv": ["e2h-command-that-does-not-exist"]}])
 
     result = _run_bound(capsule, tmp_path)
 
@@ -183,9 +179,7 @@ def test_bound_runner_timeout_terminates_descendants(tmp_path: Path) -> None:
 
 
 def test_bound_runner_missing_check_directory_is_error(tmp_path: Path) -> None:
-    capsule = _capsule(
-        [{"id": "missing", "cwd": "missing", "argv": [sys.executable, "-V"]}]
-    )
+    capsule = _capsule([{"id": "missing", "cwd": "missing", "argv": [sys.executable, "-V"]}])
 
     result = _run_bound(capsule, tmp_path)
 
