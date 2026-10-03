@@ -19,16 +19,15 @@ Python 3.11, 3.12, and 3.13 are exercised in CI.
 ## Evidence lifecycle
 
 ```mermaid
-flowchart LR
-    A[Observable run / transcript] --> B[Ingest + privacy review]
-    B --> C[Content-addressed evidence]
-    C --> D[Harness proposal]
-    D --> E[Mutation verification]
-    E --> F[Human review]
-    F --> G[Materialized capsule]
-    G --> H[Replay / experiment]
-    H --> I[Promotion / rollback evidence]
-    I --> J[Reproducible release]
+flowchart TD
+    A[Observable evidence]
+    B[Ingest and privacy review]
+    C[Verified harness]
+    D[Replay or experiment]
+    E[Promotion evidence]
+    F[Reproducible release]
+
+    A --> B --> C --> D --> E --> F
 ```
 
 ### Reviewer path
