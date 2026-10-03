@@ -65,7 +65,7 @@ def test_verify_snapshot_with_archive_sha256_rejects_parent_escape_from_containm
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks unavailable: {exc}")
 
-    with pytest.raises(SnapshotError, match="snapshot archive parent changed while reading"):
+    with pytest.raises(SnapshotError, match="snapshot archive parent escapes the configured root"):
         verify_snapshot_with_archive_sha256(
             requested_archive,
             containment_root=root.resolve(),

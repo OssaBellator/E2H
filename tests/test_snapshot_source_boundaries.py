@@ -456,6 +456,7 @@ def test_snapshot_source_explicit_include_errors_and_duplicates(tmp_path: Path) 
             source._collect_descriptor(
                 root,
                 root.stat(follow_symlinks=False),
+                requested_root=root,
                 includes=(fifo.name,),
                 patterns=(),
                 ignored=set(),
