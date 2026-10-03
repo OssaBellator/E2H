@@ -382,7 +382,9 @@ def test_evaluate_rejects_missing_extra_and_mismatched_evidence() -> None:
 
     item = proposal()
     item.evidence[0].candidate_variant_sha256 = "3" * 64
-    with pytest.raises(PromotionError, match="candidate does not match"):
+    with pytest.raises(
+        PromotionError, match="promotion evidence candidate must match proposal candidate"
+    ):
         evaluate_promotion(policy(), item)
 
 
