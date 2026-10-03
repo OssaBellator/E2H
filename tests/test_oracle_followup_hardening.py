@@ -54,7 +54,7 @@ def test_compile_oracle_revalidates_mutated_expected() -> None:
     )
     oracle.expected = {"nested": {1: "integer", "1": "string"}}
 
-    with pytest.raises(ValueError, match="string keys"):
+    with pytest.raises(ValueError, match="mapping keys must be strings"):
         compile_oracle(oracle)
 
 

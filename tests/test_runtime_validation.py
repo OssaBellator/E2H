@@ -207,15 +207,12 @@ def test_revalidation_preserves_canonical_invalid_python_values() -> None:
     current_capsule = capsule()
     current_capsule.metadata = {"not_json": {"value"}}
 
-    _, normalized_capsule, _ = revalidate_runtime_inputs(
-        document(),
-        current_capsule,
-        OpenAIResponsesInvocation(id="openai-runtime"),
-        OpenAIResponsesInvocation,
-        error_type=OpenAIRuntimeError,
-        invocation_noun="OpenAI Responses invocation",
-    )
-
-    assert normalized_capsule.metadata["not_json"] == {"value"}
-    with pytest.raises(ValueError, match="canonical JSON"):
-        capsule_sha256(normalized_capsule)
+    with pytest.raises(OpenAIRuntimeError, match="canonical JSON data"):
+        revalidate_runtime_inputs(
+            document(),
+            current_capsule,
+            OpenAIResponsesInvocation(id="openai-runtime"),
+            OpenAIResponsesInvocation,
+            error_type=OpenAIRuntimeError,
+            invocation_noun="OpenAI Responses invocation",
+        )

@@ -55,7 +55,7 @@ def test_create_snapshot_rejects_parent_swap_during_final_promotion(
 
     monkeypatch.setattr(os, "rename", swapping_rename)
 
-    with pytest.raises(SnapshotError, match="parent changed during publication"):
+    with pytest.raises(SnapshotError, match="parent changed while writing"):
         create_snapshot(root, output)
 
     assert swapped is True
@@ -133,7 +133,7 @@ def test_restore_snapshot_rejects_parent_swap_during_final_promotion(
 
     monkeypatch.setattr(os, "rename", swapping_rename)
 
-    with pytest.raises(SnapshotError, match="parent changed during publication"):
+    with pytest.raises(SnapshotError, match="parent changed while writing"):
         restore_snapshot(archive, destination)
 
     assert swapped is True
