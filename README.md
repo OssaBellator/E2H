@@ -38,6 +38,8 @@ flowchart TD
 
 ### Reviewer path
 
+- Case study: [CASE_STUDY.md](./CASE_STUDY.md)
+
 - Snapshot implementation: [`src/e2h/workspace_snapshot.py`](./src/e2h/workspace_snapshot.py)
 - Runtime request planning: [`src/e2h/runtime_plan.py`](./src/e2h/runtime_plan.py)
 - Release integrity: [`docs/release-integrity.md`](./docs/release-integrity.md)
