@@ -147,7 +147,7 @@ def test_snapshot_post_rename_stat_error_cleans_promoted_identity(
 
     monkeypatch.setattr(promotion, "_stat_entry", failing_stat)
     try:
-        with pytest.raises(SnapshotError, match="unable to publish snapshot output"):
+        with pytest.raises(SnapshotError, match="unable to inspect existing snapshot output"):
             promotion.promote_snapshot_file(output, descriptor, opened, temporary.name)
     finally:
         os.close(descriptor)

@@ -27,6 +27,15 @@ def test_parent_binding_closes_new_descriptor_when_fstat_fails(
         return SimpleNamespace(st_mode=stat.S_IFDIR)
 
     monkeypatch.setattr(store_snapshot, "_DESCRIPTOR_BOUND_SUPPORTED", True)
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        lambda self, *, follow_symlinks=False: SimpleNamespace(
+            st_mode=stat.S_IFDIR,
+            st_dev=1,
+            st_ino=1,
+        ),
+    )
     monkeypatch.setattr(store_snapshot.os, "open", fake_open)
     monkeypatch.setattr(store_snapshot.os, "fstat", fake_fstat)
     monkeypatch.setattr(store_snapshot.os, "close", closed.append)

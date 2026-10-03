@@ -43,7 +43,7 @@ def _write_manifest_archive(path: Path, manifest_data: bytes) -> None:
 
 
 def test_snapshot_metadata_rejects_nested_non_string_object_key() -> None:
-    with pytest.raises(ValidationError, match="string keys"):
+    with pytest.raises(ValidationError, match="mapping keys must be strings"):
         SnapshotCore(
             entries=[],
             total_bytes=0,
@@ -55,7 +55,7 @@ def test_snapshot_id_revalidates_mutated_metadata_keys() -> None:
     core = SnapshotCore(entries=[], total_bytes=0, metadata={"nested": {"one": 1}})
     core.metadata["nested"] = {1: "one"}
 
-    with pytest.raises(SnapshotError, match="string keys"):
+    with pytest.raises(SnapshotError, match="mapping keys must be strings"):
         snapshot_id(core)
 
 
