@@ -16,6 +16,12 @@ Python 3.11, 3.12, and 3.13 are exercised in CI.
 - **Evidence rule:** E2H records observable events and artifacts only; it does not attempt to capture or reconstruct hidden model chain-of-thought.
 - **Boundary:** a valid harness or artifact is not a general-purpose sandbox and does not make arbitrary candidate code safe.
 
+## Live proof
+
+Captured from the actual green GitHub Actions CI run on \`main\` on 2026-10-03.
+
+![Actual E2H GitHub Actions test result](./docs/assets/proof.svg)
+
 ## Evidence lifecycle
 
 ```mermaid

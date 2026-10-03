@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="416" viewBox="0 0 1100 416">
+  <rect width="100%" height="100%" rx="18" fill="#0d1117"/>
+  <rect x="0" y="0" width="100%" height="56" rx="18" fill="#161b22"/>
+  <circle cx="28" cy="28" r="7" fill="#ff7b72"/>
+  <circle cx="52" cy="28" r="7" fill="#d29922"/>
+  <circle cx="76" cy="28" r="7" fill="#3fb950"/>
+  <text x="102" y="36" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="20" fill="#8b949e">GitHub Actions · CI · Python 3.13</text>
+  <text x="42" y="76" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9">uv run pytest</text><text x="42" y="110" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9"></text><text x="42" y="144" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9">======================</text><text x="42" y="178" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9">2035 passed, 49 warnings in 33.66s</text><text x="42" y="212" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9">======================</text><text x="42" y="246" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9"></text><text x="42" y="280" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9">Workflow conclusion: success</text><text x="42" y="314" font-family="ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="22" fill="#c9d1d9">Branch: main</text>
+</svg>
