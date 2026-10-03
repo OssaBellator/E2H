@@ -6,6 +6,14 @@ The project is built around a simple rule: **claims should be backed by replayab
 
 Python 3.11, 3.12, and 3.13 are exercised in CI.
 
+## At a glance
+
+- **Problem:** AI-agent evaluations often depend on opaque transcripts, mutable environments or unverifiable success claims that are difficult to replay.
+- **Implemented:** versioned task capsules, deterministic grading, observable evidence ingestion, privacy review, mutation-tested harness compilation, snapshots, experiment storage, provider runtimes, MCP/A2A verification surfaces and reproducible release artifacts.
+- **Verification:** Python 3.11/3.12/3.13 CI, deterministic replay checks, adversarial privacy/filesystem tests, reproducible wheel/sdist builds, SBOMs and release provenance.
+- **Evidence rule:** E2H records observable events and artifacts only; it does not attempt to capture or reconstruct hidden model chain-of-thought.
+- **Boundary:** a valid harness or artifact is not a general-purpose sandbox and does not make arbitrary candidate code safe.
+
 ## What E2H provides
 
 | Area | Capabilities |
