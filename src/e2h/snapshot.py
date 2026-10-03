@@ -14,7 +14,7 @@ import zipfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -338,7 +338,7 @@ def _bound_snapshot_path_parent(self: Any) -> Path:
     parent.requested_parent = self.requested_parent
     parent.expected_parent = self.expected_parent
     parent.noun = self.noun
-    return parent
+    return cast(Path, parent)
 
 
 _BOUND_SNAPSHOT_PATH_TYPE = type(
@@ -362,7 +362,7 @@ def _bind_snapshot_path(
     bound.requested_parent = requested_parent
     bound.expected_parent = expected_parent
     bound.noun = noun
-    return bound
+    return cast(Path, bound)
 
 
 def _validated_snapshot_core(core: SnapshotCore) -> SnapshotCore:

@@ -255,7 +255,7 @@ def _tar_info(
     member.uname = ""
     member.gname = ""
     member.mtime = info.st_mtime
-    member.pax_headers["mtime"] = _pax_timestamp_ns(info.st_mtime_ns)
+    member.pax_headers = {**member.pax_headers, "mtime": _pax_timestamp_ns(info.st_mtime_ns)}
     member.type = entry_type
     return member
 

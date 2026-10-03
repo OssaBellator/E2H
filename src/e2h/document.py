@@ -25,8 +25,8 @@ class _UniqueKeySafeLoader(yaml.SafeLoader):
     """Safe YAML loader that rejects aliases and duplicate mapping keys."""
 
     def compose_node(self, parent: Any, index: Any) -> Any:
-        if self.check_event(AliasEvent):
-            event = self.peek_event()
+        if self.check_event(AliasEvent):  # type: ignore[no-untyped-call]
+            event = self.peek_event()  # type: ignore[no-untyped-call]
             raise ComposerError(
                 "while composing a document",
                 event.start_mark,
