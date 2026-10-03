@@ -1,5 +1,7 @@
 # E2H — Evidence-to-Harness
 
+[![CI](https://github.com/OssaBellator/E2H/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OssaBellator/E2H/actions/workflows/ci.yml) [![Dependency audit](https://github.com/OssaBellator/E2H/actions/workflows/dependency-audit.yml/badge.svg?branch=main)](https://github.com/OssaBellator/E2H/actions/workflows/dependency-audit.yml)
+
 E2H is an open-source toolkit for turning observable AI-agent evidence into reproducible evaluations, controlled harness experiments, and verifiable release artifacts.
 
 The project is built around a simple rule: **claims should be backed by replayable or content-addressed evidence rather than hidden reasoning or unverifiable state**. E2H therefore keeps execution, evidence capture, optimization, benchmark data, and release integrity explicit and machine-checkable.
